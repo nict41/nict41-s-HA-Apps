@@ -75,3 +75,10 @@ and rebuild.
   running.
 - App logs show whether it is still waiting for the database to become
   reachable on startup.
+
+## Installation
+
+See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
+to add this repository to Home Assistant, then install **WordPress**
+from the app store. Remember to install and configure a MySQL-compatible
+database app first — see [Prerequisites](#prerequisites) above.

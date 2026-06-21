@@ -36,6 +36,12 @@ Glance supports `${VAR_NAME}` syntax in its configuration file. The app
 automatically sets `GLANCE_BASE_URL` for ingress support. You can reference
 any other environment variable in your configuration.
 
+## Options
+
+| Option | Default | Description |
+|---|---|---|
+| `log_level` | `info` | App log verbosity. One of `trace`, `debug`, `info`, `warning`, `error`, `fatal`. |
+
 ## Ingress
 
 The app supports Home Assistant ingress, which means it appears in your
@@ -48,3 +54,9 @@ app's network configuration.
 ## Updating the dashboard
 
 After editing `glance/glance.yml`, restart the Glance app to apply changes.
+
+## Installation
+
+See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
+to add this repository to Home Assistant, then install **Glance
+Dashboard** from the app store.
