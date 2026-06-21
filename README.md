@@ -1,29 +1,42 @@
 # nict41's HA Apps
 
-A single Home Assistant **add-on repository** that bundles all of my
-previously separate add-ons in one place.
+This repository can be used as an app repository for Home Assistant.
 
-## Add-ons
+[![Open your Home Assistant instance and show the app store with this repository pre-filled.](https://my.home-assistant.io/badges/supervisor_store.svg)](https://my.home-assistant.io/redirect/supervisor_store/?repository_url=https%3A%2F%2Fgithub.com%2Fnict41%2Fnict41-s-HA-Apps)
 
-| Add-on | Folder | Description |
-|--------|--------|--------------|
-| [3D Print Timelapse](print_timelapse/README.md) | [`print_timelapse/`](print_timelapse) | Captures frame-by-frame 3D print timelapses and archives them as GIFs. |
-| [Glance Dashboard](glance/DOCS.md) | [`glance/`](glance) | Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more. |
-| [WordPress](wordpress/DOCS.md) | [`wordpress/`](wordpress) | Self-hosted WordPress, built on the official docker-library/wordpress image. |
+## Apps
 
-Each add-on keeps its own `config.yaml`, `Dockerfile`, and documentation
-inside its folder. Originally these lived in separate repos
-(`HA3DPrintTimelapse`, `GlanceHA`, `HAWordpress`); they're now maintained
-here as one repository.
+This repository contains the following apps
 
-## Installation
+### [3D Print Timelapse](./print_timelapse)
 
-1. In Home Assistant: **Settings → Add-ons → Add-on Store**.
-2. Click the **⋮** (overflow) menu in the top right → **Repositories**.
-3. Add this repository's URL: `https://github.com/nict41/nict41-s-HA-Apps`.
-4. Close the dialog and refresh the page. All three add-ons above will
-   appear in the store under "nict41's Home Assistant Add-ons".
-5. Click an add-on, then **Install**.
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
 
-See each add-on's own README/DOCS (linked above) for configuration
-options and add-on-specific setup steps.
+Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
+
+### [Glance Dashboard](./glance)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+![Supports armv7 Architecture][armv7-shield]
+
+Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
+
+### [WordPress](./wordpress)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+![Supports armhf Architecture][armhf-shield]
+![Supports armv7 Architecture][armv7-shield]
+![Supports i386 Architecture][i386-shield]
+
+Self-hosted WordPress, built on the official docker-library/wordpress image.
+
+See each app's own README/DOCS for configuration options and setup steps.
+
+[aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
+[amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
+[armhf-shield]: https://img.shields.io/badge/armhf-yes-green.svg
+[armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg
+[i386-shield]: https://img.shields.io/badge/i386-yes-green.svg
