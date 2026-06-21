@@ -12,7 +12,7 @@
 
 - New `gif_export_path` option: also copies every finished GIF to
   `/media/<gif_export_path>` (e.g. a mapped network share), in addition to
-  the permanent local copy in `/data/archive`. Requires the add-on's new
+  the permanent local copy in `/data/archive`. Requires the app's new
   `media:rw` map permission. Leave blank to disable (default).
 - `/finish`'s response now includes `exported_to` (the export destination
   path, or `null` if export is disabled or failed).
@@ -20,7 +20,7 @@
 ## 0.2.0
 
 - `POST /frame` now takes `image_url` instead of an uploaded file: the
-  add-on fetches the image itself. Home Assistant's `rest_command` can't
+  app fetches the image itself. Home Assistant's `rest_command` can't
   upload local files, so this lets `/frame` be driven by a plain
   `rest_command` pointed at a snapshot already saved under HA's
   unauthenticated `/local/` folder.

@@ -8,12 +8,12 @@ Assistant automations:
 
 1. `POST /start` when a print begins.
 2. `POST /frame` once per integer percent of progress, with an `image_url`
-   the add-on fetches itself (e.g. a camera snapshot already saved to HA's
+   the app fetches itself (e.g. a camera snapshot already saved to HA's
    `/local/` folder).
 3. `POST /finish` when the print completes — builds the GIF and archives it.
 
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
-for full install instructions, how to confirm the add-on's internal
+for full install instructions, how to confirm the app's internal
 hostname for `rest_command`, and the `rest_command` examples themselves.
 
 ## API
@@ -25,7 +25,7 @@ hostname for `rest_command`, and the `rest_command` examples themselves.
 | POST   | `/finish` | `job_id`                                   |
 | GET    | `/gifs`   | —                                           |
 
-The ingress panel (this add-on, in your sidebar) shows a gallery of every
+The ingress panel (this app, in your sidebar) shows a gallery of every
 archived GIF.
 
 ## Options

@@ -18,8 +18,8 @@ pages:
                     url: https://www.home-assistant.io/docs/
                   - title: HA Community
                     url: https://community.home-assistant.io/
-                  - title: HA Add-ons
-                    url: https://www.home-assistant.io/addons/
+                  - title: HA Apps
+                    url: https://www.home-assistant.io/apps/
               - title: General
                 links:
                   - title: GitHub
