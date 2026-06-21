@@ -1,5 +1,7 @@
 # Home Assistant App: WordPress
 
+![WordPress logo](logo.png)
+
 Self-hosted WordPress for Home Assistant, built on the official
 [docker-library/wordpress](https://github.com/docker-library/wordpress) image
 (`wordpress:php8.3-apache`).

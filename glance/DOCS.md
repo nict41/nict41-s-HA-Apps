@@ -1,5 +1,7 @@
 # Glance Dashboard for Home Assistant
 
+![Glance logo](logo.png)
+
 A self-hosted dashboard that puts all your feeds in one place, running as a
 Home Assistant app.
 

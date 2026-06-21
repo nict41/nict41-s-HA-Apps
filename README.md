@@ -10,12 +10,16 @@ This repository contains the following apps
 
 ### [3D Print Timelapse](./print_timelapse)
 
+![3D Print Timelapse logo](print_timelapse/logo.png)
+
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
 
 ### [Glance Dashboard](./glance)
+
+![Glance logo](glance/logo.png)
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
@@ -24,6 +28,8 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
 ### [WordPress](./wordpress)
+
+![WordPress logo](wordpress/logo.png)
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
