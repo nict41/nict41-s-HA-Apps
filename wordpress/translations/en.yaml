@@ -1,0 +1,28 @@
+configuration:
+  db_host:
+    name: Database host
+    description: Hostname or IP address of the MySQL/MariaDB server (e.g. core-mariadb).
+  db_port:
+    name: Database port
+    description: Port of the MySQL/MariaDB server.
+  db_name:
+    name: Database name
+    description: Name of the database to use for WordPress.
+  db_user:
+    name: Database user
+    description: Username for the WordPress database.
+  db_password:
+    name: Database password
+    description: Password for the WordPress database user.
+  table_prefix:
+    name: Table prefix
+    description: Prefix used for WordPress's database tables.
+  locale:
+    name: Locale
+    description: WordPress locale to install (e.g. de_DE). Leave empty for English.
+  debug:
+    name: Debug mode
+    description: Enable WordPress's WP_DEBUG mode.
+  config_extra:
+    name: Extra wp-config.php PHP
+    description: Raw PHP code injected into wp-config.php for advanced settings.

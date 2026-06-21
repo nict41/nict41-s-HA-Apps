@@ -1,0 +1,39 @@
+name: WordPress
+version: "1.0.0"
+slug: wordpress
+description: Self-hosted WordPress, powered by the official docker-library/wordpress image
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/wordpress"
+arch:
+  - aarch64
+  - amd64
+  - armhf
+  - armv7
+  - i386
+startup: application
+boot: auto
+init: true
+hassio_api: false
+homeassistant_api: false
+host_network: false
+ports:
+  80/tcp: 8080
+ports_description:
+  80/tcp: WordPress web interface
+map:
+  - share:rw
+options:
+  db_port: 3306
+  db_name: wordpress
+  db_user: wordpress
+  table_prefix: "wp_"
+  debug: false
+schema:
+  db_host: str
+  db_port: int(1,65535)
+  db_name: str
+  db_user: str
+  db_password: password
+  table_prefix: str
+  locale: str?
+  debug: bool
+  config_extra: str?
