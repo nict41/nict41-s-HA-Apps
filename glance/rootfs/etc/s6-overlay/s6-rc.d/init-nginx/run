@@ -1,0 +1,88 @@
+#!/command/with-contenv bashio
+
+# Ensure runtime dirs exist
+mkdir -p /etc/nginx/servers /run/glance /config/glance
+
+# ── Glance config ──────────────────────────────────────────────────────────────
+USER_CONFIG="/config/glance/glance.yml"
+DEFAULT_CONFIG="/etc/glance/glance.yml"
+
+if [ ! -f "${USER_CONFIG}" ]; then
+    cp "${DEFAULT_CONFIG}" "${USER_CONFIG}"
+    bashio::log.info "Created default Glance configuration"
+    bashio::log.info "To customise your dashboard: edit glance/glance.yml in your HA config folder (File Editor or SSH add-on), then restart Glance"
+fi
+
+bashio::log.info "Using config: ${USER_CONFIG}"
+
+# Extract only the pages section — server section is always generated here
+PAGES="$(awk '/^pages:/{found=1} found{print}' "${USER_CONFIG}")"
+if [ -z "${PAGES}" ]; then
+    PAGES="$(awk '/^pages:/{found=1} found{print}' "${DEFAULT_CONFIG}")"
+fi
+
+# ── Ingress entry ──────────────────────────────────────────────────────────────
+INGRESS_ENTRY="$(bashio::addon.ingress_entry 2>/dev/null)" || true
+
+# ── Write runtime Glance configs ───────────────────────────────────────────────
+# glance.yml      → port 8080, base-url set  → used when accessed via HA ingress
+# glance-direct.yml → port 8081, no base-url → used when accessed directly
+if [ -n "${INGRESS_ENTRY}" ]; then
+    bashio::log.info "Ingress entry: ${INGRESS_ENTRY}"
+    cat > /run/glance/glance.yml <<EOF
+server:
+  port: 8080
+  base-url: ${INGRESS_ENTRY}
+
+${PAGES}
+EOF
+else
+    bashio::log.warning "No ingress entry — running without base-url"
+    cat > /run/glance/glance.yml <<EOF
+server:
+  port: 8080
+
+${PAGES}
+EOF
+fi
+
+cat > /run/glance/glance-direct.yml <<EOF
+server:
+  port: 8081
+
+${PAGES}
+EOF
+
+bashio::log.info "Glance configs written"
+
+# ── Write nginx config ─────────────────────────────────────────────────────────
+# Route to ingress instance (8080, has base-url) when HA's X-Ingress-Path header
+# is present; route to direct instance (8081, no base-url) otherwise.
+cat > /etc/nginx/servers/ingress.conf <<NGINX
+upstream glance_ingress {
+    server 127.0.0.1:8080;
+}
+
+upstream glance_direct {
+    server 127.0.0.1:8081;
+}
+
+map \$http_x_ingress_path \$glance_upstream {
+    ""      glance_direct;
+    default glance_ingress;
+}
+
+server {
+    listen 8099;
+    location / {
+        proxy_pass http://\$glance_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+NGINX
+
+bashio::log.info "Nginx config written"

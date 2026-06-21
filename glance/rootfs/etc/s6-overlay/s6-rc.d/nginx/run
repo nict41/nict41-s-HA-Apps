@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+
+bashio::net.wait_for 8080 localhost 60
+bashio::net.wait_for 8081 localhost 60
+bashio::log.info "Starting nginx on port 8099"
+
+exec nginx -g "daemon off;"

@@ -1,0 +1,11 @@
+#!/command/with-contenv bashio
+
+declare exit_code=${1}
+
+if [[ "${exit_code}" -eq 256 ]]; then
+    exit_code=$((128 + ${2}))
+fi
+
+bashio::log.warning "Glance direct exited with code ${exit_code}, stopping add-on"
+echo "${exit_code}" > /run/s6-linux-init-container-results/exitcode
+exec /run/s6/basedir/bin/halt

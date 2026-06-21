@@ -1,0 +1,5 @@
+#!/command/with-contenv bashio
+
+bashio::log.info "Starting Glance direct (port=8081)"
+
+exec /usr/bin/glance --config /run/glance/glance-direct.yml

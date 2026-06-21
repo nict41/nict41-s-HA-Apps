@@ -1,0 +1,68 @@
+pages:
+  - name: Home
+    columns:
+      - size: small
+        widgets:
+          - type: calendar
+
+          - type: weather
+            location: New York, United States
+            units: metric
+            hour-format: 12h
+
+          - type: bookmarks
+            groups:
+              - title: Home Assistant
+                links:
+                  - title: HA Documentation
+                    url: https://www.home-assistant.io/docs/
+                  - title: HA Community
+                    url: https://community.home-assistant.io/
+                  - title: HA Add-ons
+                    url: https://www.home-assistant.io/addons/
+              - title: General
+                links:
+                  - title: GitHub
+                    url: https://github.com
+                  - title: Wikipedia
+                    url: https://en.wikipedia.org
+
+      - size: full
+        widgets:
+          - type: hacker-news
+
+          - type: rss
+            title: Technology
+            style: horizontal-cards
+            feeds:
+              - url: https://www.theverge.com/rss/index.xml
+                title: The Verge
+              - url: https://feeds.arstechnica.com/arstechnica/index
+                title: Ars Technica
+
+          - type: rss
+            title: News
+            feeds:
+              - url: https://feeds.bbci.co.uk/news/rss.xml
+                title: BBC News
+
+      - size: small
+        widgets:
+          - type: clock
+            hour-format: 12h
+            timezones:
+              - timezone: UTC
+                label: UTC
+              - timezone: America/New_York
+                label: New York
+              - timezone: Europe/London
+                label: London
+
+          - type: markets
+            markets:
+              - symbol: SPY
+                name: S&P 500
+              - symbol: BTC-USD
+                name: Bitcoin
+              - symbol: NVDA
+                name: NVIDIA
