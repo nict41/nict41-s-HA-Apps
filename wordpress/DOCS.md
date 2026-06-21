@@ -1,6 +1,6 @@
 # Home Assistant App: WordPress
 
-![WordPress logo](logo.png)
+![WordPress logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/wordpress/logo.png)
 
 Self-hosted WordPress for Home Assistant, built on the official
 [docker-library/wordpress](https://github.com/docker-library/wordpress) image

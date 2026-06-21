@@ -1,6 +1,6 @@
 # 3D Print Timelapse
 
-![3D Print Timelapse logo](logo.png)
+![3D Print Timelapse logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/print_timelapse/logo.png)
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a
 GIF, with long-term storage of finished GIFs.
