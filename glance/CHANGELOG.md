@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.3
+
+- Fix the add-on showing as "Error" instead of "Stopped" after a normal
+  stop. The `glance`, `glance-direct`, and `nginx` service `finish`
+  scripts were treating *any* exit — including the expected SIGTERM sent
+  when Home Assistant stops the add-on — as a crash, writing exit code
+  143 as the container's result and force-halting. They now recognize a
+  SIGTERM-caused exit as a normal stop and let s6-overlay's own shutdown
+  finish with exit code 0 instead.
+
 ## 0.2.2
 
 - Fix direct browser access (port 8099) having broken CSS/widgets

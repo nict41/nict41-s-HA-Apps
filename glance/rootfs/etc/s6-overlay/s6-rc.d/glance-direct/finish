@@ -1,9 +1,19 @@
 #!/command/with-contenv bashio
 
 declare exit_code=${1}
+declare signal=${2}
+
+if [[ "${exit_code}" -eq 256 && "${signal}" -eq 15 ]]; then
+    # Killed by SIGTERM: a normal/requested stop, not a crash. Let
+    # s6-overlay's own shutdown sequence finish with exit code 0 instead
+    # of forcing a halt here, which would otherwise make the add-on show
+    # up as "Error" in the HA UI even on a clean stop.
+    bashio::log.info "Glance direct stopped"
+    exit 0
+fi
 
 if [[ "${exit_code}" -eq 256 ]]; then
-    exit_code=$((128 + ${2}))
+    exit_code=$((128 + signal))
 fi
 
 bashio::log.warning "Glance direct exited with code ${exit_code}, stopping add-on"
