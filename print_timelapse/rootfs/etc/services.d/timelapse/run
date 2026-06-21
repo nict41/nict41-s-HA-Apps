@@ -1,0 +1,24 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start the Print Timelapse API
+# ==============================================================================
+
+declare cleanup_after_finish
+declare gif_fps
+declare gif_width
+declare gif_export_path
+
+cleanup_after_finish=$(bashio::config 'cleanup_after_finish')
+gif_fps=$(bashio::config 'gif_fps')
+gif_width=$(bashio::config 'gif_width')
+gif_export_path=$(bashio::config 'gif_export_path')
+
+export CLEANUP_AFTER_FINISH="${cleanup_after_finish}"
+export GIF_FPS="${gif_fps}"
+export GIF_WIDTH="${gif_width}"
+export GIF_EXPORT_PATH="${gif_export_path}"
+
+bashio::log.info "Starting Print Timelapse API on port 8099..."
+
+cd /app || bashio::exit.nok "Could not change to /app directory"
+exec python3 -m uvicorn main:app --host 0.0.0.0 --port 8099

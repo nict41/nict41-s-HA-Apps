@@ -1,0 +1,15 @@
+configuration:
+  cleanup_after_finish:
+    name: Clean up frames after finishing
+    description: Delete the captured frame images for a job once its GIF has been created.
+  gif_fps:
+    name: GIF frame rate
+    description: Frames per second used when assembling the timelapse GIF.
+  gif_width:
+    name: GIF width (pixels)
+    description: Width to scale the GIF to; height is scaled to keep the aspect ratio.
+  gif_export_path:
+    name: GIF export path
+    description: >-
+      Optional path, relative to /media, to also copy every finished GIF to
+      (e.g. a mapped network share's subfolder). Leave blank to disable.
