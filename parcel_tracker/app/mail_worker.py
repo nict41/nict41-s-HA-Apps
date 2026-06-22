@@ -1,6 +1,6 @@
-"""Read-only IMAP polling.
+"""Read-only IMAP polling, across one or more configured mailboxes.
 
-Connects with `select(folder, readonly=True)` so the mailbox is never
+Connects with `select(folder, readonly=True)` so a mailbox is never
 modified (no read-flag changes, no deletions). Dedup is by the `Message-ID`
 header rather than IMAP UID, since UIDs are only stable within a single
 UIDVALIDITY epoch and that epoch can change (e.g. if the mail provider
@@ -10,6 +10,7 @@ rebuilds the folder), which would otherwise risk silently re-processing
 
 import email
 import imaplib
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
@@ -18,18 +19,13 @@ from email.message import Message
 import carriers
 import db
 
-IMAP_HOST = os.environ.get("IMAP_HOST", "")
-IMAP_PORT = int(os.environ.get("IMAP_PORT", "993"))
-IMAP_USE_SSL = os.environ.get("IMAP_USE_SSL", "true").lower() == "true"
-IMAP_USERNAME = os.environ.get("IMAP_USERNAME", "")
-IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
-IMAP_FOLDER = os.environ.get("IMAP_FOLDER", "INBOX")
+MAILBOXES: list[dict] = json.loads(os.environ.get("MAILBOXES_JSON", "[]"))
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
 
 # Comma-separated extra sender domains to treat as trusted retailers (their
 # tracking numbers get the high-confidence label parser instead of the
 # generic regex fallback). Lets users add e.g. a niche retailer without a
-# code change.
+# code change. Applies across every configured mailbox.
 TRUSTED_SENDERS = frozenset(
     d.strip().lower() for d in os.environ.get("TRUSTED_SENDERS", "").split(",") if d.strip()
 )
@@ -81,30 +77,39 @@ def _extract_body(msg: Message) -> str:
     return carriers.strip_html(html_fallback) if html_fallback else ""
 
 
-def _connect() -> imaplib.IMAP4:
-    if IMAP_USE_SSL:
-        conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+def _message_bytes(fetch_part) -> bytes | None:
+    """A `FETCH ... (RFC822)` response part is a literal, so imaplib hands it
+    back as a `(header_line, literal_bytes)` tuple rather than plain bytes -
+    the actual message lives in the second element."""
+    if isinstance(fetch_part, tuple):
+        return fetch_part[1]
+    if isinstance(fetch_part, bytes):
+        return fetch_part
+    return None
+
+
+def _connect(account: dict) -> imaplib.IMAP4:
+    host = account["host"]
+    port = int(account.get("port") or 993)
+    if account.get("use_ssl", True):
+        conn = imaplib.IMAP4_SSL(host, port)
     else:
-        conn = imaplib.IMAP4(IMAP_HOST, IMAP_PORT)
+        conn = imaplib.IMAP4(host, port)
         conn.starttls()
-    conn.login(IMAP_USERNAME, IMAP_PASSWORD)
-    # readonly=True: the inbox's read/unread state and contents are never
+    conn.login(account["username"], account["password"])
+    # readonly=True: the mailbox's read/unread state and contents are never
     # touched by this app.
-    conn.select(IMAP_FOLDER, readonly=True)
+    conn.select(account.get("folder") or "INBOX", readonly=True)
     return conn
 
 
-def sync_mailbox() -> dict:
-    """Poll the mailbox once. Never raises - failures are reported in the
-    returned dict so the caller can surface them without crashing the
-    scheduler loop."""
-    if not IMAP_HOST or not IMAP_USERNAME or not IMAP_PASSWORD:
-        return {"ok": False, "error": "IMAP is not configured", "new_candidates": 0, "scanned": 0}
+def _sync_account(account: dict) -> dict:
+    label = account.get("username") or account.get("host") or "mailbox"
 
     try:
-        conn = _connect()
+        conn = _connect(account)
     except (imaplib.IMAP4.error, OSError) as exc:
-        return {"ok": False, "error": f"connection failed: {exc}", "new_candidates": 0, "scanned": 0}
+        return {"ok": False, "error": f"{label}: connection failed: {exc}", "new_candidates": 0, "scanned": 0}
 
     scanned = 0
     new_candidates = 0
@@ -112,15 +117,18 @@ def sync_mailbox() -> dict:
         since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
         status, data = conn.search(None, "SINCE", since)
         if status != "OK":
-            return {"ok": False, "error": f"search failed: {status}", "new_candidates": 0, "scanned": 0}
+            return {"ok": False, "error": f"{label}: search failed: {status}", "new_candidates": 0, "scanned": 0}
 
         message_nums = data[0].split()
         for num in message_nums:
             status, msg_data = conn.fetch(num, "(RFC822)")
-            if status != "OK" or not msg_data or not msg_data[0]:
+            if status != "OK" or not msg_data:
+                continue
+            raw = _message_bytes(msg_data[0])
+            if not raw:
                 continue
             scanned += 1
-            msg = email.message_from_bytes(msg_data[0])
+            msg = email.message_from_bytes(raw)
 
             message_id = msg.get("Message-ID", "").strip()
             if not message_id:
@@ -131,8 +139,7 @@ def sync_mailbox() -> dict:
                 continue
 
             sender = _decode(msg.get("From", ""))
-            sender_domain = sender.split("@")[-1].rstrip(">").lower() if "@" in sender else ""
-            if sender_domain in IGNORE_SENDERS:
+            if carriers.sender_domain(sender) in IGNORE_SENDERS:
                 db.mark_processed(message_id)
                 continue
 
@@ -167,3 +174,27 @@ def sync_mailbox() -> dict:
         conn.logout()
 
     return {"ok": True, "error": None, "new_candidates": new_candidates, "scanned": scanned}
+
+
+def sync_mailbox() -> dict:
+    """Poll every configured mailbox once. Never raises - a failure on one
+    account is reported without stopping the others from being checked."""
+    if not MAILBOXES:
+        return {"ok": False, "error": "no mailboxes configured", "new_candidates": 0, "scanned": 0}
+
+    scanned = 0
+    new_candidates = 0
+    errors = []
+    for account in MAILBOXES:
+        result = _sync_account(account)
+        scanned += result["scanned"]
+        new_candidates += result["new_candidates"]
+        if not result["ok"]:
+            errors.append(result["error"])
+
+    return {
+        "ok": not errors,
+        "error": "; ".join(errors) if errors else None,
+        "new_candidates": new_candidates,
+        "scanned": scanned,
+    }

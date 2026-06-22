@@ -1,22 +1,25 @@
 configuration:
-  imap_host:
+  mailboxes:
+    name: Mailboxes
+    description: One entry per email account to scan for shipping emails.
+  mailboxes.host:
     name: IMAP host
-    description: Hostname of your mailbox's IMAP server, e.g. imap.gmail.com.
-  imap_port:
+    description: Hostname of the mailbox's IMAP server, e.g. imap.gmail.com.
+  mailboxes.port:
     name: IMAP port
     description: Usually 993 for IMAP over SSL, or 143 if using STARTTLS.
-  imap_use_ssl:
+  mailboxes.use_ssl:
     name: Use SSL
     description: Connect over IMAP SSL (port 993). Turn off to use STARTTLS instead (e.g. port 143).
-  imap_username:
+  mailboxes.username:
     name: IMAP username
-    description: Mailbox login, usually your full email address.
-  imap_password:
+    description: Mailbox login, usually the full email address.
+  mailboxes.password:
     name: IMAP password
     description: >-
       Mailbox password or an app-specific password. The mailbox is only ever
       read - nothing is deleted or marked as read.
-  imap_folder:
+  mailboxes.folder:
     name: IMAP folder
     description: Folder to scan for shipping emails, e.g. INBOX or a dedicated forwarding folder.
   lookback_days:
@@ -24,7 +27,7 @@ configuration:
     description: How far back to scan for shipping emails on each check.
   poll_interval_minutes:
     name: Check interval (minutes)
-    description: How often to check the mailbox and refresh delivery status.
+    description: How often to check the mailboxes and refresh delivery status.
   auto_archive_after_days:
     name: Auto-archive after (days)
     description: Automatically archive delivered parcels this many days after delivery. Set to 0 to disable.
@@ -33,7 +36,7 @@ configuration:
     description: >-
       Comma-separated extra sender domains (e.g. myretailer.com) to treat as
       trusted, enabling the same high-confidence parsing used for AliExpress,
-      eBay and Amazon.
+      eBay and Amazon. Applies across all configured mailboxes.
   ignore_senders:
     name: Ignored sender domains
     description: Comma-separated sender domains to skip entirely, e.g. noisy newsletters.

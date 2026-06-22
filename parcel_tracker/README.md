@@ -33,11 +33,14 @@ copy-pasting of tracking numbers required.
 
 ## Setup
 
-### 1. Connect a mailbox
+### 1. Connect one or more mailboxes
 
-You have two options:
+The app can poll multiple email accounts, so shipping notifications landing
+in different inboxes (e.g. a personal account and a shared family account)
+all show up on the same dashboard. For each account you want monitored, you
+have two options:
 
-**Option A - connect your real mailbox directly.** Give the app IMAP
+**Option A - connect the real mailbox directly.** Give the app IMAP
 credentials for the mailbox that receives your shipping emails. For Gmail,
 enable IMAP access (**Settings → Forwarding and POP/IMAP**) and create an
 [app password](https://myaccount.google.com/apppasswords) rather than
@@ -48,23 +51,33 @@ clients.
 **Option B - forward to a dedicated mailbox.** If you'd rather not give
 the app credentials to your primary mailbox, set up mail forwarding (or a
 filter that copies matching mail) from your primary account to a separate
-mailbox created just for this, then point the app's IMAP settings at that
-dedicated mailbox instead. This is purely a setup choice on your mail
-provider's side - the app's IMAP polling works identically either way.
+mailbox created just for this, then point one of the app's mailbox entries
+at that dedicated mailbox instead. This is purely a setup choice on your
+mail provider's side - the app's IMAP polling works identically either way.
+
+You can freely mix both options across entries - one account connected
+directly, another via a forwarding mailbox, and so on.
 
 ### 2. Configure the app
 
 Set the options below (**Settings → Add-ons → Parcel Tracker →
 Configuration**), then start the app.
 
+Under **Mailboxes**, add one entry per email account to scan:
+
+| Field | Default | Description |
+|---|---|---|
+| `host` | _(required)_ | IMAP server hostname, e.g. `imap.gmail.com`. |
+| `port` | `993` | IMAP port. |
+| `use_ssl` | `true` | Use IMAP over SSL. Turn off for STARTTLS. |
+| `username` | _(required)_ | Mailbox login, usually the full email address. |
+| `password` | _(required)_ | Mailbox password or app-specific password. |
+| `folder` | `INBOX` | Folder to scan. |
+
+The remaining options apply across all configured mailboxes:
+
 | Option | Default | Description |
 |---|---|---|
-| `imap_host` | _(required)_ | IMAP server hostname, e.g. `imap.gmail.com`. |
-| `imap_port` | `993` | IMAP port. |
-| `imap_use_ssl` | `true` | Use IMAP over SSL. Turn off for STARTTLS. |
-| `imap_username` | _(required)_ | Mailbox login, usually your email address. |
-| `imap_password` | _(required)_ | Mailbox password or app-specific password. |
-| `imap_folder` | `INBOX` | Folder to scan. |
 | `lookback_days` | `14` | How far back to scan emails on each check. |
 | `poll_interval_minutes` | `30` | How often to check mail and refresh status. |
 | `auto_archive_after_days` | `14` | Auto-archive parcels this many days after delivery. `0` disables. |

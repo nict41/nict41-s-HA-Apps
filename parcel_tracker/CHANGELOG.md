@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Fixed a crash (`AttributeError: 'tuple' object has no attribute 'decode'`)
+  during mail sync, caused by treating the IMAP literal-bearing FETCH
+  response as raw message bytes instead of unwrapping the
+  `(header, bytes)` tuple imaplib returns for it.
+- Mailboxes are now configured as a repeatable list, so multiple email
+  accounts can be scanned for shipping emails instead of just one. This
+  replaces the previous flat `imap_host`/`imap_port`/`imap_username`/etc.
+  options with a `mailboxes` entry per account.
+
 ## 0.1.0
 
 - Initial release.

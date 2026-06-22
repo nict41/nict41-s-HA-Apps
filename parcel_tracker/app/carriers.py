@@ -144,7 +144,7 @@ def strip_html(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _sender_domain(sender: str) -> str:
+def sender_domain(sender: str) -> str:
     match = re.search(r"@([\w.-]+)", sender or "")
     return match.group(1).lower() if match else ""
 
@@ -162,7 +162,7 @@ def _clean_subject(subject: str) -> str:
 def detect_candidates(
     sender: str, subject: str, body_text: str, extra_trusted_domains=frozenset()
 ) -> list[Candidate]:
-    domain = _sender_domain(sender)
+    domain = sender_domain(sender)
     text = f"{subject}\n{body_text}"
     description = _clean_subject(subject)
 

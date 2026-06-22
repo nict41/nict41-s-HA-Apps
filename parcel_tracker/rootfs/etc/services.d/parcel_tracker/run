@@ -3,12 +3,7 @@
 # Start the Parcel Tracker dashboard
 # ==============================================================================
 
-declare imap_host
-declare imap_port
-declare imap_use_ssl
-declare imap_username
-declare imap_password
-declare imap_folder
+declare mailboxes_json
 declare lookback_days
 declare poll_interval_minutes
 declare auto_archive_after_days
@@ -16,12 +11,7 @@ declare trusted_senders
 declare ignore_senders
 declare seventeentrack_api_key
 
-imap_host=$(bashio::config 'imap_host')
-imap_port=$(bashio::config 'imap_port')
-imap_use_ssl=$(bashio::config 'imap_use_ssl')
-imap_username=$(bashio::config 'imap_username')
-imap_password=$(bashio::config 'imap_password')
-imap_folder=$(bashio::config 'imap_folder')
+mailboxes_json=$(bashio::config 'mailboxes' '[]')
 lookback_days=$(bashio::config 'lookback_days')
 poll_interval_minutes=$(bashio::config 'poll_interval_minutes')
 auto_archive_after_days=$(bashio::config 'auto_archive_after_days')
@@ -29,12 +19,7 @@ trusted_senders=$(bashio::config 'trusted_senders')
 ignore_senders=$(bashio::config 'ignore_senders')
 seventeentrack_api_key=$(bashio::config 'seventeentrack_api_key')
 
-export IMAP_HOST="${imap_host}"
-export IMAP_PORT="${imap_port}"
-export IMAP_USE_SSL="${imap_use_ssl}"
-export IMAP_USERNAME="${imap_username}"
-export IMAP_PASSWORD="${imap_password}"
-export IMAP_FOLDER="${imap_folder}"
+export MAILBOXES_JSON="${mailboxes_json}"
 export LOOKBACK_DAYS="${lookback_days}"
 export POLL_INTERVAL_MINUTES="${poll_interval_minutes}"
 export AUTO_ARCHIVE_AFTER_DAYS="${auto_archive_after_days}"

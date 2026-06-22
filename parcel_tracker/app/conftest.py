@@ -10,7 +10,7 @@ import pytest
 # imports any test_*.py file in this directory, regardless of import order.
 _TMP_DATA_DIR = tempfile.mkdtemp(prefix="parcel-tracker-test-")
 os.environ["DATA_DIR"] = _TMP_DATA_DIR
-os.environ.setdefault("IMAP_HOST", "")
+os.environ.setdefault("MAILBOXES_JSON", "[]")
 os.environ.setdefault("SEVENTEENTRACK_API_KEY", "")
 
 
