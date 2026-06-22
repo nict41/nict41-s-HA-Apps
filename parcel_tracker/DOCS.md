@@ -1,0 +1,109 @@
+# Parcel Tracker
+
+![Parcel Tracker logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/parcel_tracker/logo.png)
+
+Automatically detects tracking numbers from your shipping emails and shows
+delivery status for every parcel in one ingress dashboard - no manual
+copy-pasting of tracking numbers required.
+
+## How it works
+
+1. The app periodically connects to a mailbox over IMAP and scans recent
+   emails for tracking numbers. The connection is **read-only** - nothing
+   is ever marked as read, moved, or deleted.
+2. Emails from known retailers (AliExpress, eBay, Amazon, Cainiao) are
+   parsed with a high-confidence label-based detector, since their
+   notification emails reliably print "Tracking Number: ..." style text.
+   Everything else falls back to generic carrier-pattern matching (UPS,
+   USPS, FedEx, DHL, Royal Mail, DPD, Evri, YunExpress, and international
+   postal tracking numbers used by China Post/ePacket, Hongkong Post,
+   Singapore Post, and others), gated behind shipping-related context to
+   keep false positives down.
+3. High-confidence matches are tracked automatically. Lower-confidence
+   matches land in a **needs confirmation** queue on the dashboard, so
+   nothing gets auto-tracked on a guess.
+4. If a [17track](https://www.17track.net/) API key is configured, the app
+   registers each tracking number for auto-detected carrier lookup (useful
+   for AliExpress/eBay shipments, which are often routed through one of
+   dozens of regional carriers) and pulls live status on every check.
+   Without a key, parcels are still detected and listed, just with a
+   carrier tracking link instead of live status.
+5. Delivered parcels are kept on the dashboard for a configurable number
+   of days, then automatically archived.
+
+## Setup
+
+### 1. Connect a mailbox
+
+You have two options:
+
+**Option A - connect your real mailbox directly.** Give the app IMAP
+credentials for the mailbox that receives your shipping emails. For Gmail,
+enable IMAP access (**Settings → Forwarding and POP/IMAP**) and create an
+[app password](https://myaccount.google.com/apppasswords) rather than
+using your normal account password. Other providers (Outlook, iCloud,
+Fastmail, etc.) have similar app-password mechanisms for third-party IMAP
+clients.
+
+**Option B - forward to a dedicated mailbox.** If you'd rather not give
+the app credentials to your primary mailbox, set up mail forwarding (or a
+filter that copies matching mail) from your primary account to a separate
+mailbox created just for this, then point the app's IMAP settings at that
+dedicated mailbox instead. This is purely a setup choice on your mail
+provider's side - the app's IMAP polling works identically either way.
+
+### 2. Configure the app
+
+Set the options below (**Settings → Add-ons → Parcel Tracker →
+Configuration**), then start the app.
+
+| Option | Default | Description |
+|---|---|---|
+| `imap_host` | _(required)_ | IMAP server hostname, e.g. `imap.gmail.com`. |
+| `imap_port` | `993` | IMAP port. |
+| `imap_use_ssl` | `true` | Use IMAP over SSL. Turn off for STARTTLS. |
+| `imap_username` | _(required)_ | Mailbox login, usually your email address. |
+| `imap_password` | _(required)_ | Mailbox password or app-specific password. |
+| `imap_folder` | `INBOX` | Folder to scan. |
+| `lookback_days` | `14` | How far back to scan emails on each check. |
+| `poll_interval_minutes` | `30` | How often to check mail and refresh status. |
+| `auto_archive_after_days` | `14` | Auto-archive parcels this many days after delivery. `0` disables. |
+| `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
+| `ignore_senders` | _(blank)_ | Comma-separated sender domains to skip entirely. |
+| `seventeentrack_api_key` | _(blank)_ | Optional [17track](https://www.17track.net/en/api) API key for live status. |
+
+### 3. (Optional) Get a 17track API key
+
+Without an API key, the dashboard still detects and lists every parcel,
+with a tracking link per carrier (or 17track's own universal tracker for
+carriers without a known link). With a free
+[17track API](https://www.17track.net/en/api) key, the dashboard instead
+shows live status (in transit, out for delivery, delivered, exception)
+pulled directly into each parcel's card. The free tier covers 100 tracking
+numbers/month.
+
+## Using the dashboard
+
+Open the app's ingress panel from your sidebar:
+
+- **Needs confirmation** - lower-confidence detections. Confirm to start
+  tracking, or dismiss if it isn't actually a parcel.
+- **In transit** - actively tracked parcels with their latest status.
+- **Delivered** - parcels marked delivered, until they're auto-archived.
+- **Archived** - dismissed or archived parcels, with an option to delete.
+- An **add parcel** form lets you track a number manually, e.g. for a
+  shipment that didn't arrive by email at all.
+
+"**Check mail now**" runs a sync immediately instead of waiting for the
+next scheduled check.
+
+## Storage
+
+All parcel and sync state is stored locally in `/data/parcels.db`
+(SQLite). The mailbox itself is never modified.
+
+## Installation
+
+See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
+to add this repository to Home Assistant, then install **Parcel Tracker**
+from the app store.

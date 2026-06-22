@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Parcel Tracker</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #111318;
+      color: #e3e3e3;
+    }
+    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 1.05rem; margin: 2rem 0 0.75rem; color: #cfd2d8; }
+    .sub { color: #9aa0a6; margin-bottom: 0.5rem; font-size: 0.9rem; }
+    .empty { color: #9aa0a6; padding: 1.5rem 0; font-size: 0.9rem; }
+    .list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .card {
+      background: #1b1f27;
+      border-radius: 10px;
+      border: 1px solid #2a2f3a;
+      padding: 0.75rem 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .card .info { flex: 1; min-width: 220px; }
+    .card .tracking {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #e3e3e3;
+    }
+    .card .desc { color: #9aa0a6; font-size: 0.82rem; margin-top: 0.1rem; }
+    .card .status-line { font-size: 0.82rem; margin-top: 0.25rem; }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      margin-right: 0.4rem;
+    }
+    .badge.pending { background: #4a3a14; color: #f2c14e; }
+    .badge.active { background: #1c3a52; color: #7db4ff; }
+    .badge.exception { background: #4a1c1c; color: #ff8f8f; }
+    .badge.delivered { background: #1c4a2a; color: #7fe3a1; }
+    .badge.archived { background: #2a2a2a; color: #9aa0a6; }
+    .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+    .actions form { margin: 0; }
+    button, .link-btn {
+      background: #262b35;
+      color: #e3e3e3;
+      border: 1px solid #383e4a;
+      border-radius: 6px;
+      padding: 0.35rem 0.7rem;
+      font-size: 0.78rem;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-block;
+    }
+    button.primary { background: #1c3a52; border-color: #2c557a; color: #7db4ff; }
+    button.danger { background: #3a1c1c; border-color: #5a2c2c; color: #ff8f8f; }
+    .add-form, .sync-row {
+      background: #1b1f27;
+      border-radius: 10px;
+      border: 1px solid #2a2f3a;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .add-form { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
+    .add-form label { display: block; font-size: 0.75rem; color: #9aa0a6; margin-bottom: 0.25rem; }
+    .add-form input {
+      background: #111318;
+      border: 1px solid #383e4a;
+      border-radius: 6px;
+      color: #e3e3e3;
+      padding: 0.4rem 0.6rem;
+      font-size: 0.85rem;
+    }
+    .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+    .sync-row .sub { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>Parcel Tracker</h1>
+  <div class="sub">Automatically detected and manually added parcels.</div>
+
+  <div class="sync-row">
+    <div class="sub">
+      {% if last_sync_at %}Last checked {{ last_sync_at }}{% if last_sync_summary %} &mdash; {{ last_sync_summary }}{% endif %}{% else %}Not checked yet.{% endif %}
+      {% if not seventeentrack_configured %}<br />No 17track API key configured &mdash; showing carrier links only, no live status.{% endif %}
+    </div>
+    <form action="sync" method="post">
+      <button class="primary" type="submit">Check mail now</button>
+    </form>
+  </div>
+
+  <form class="add-form" action="add" method="post">
+    <div>
+      <label for="tracking_number">Tracking number</label>
+      <input id="tracking_number" name="tracking_number" required />
+    </div>
+    <div>
+      <label for="carrier_name">Carrier (optional)</label>
+      <input id="carrier_name" name="carrier_name" />
+    </div>
+    <div>
+      <label for="description">Description (optional)</label>
+      <input id="description" name="description" />
+    </div>
+    <button class="primary" type="submit">Add parcel</button>
+  </form>
+
+  {% if pending %}
+  <h2>Needs confirmation ({{ pending|length }})</h2>
+  <div class="list">
+    {% for p in pending %}
+    <div class="card">
+      <div class="info">
+        <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span></div>
+        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; confidence {{ (p.confidence * 100) | round | int }}%</div>
+      </div>
+      <div class="actions">
+        <form action="confirm" method="post">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button class="primary" type="submit">Confirm</button>
+        </form>
+        <form action="dismiss" method="post">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Not a parcel</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>In transit ({{ active|length }})</h2>
+  {% if not active %}
+  <div class="empty">No parcels in transit.</div>
+  {% else %}
+  <div class="list">
+    {% for p in active %}
+    <div class="card">
+      <div class="info">
+        <div class="tracking">
+          {{ p.tracking_number }}
+          <span class="badge {{ 'exception' if p.status == 'exception' else 'active' }}">{{ 'exception' if p.status == 'exception' else 'in transit' }}</span>
+        </div>
+        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
+        <div class="status-line">{{ p.status_detail or "No status yet" }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
+      </div>
+      <div class="actions">
+        <a class="link-btn" href="{{ get_tracking_url(p.carrier_name, p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
+        <form action="archive" method="post">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Archive</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <h2>Delivered ({{ delivered|length }})</h2>
+  {% if not delivered %}
+  <div class="empty">No delivered parcels yet.</div>
+  {% else %}
+  <div class="list">
+    {% for p in delivered %}
+    <div class="card">
+      <div class="info">
+        <div class="tracking">{{ p.tracking_number }} <span class="badge delivered">delivered</span></div>
+        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; delivered {{ p.delivered_at }}</div>
+      </div>
+      <div class="actions">
+        <form action="archive" method="post">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Archive</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% if archived %}
+  <h2>Archived ({{ archived|length }})</h2>
+  <div class="list">
+    {% for p in archived %}
+    <div class="card">
+      <div class="info">
+        <div class="tracking">{{ p.tracking_number }} <span class="badge archived">{{ p.status }}</span></div>
+        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
+      </div>
+      <div class="actions">
+        <form action="delete" method="post">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button class="danger" type="submit">Delete</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</body>
+</html>

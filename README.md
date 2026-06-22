@@ -27,6 +27,15 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 
 Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
+### [Parcel Tracker](./parcel_tracker)
+
+![Parcel Tracker logo](parcel_tracker/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Automatically detects tracking numbers from your shipping emails (AliExpress, eBay, Amazon, and more) and tracks delivery status.
+
 ### [WordPress](./wordpress)
 
 ![WordPress logo](wordpress/logo.png)

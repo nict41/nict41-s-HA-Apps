@@ -1,0 +1,45 @@
+configuration:
+  imap_host:
+    name: IMAP host
+    description: Hostname of your mailbox's IMAP server, e.g. imap.gmail.com.
+  imap_port:
+    name: IMAP port
+    description: Usually 993 for IMAP over SSL, or 143 if using STARTTLS.
+  imap_use_ssl:
+    name: Use SSL
+    description: Connect over IMAP SSL (port 993). Turn off to use STARTTLS instead (e.g. port 143).
+  imap_username:
+    name: IMAP username
+    description: Mailbox login, usually your full email address.
+  imap_password:
+    name: IMAP password
+    description: >-
+      Mailbox password or an app-specific password. The mailbox is only ever
+      read - nothing is deleted or marked as read.
+  imap_folder:
+    name: IMAP folder
+    description: Folder to scan for shipping emails, e.g. INBOX or a dedicated forwarding folder.
+  lookback_days:
+    name: Lookback window (days)
+    description: How far back to scan for shipping emails on each check.
+  poll_interval_minutes:
+    name: Check interval (minutes)
+    description: How often to check the mailbox and refresh delivery status.
+  auto_archive_after_days:
+    name: Auto-archive after (days)
+    description: Automatically archive delivered parcels this many days after delivery. Set to 0 to disable.
+  trusted_senders:
+    name: Trusted sender domains
+    description: >-
+      Comma-separated extra sender domains (e.g. myretailer.com) to treat as
+      trusted, enabling the same high-confidence parsing used for AliExpress,
+      eBay and Amazon.
+  ignore_senders:
+    name: Ignored sender domains
+    description: Comma-separated sender domains to skip entirely, e.g. noisy newsletters.
+  seventeentrack_api_key:
+    name: 17track API key
+    description: >-
+      Optional. Enables live delivery status lookups via 17track.net. Without
+      it, parcels still get detected and listed, with carrier tracking links
+      only.

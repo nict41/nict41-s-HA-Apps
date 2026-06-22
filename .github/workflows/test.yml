@@ -7,16 +7,20 @@ on:
 jobs:
   pytest:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [print_timelapse, parcel_tracker]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install ffmpeg
+        if: matrix.app == 'print_timelapse'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install dependencies
-        working-directory: print_timelapse/app
+        working-directory: ${{ matrix.app }}/app
         run: pip install -r requirements-dev.txt
       - name: Run tests
-        working-directory: print_timelapse/app
+        working-directory: ${{ matrix.app }}/app
         run: pytest -v

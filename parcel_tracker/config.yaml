@@ -1,0 +1,44 @@
+name: "Parcel Tracker"
+version: "0.1.0"
+slug: "parcel_tracker"
+description: "Automatically detects tracking numbers from your email and tracks deliveries"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/parcel_tracker"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:package-variant-closed
+panel_title: "Parcel Tracker"
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: "Parcel Tracker dashboard (optional direct access)"
+options:
+  imap_host: ""
+  imap_port: 993
+  imap_use_ssl: true
+  imap_username: ""
+  imap_password: ""
+  imap_folder: "INBOX"
+  lookback_days: 14
+  poll_interval_minutes: 30
+  auto_archive_after_days: 14
+  trusted_senders: ""
+  ignore_senders: ""
+  seventeentrack_api_key: ""
+schema:
+  imap_host: str
+  imap_port: port
+  imap_use_ssl: bool
+  imap_username: str
+  imap_password: password
+  imap_folder: str
+  lookback_days: int(1,90)
+  poll_interval_minutes: int(5,1440)
+  auto_archive_after_days: int(0,365)
+  trusted_senders: str
+  ignore_senders: str
+  seventeentrack_api_key: password
