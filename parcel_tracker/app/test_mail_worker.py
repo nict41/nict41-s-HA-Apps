@@ -55,6 +55,25 @@ class _FakeConn:
         self.logged_out = True
 
 
+def test_normalize_mailboxes_wraps_a_bare_mapping():
+    # Regression test: with exactly one mailbox configured, the Supervisor's
+    # repeating-group option can come through as a single mapping instead of
+    # a one-item list - iterating that mapping directly yields its keys
+    # (strings), which crashes _sync_account with AttributeError.
+    account = {"host": "imap.example.com", "username": "a@example.com"}
+    assert mail_worker._normalize_mailboxes(account) == [account]
+
+
+def test_normalize_mailboxes_passes_through_a_list():
+    accounts = [{"host": "imap.one.com"}, {"host": "imap.two.com"}]
+    assert mail_worker._normalize_mailboxes(accounts) == accounts
+
+
+def test_normalize_mailboxes_treats_other_values_as_empty():
+    assert mail_worker._normalize_mailboxes(None) == []
+    assert mail_worker._normalize_mailboxes("") == []
+
+
 def test_sync_mailbox_with_no_accounts_configured():
     result = mail_worker.sync_mailbox()
     assert result == {"ok": False, "error": "no mailboxes configured", "new_candidates": 0, "scanned": 0}

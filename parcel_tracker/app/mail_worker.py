@@ -19,7 +19,18 @@ from email.message import Message
 import carriers
 import db
 
-MAILBOXES: list[dict] = json.loads(os.environ.get("MAILBOXES_JSON", "[]"))
+def _normalize_mailboxes(raw) -> list[dict]:
+    """The Supervisor's repeating-group option is documented as a list, but
+    with a single entry it can come through as a bare mapping instead of a
+    one-item list - normalize so callers can always iterate a list of dicts."""
+    if isinstance(raw, dict):
+        return [raw]
+    if isinstance(raw, list):
+        return raw
+    return []
+
+
+MAILBOXES: list[dict] = _normalize_mailboxes(json.loads(os.environ.get("MAILBOXES_JSON", "[]")))
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
 
 # Comma-separated extra sender domains to treat as trusted retailers (their

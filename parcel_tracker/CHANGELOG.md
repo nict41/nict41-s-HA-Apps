@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed a crash (`AttributeError: 'str' object has no attribute 'get'`)
+  during mail sync when exactly one mailbox was configured. The Supervisor
+  can return the `mailboxes` option as a single mapping rather than a
+  one-item list in that case; mailbox entries are now normalized into a
+  list regardless of shape.
+
 ## 0.2.0
 
 - Fixed a crash (`AttributeError: 'tuple' object has no attribute 'decode'`)
