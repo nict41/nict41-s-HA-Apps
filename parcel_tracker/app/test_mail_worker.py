@@ -1,4 +1,5 @@
 import imaplib
+import json
 
 import pytest
 
@@ -55,23 +56,35 @@ class _FakeConn:
         self.logged_out = True
 
 
-def test_normalize_mailboxes_wraps_a_bare_mapping():
-    # Regression test: with exactly one mailbox configured, the Supervisor's
-    # repeating-group option can come through as a single mapping instead of
-    # a one-item list - iterating that mapping directly yields its keys
-    # (strings), which crashes _sync_account with AttributeError.
+def test_parse_mailboxes_handles_empty_string():
+    assert mail_worker._parse_mailboxes("") == []
+    assert mail_worker._parse_mailboxes("   ") == []
+
+
+def test_parse_mailboxes_wraps_a_bare_mapping():
+    # Regression test: with exactly one mailbox configured, bashio emits the
+    # single array element as a bare JSON object rather than a one-item
+    # array - iterating that mapping directly yields its keys (strings),
+    # which crashed _sync_account with AttributeError.
     account = {"host": "imap.example.com", "username": "a@example.com"}
-    assert mail_worker._normalize_mailboxes(account) == [account]
+    raw_json = json.dumps(account)
+    assert mail_worker._parse_mailboxes(raw_json) == [account]
 
 
-def test_normalize_mailboxes_passes_through_a_list():
+def test_parse_mailboxes_handles_concatenated_objects():
+    # Regression test: with two or more mailboxes configured, bashio emits
+    # one JSON object per array element with no separator between them
+    # (not wrapped in `[...]`), which made plain json.loads() raise
+    # "Extra data" and crash the app on startup.
+    account_a = {"host": "imap.one.com", "username": "a@example.com"}
+    account_b = {"host": "imap.two.com", "username": "b@example.com"}
+    raw_json = json.dumps(account_a) + "\n" + json.dumps(account_b)
+    assert mail_worker._parse_mailboxes(raw_json) == [account_a, account_b]
+
+
+def test_parse_mailboxes_passes_through_a_proper_array():
     accounts = [{"host": "imap.one.com"}, {"host": "imap.two.com"}]
-    assert mail_worker._normalize_mailboxes(accounts) == accounts
-
-
-def test_normalize_mailboxes_treats_other_values_as_empty():
-    assert mail_worker._normalize_mailboxes(None) == []
-    assert mail_worker._normalize_mailboxes("") == []
+    assert mail_worker._parse_mailboxes(json.dumps(accounts)) == accounts
 
 
 def test_sync_mailbox_with_no_accounts_configured():

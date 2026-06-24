@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2
+
+- Fixed a startup crash (`json.decoder.JSONDecodeError: Extra data`) with
+  two or more mailboxes configured. The Supervisor emits each mailbox
+  entry as its own JSON object with no enclosing array or separator
+  between them, which a plain JSON parse can't handle. Mailbox config is
+  now parsed as however many JSON values are present, in whatever shape
+  they arrive (a bare mapping, several concatenated mappings, or a proper
+  array).
+
 ## 0.2.1
 
 - Fixed a crash (`AttributeError: 'str' object has no attribute 'get'`)

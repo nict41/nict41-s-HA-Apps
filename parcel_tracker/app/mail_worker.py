@@ -19,18 +19,32 @@ from email.message import Message
 import carriers
 import db
 
-def _normalize_mailboxes(raw) -> list[dict]:
-    """The Supervisor's repeating-group option is documented as a list, but
-    with a single entry it can come through as a bare mapping instead of a
-    one-item list - normalize so callers can always iterate a list of dicts."""
-    if isinstance(raw, dict):
-        return [raw]
-    if isinstance(raw, list):
-        return raw
-    return []
+
+def _parse_mailboxes(raw_json: str) -> list[dict]:
+    """bashio emits list-type options as one JSON value per array element
+    rather than a single JSON array - for a single mailbox that's a bare
+    mapping, for several it's multiple JSON objects with no separator
+    between them. Decode however many JSON values are present and return
+    them as a flat list, whatever shape they came in."""
+    raw_json = raw_json.strip()
+    if not raw_json:
+        return []
+
+    decoder = json.JSONDecoder()
+    values = []
+    idx = 0
+    while idx < len(raw_json):
+        value, idx = decoder.raw_decode(raw_json, idx)
+        values.append(value)
+        while idx < len(raw_json) and raw_json[idx].isspace():
+            idx += 1
+
+    if len(values) == 1 and isinstance(values[0], list):
+        return values[0]
+    return values
 
 
-MAILBOXES: list[dict] = _normalize_mailboxes(json.loads(os.environ.get("MAILBOXES_JSON", "[]")))
+MAILBOXES: list[dict] = _parse_mailboxes(os.environ.get("MAILBOXES_JSON", "[]"))
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
 
 # Comma-separated extra sender domains to treat as trusted retailers (their
