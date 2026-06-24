@@ -103,8 +103,8 @@ def _detected_carrier_name(track_info: dict) -> str | None:
 
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name"}}. Numbers with no data back from
-    the API are omitted from the result rather than guessed at."""
+    "estimated_delivery", "carrier_name", "confirmed"}}. Numbers with no data
+    back from the API are omitted from the result rather than guessed at."""
     results: dict[str, dict] = {}
     if not API_KEY or not tracking_numbers:
         return results
@@ -125,12 +125,19 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
             estimated_delivery = (track_info.get("time_metrics") or {}).get(
                 "estimated_delivery_date", {}
             ).get("from")
+            carrier_name = _detected_carrier_name(track_info)
             results[number] = {
                 "status": status,
                 "status_detail": detail,
                 "last_event_time": event_time,
                 "estimated_delivery": estimated_delivery,
-                "carrier_name": _detected_carrier_name(track_info),
+                "carrier_name": carrier_name,
+                # "Recognized" = 17track matched the number to a real carrier
+                # or returned an actual movement event, as opposed to merely
+                # echoing back a number it has no data for. Used to auto-confirm
+                # pending candidates, a far stronger signal than our own
+                # pattern-based carrier guess.
+                "confirmed": bool(carrier_name) or bool(event_time),
             }
 
     return results

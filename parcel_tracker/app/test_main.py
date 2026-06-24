@@ -3,6 +3,15 @@ from fastapi.testclient import TestClient
 
 import db
 import main
+from providers import track123
+
+
+def _stub_provider(monkeypatch, track_info):
+    """Make Track123 look configured and return a canned lookup, without any
+    network or API key - exercises run_sync_cycle's provider-dispatch logic."""
+    monkeypatch.setattr(track123, "configured", lambda: True)
+    monkeypatch.setattr(track123, "register", lambda numbers: None)
+    monkeypatch.setattr(track123, "get_track_info", lambda numbers: track_info)
 
 # main.app's startup event (which starts the background scheduler) is only
 # triggered if TestClient is used as a context manager; using it bare here
@@ -112,3 +121,49 @@ def test_dashboard_omits_email_preview_when_no_source_email():
     db.upsert_parcel("PEND123", "Unknown", "manual add", 0.5, None, db.STATUS_PENDING)
     html = client.get("/").text
     assert "View full email" not in html
+
+
+def test_sync_auto_confirms_pending_when_provider_recognizes_number(monkeypatch):
+    parcel_id = db.upsert_parcel("RECOG1", "FedEx", "ebay item", 0.4, None, db.STATUS_PENDING)
+    _stub_provider(
+        monkeypatch,
+        {
+            "RECOG1": {
+                "status": db.STATUS_ACTIVE,
+                "status_detail": "In transit",
+                "last_event_time": "2024-01-01T00:00:00Z",
+                "estimated_delivery": "2024-01-05",
+                "carrier_name": "Cainiao",
+                "confirmed": True,
+            }
+        },
+    )
+    main.run_sync_cycle()
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status"] == db.STATUS_ACTIVE
+    # The provider's carrier replaces our wrong pattern guess on confirm.
+    assert parcel["carrier_name"] == "Cainiao"
+    assert parcel["tracking_provider"] == "track123"
+
+
+def test_sync_keeps_pending_as_preview_when_provider_does_not_recognize_number(monkeypatch):
+    parcel_id = db.upsert_parcel("UNREC1", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
+    _stub_provider(
+        monkeypatch,
+        {
+            "UNREC1": {
+                "status": db.STATUS_ACTIVE,
+                "status_detail": "Pending carrier pickup",
+                "last_event_time": None,
+                "estimated_delivery": None,
+                "carrier_name": None,
+                "confirmed": False,
+            }
+        },
+    )
+    main.run_sync_cycle()
+    parcel = db.get_parcel(parcel_id)
+    # Unrecognised numbers stay pending for manual review, but still get a
+    # status preview written to their card.
+    assert parcel["status"] == db.STATUS_PENDING
+    assert parcel["status_detail"] == "Pending carrier pickup"

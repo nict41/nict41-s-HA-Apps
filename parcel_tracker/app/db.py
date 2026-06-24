@@ -205,10 +205,11 @@ def delete_parcel(parcel_id: int) -> None:
 
 
 def parcels_needing_refresh() -> list[dict]:
-    """Pending candidates are included too, so their carrier guess can be
-    corrected and a status preview shown - but callers must leave their
-    `status` column untouched (pass status=None to update_tracking_status)
-    since only an explicit confirm/dismiss should move them out of pending."""
+    """Pending candidates are included too, so the provider can correct their
+    carrier guess and auto-confirm them once it positively recognises the
+    number. Until a candidate is recognised, callers should leave its `status`
+    untouched (pass status=None to update_tracking_status) so an unrecognised
+    guess still waits for an explicit confirm/dismiss."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM parcels WHERE status IN (?, ?, ?)",

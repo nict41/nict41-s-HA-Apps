@@ -86,8 +86,8 @@ def _map_status(entry: dict) -> tuple[str, str | None, str | None]:
 
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name"}}. Numbers with no data back from
-    the API are omitted from the result rather than guessed at."""
+    "estimated_delivery", "carrier_name", "confirmed"}}. Numbers with no data
+    back from the API are omitted from the result rather than guessed at."""
     results: dict[str, dict] = {}
     if not API_KEY or not tracking_numbers:
         return results
@@ -107,12 +107,19 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
             if not number:
                 continue
             status, detail, event_time = _map_status(entry)
+            carrier_name = (entry.get("localLogisticsInfo") or {}).get("courierNameEN") or None
             results[number] = {
                 "status": status,
                 "status_detail": detail,
                 "last_event_time": event_time,
                 "estimated_delivery": entry.get("expectedDelivery"),
-                "carrier_name": (entry.get("localLogisticsInfo") or {}).get("courierNameEN") or None,
+                "carrier_name": carrier_name,
+                # "Recognized" = Track123 identified the courier or returned an
+                # actual movement event, as opposed to merely echoing back a
+                # number with no record. Used to auto-confirm pending
+                # candidates, a far stronger signal than our own pattern-based
+                # carrier guess.
+                "confirmed": bool(carrier_name) or bool(event_time),
             }
 
     return results

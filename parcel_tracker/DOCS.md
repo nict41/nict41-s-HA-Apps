@@ -27,12 +27,17 @@ copy-pasting of tracking numbers required.
    registers each tracking number for auto-detected carrier lookup (useful
    for AliExpress/eBay shipments, which are often routed through one of
    dozens of regional carriers) and pulls live status on every check -
-   including for parcels still awaiting confirmation, so the detected
-   carrier and a status preview show up before you've even confirmed it's a
-   real parcel. Each parcel sticks to whichever provider it was first
-   registered with, even if you add or remove the other provider's key
-   later. Without any provider configured, parcels are still detected and
-   listed, just with a carrier tracking link instead of live status.
+   including for parcels still in the needs-confirmation queue. When a
+   provider positively recognises a queued number (it resolves a real
+   carrier or returns an actual tracking event), that number is
+   **auto-confirmed** and starts tracking with the provider's carrier,
+   replacing our pattern guess - so a number an email mislabelled gets
+   corrected automatically. Numbers the provider can't identify stay in the
+   queue with a status preview, for you to confirm or dismiss by hand. Each
+   parcel sticks to whichever provider it was first registered with, even if
+   you add or remove the other provider's key later. Without any provider
+   configured, parcels are still detected and listed, just with a carrier
+   tracking link instead of live status.
 5. Delivered parcels are kept on the dashboard for a configurable number
    of days, then automatically archived.
 
@@ -121,12 +126,14 @@ switching (and consuming quota on both).
 
 Open the app's ingress panel from your sidebar:
 
-- **Needs confirmation** - lower-confidence detections. Each card shows a
-  short preview of the source email, with a "View full email" section to
-  expand the sender, subject, and full body, plus a live carrier/status
-  preview if a tracking provider key is configured - useful for judging
-  whether it's a real tracking number before you decide. Confirm to start
-  tracking, or dismiss if it isn't actually a parcel.
+- **Needs confirmation** - lower-confidence detections a tracking provider
+  couldn't yet recognise (ones it can recognise are auto-confirmed straight
+  into **In transit**). Each card shows a short preview of the source email,
+  with a "View full email" section to expand the sender, subject, and full
+  body, plus a live carrier/status preview if a tracking provider key is
+  configured - useful for judging whether it's a real tracking number before
+  you decide. Confirm to start tracking, or dismiss if it isn't actually a
+  parcel.
 - **In transit** - actively tracked parcels with their latest status.
 - **Delivered** - parcels marked delivered, until they're auto-archived.
 - **Archived** - dismissed or archived parcels, with an option to delete.

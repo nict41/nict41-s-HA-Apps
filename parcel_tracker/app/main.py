@@ -59,10 +59,15 @@ def run_sync_cycle() -> None:
                 info = track_info.get(parcel["tracking_number"])
                 if not info:
                     continue
-                # Pending candidates only get a preview (carrier/status
-                # text) - their lifecycle status stays "pending" until the
-                # user explicitly confirms or dismisses it.
-                new_status = None if parcel["status"] == db.STATUS_PENDING else info["status"]
+                # A pending candidate is auto-confirmed once the provider
+                # positively recognises the number (a detected carrier or a
+                # real tracking event) - the API is a far stronger signal than
+                # our own pattern guess. Until then it only gets a preview
+                # (carrier/status text) and stays pending for manual review.
+                if parcel["status"] == db.STATUS_PENDING and not info["confirmed"]:
+                    new_status = None
+                else:
+                    new_status = info["status"]
                 db.update_tracking_status(
                     parcel["id"],
                     status=new_status,

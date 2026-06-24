@@ -11,11 +11,13 @@
   configured provider's quota renews (Track123) before falling back to
   the other.
 - Parcels awaiting confirmation are now also registered with a configured
-  tracking provider, so their card shows the actual detected carrier and a
-  live status preview (e.g. correcting cases where the generic carrier
-  guess was wrong) instead of relying solely on the email-text guess.
-  Confirming or dismissing is still required before a parcel is tracked
-  for real - the preview doesn't change its pending status.
+  tracking provider. When the provider positively recognises a queued
+  number (it resolves a real carrier or returns an actual tracking event),
+  the parcel is **auto-confirmed** and starts tracking with the provider's
+  carrier - so e.g. an eBay shipment the email pattern-matched as the wrong
+  carrier gets corrected and confirmed automatically. Numbers the provider
+  can't identify stay in the needs-confirmation queue with a status
+  preview, for you to confirm or dismiss by hand.
 
 ## 0.3.0
 
