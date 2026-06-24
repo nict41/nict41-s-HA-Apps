@@ -115,6 +115,22 @@ def test_sync_account_parses_literal_tuple_fetch_response(monkeypatch):
     parcels = db.list_parcels()
     assert len(parcels) == 1
     assert parcels[0]["tracking_number"] == "LP00123456789CN"
+    assert parcels[0]["email_sender"] == "noreply@aliexpress.com"
+    assert parcels[0]["email_subject"] == "Your order has shipped!"
+    assert "LP00123456789CN" in parcels[0]["email_body"]
+
+
+def test_sync_account_truncates_long_email_body(monkeypatch):
+    long_body = "Tracking Number: LP00123456789CN " + ("x" * 9000)
+    raw = _raw_email("noreply@aliexpress.com", "Shipped!", long_body, "<msg-long@aliexpress.com>")
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    parcel = db.list_parcels()[0]
+    assert len(parcel["email_body"]) == mail_worker.MAX_EMAIL_BODY_CHARS
 
 
 def test_sync_mailbox_scans_every_configured_account(monkeypatch):

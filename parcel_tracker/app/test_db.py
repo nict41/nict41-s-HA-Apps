@@ -41,6 +41,45 @@ def test_upsert_parcel_does_not_downgrade_lower_confidence():
     assert parcel["description"] == "good guess"
 
 
+def test_upsert_parcel_stores_email_fields():
+    parcel_id = db.upsert_parcel(
+        "ABC123",
+        "UPS",
+        "Widget",
+        0.9,
+        "msg-1",
+        db.STATUS_ACTIVE,
+        email_sender="ups@ups.com",
+        email_subject="Your package shipped",
+        email_body="Tracking: ABC123",
+    )
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["email_sender"] == "ups@ups.com"
+    assert parcel["email_subject"] == "Your package shipped"
+    assert parcel["email_body"] == "Tracking: ABC123"
+
+
+def test_upsert_parcel_updates_email_fields_only_on_higher_confidence():
+    db.upsert_parcel(
+        "ABC123", "Unknown", "first guess", 0.3, "msg-1", db.STATUS_PENDING,
+        email_sender="a@example.com", email_subject="first subject", email_body="first body",
+    )
+    db.upsert_parcel(
+        "ABC123", "UPS", "better guess", 0.9, "msg-2", db.STATUS_ACTIVE,
+        email_sender="b@example.com", email_subject="second subject", email_body="second body",
+    )
+    parcel = db.get_parcel(1)
+    assert parcel["email_sender"] == "b@example.com"
+    assert parcel["email_body"] == "second body"
+
+    db.upsert_parcel(
+        "ABC123", "Unknown", "worse guess", 0.1, "msg-3", db.STATUS_PENDING,
+        email_sender="c@example.com", email_subject="third subject", email_body="third body",
+    )
+    parcel = db.get_parcel(1)
+    assert parcel["email_sender"] == "b@example.com"
+
+
 def test_is_processed_and_mark_processed():
     assert not db.is_processed("msg-1")
     db.mark_processed("msg-1")

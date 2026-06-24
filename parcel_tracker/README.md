@@ -99,7 +99,10 @@ numbers/month.
 
 Open the app's ingress panel from your sidebar:
 
-- **Needs confirmation** - lower-confidence detections. Confirm to start
+- **Needs confirmation** - lower-confidence detections. Each card shows a
+  short preview of the source email, with a "View full email" section to
+  expand the sender, subject, and full body - useful for judging whether
+  it's a real tracking number before you decide. Confirm to start
   tracking, or dismiss if it isn't actually a parcel.
 - **In transit** - actively tracked parcels with their latest status.
 - **Delivered** - parcels marked delivered, until they're auto-archived.

@@ -88,3 +88,27 @@ def test_dashboard_lists_pending_and_active_parcels():
     html = client.get("/").text
     assert "PEND123" in html
     assert "ACT123" in html
+
+
+def test_dashboard_shows_email_preview_for_pending_parcel_with_source_email():
+    db.upsert_parcel(
+        "PEND123",
+        "Unknown",
+        "maybe a parcel",
+        0.5,
+        "msg-1",
+        db.STATUS_PENDING,
+        email_sender="newsletter@example.com",
+        email_subject="Your order update",
+        email_body="Hello, your tracking number is PEND123 and it ships soon.",
+    )
+    html = client.get("/").text
+    assert "View full email" in html
+    assert "newsletter@example.com" in html
+    assert "Your order update" in html
+
+
+def test_dashboard_omits_email_preview_when_no_source_email():
+    db.upsert_parcel("PEND123", "Unknown", "manual add", 0.5, None, db.STATUS_PENDING)
+    html = client.get("/").text
+    assert "View full email" not in html

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- Pending parcel cards on the dashboard now show a short preview of the
+  source email, with an expandable "View full email" section showing the
+  sender, subject, and full body - useful for judging whether a
+  low-confidence detection is actually a real tracking number before
+  confirming or dismissing it.
+
 ## 0.2.2
 
 - Fixed a startup crash (`json.decoder.JSONDecodeError: Extra data`) with

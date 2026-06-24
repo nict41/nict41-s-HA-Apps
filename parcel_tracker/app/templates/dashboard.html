@@ -50,6 +50,23 @@
     .badge.exception { background: #4a1c1c; color: #ff8f8f; }
     .badge.delivered { background: #1c4a2a; color: #7fe3a1; }
     .badge.archived { background: #2a2a2a; color: #9aa0a6; }
+    .email-snippet { color: #b7bcc4; font-size: 0.78rem; margin-top: 0.35rem; font-style: italic; }
+    .email-full { margin-top: 0.35rem; }
+    .email-full summary { cursor: pointer; font-size: 0.78rem; color: #7db4ff; }
+    .email-meta { color: #9aa0a6; font-size: 0.78rem; margin: 0.4rem 0 0.3rem; }
+    .email-body {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #111318;
+      border: 1px solid #2a2f3a;
+      border-radius: 6px;
+      padding: 0.6rem;
+      font-size: 0.78rem;
+      color: #cfd2d8;
+      max-height: 260px;
+      overflow-y: auto;
+      margin: 0;
+    }
     .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
     .actions form { margin: 0; }
     button, .link-btn {
@@ -124,6 +141,17 @@
       <div class="info">
         <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span></div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; confidence {{ (p.confidence * 100) | round | int }}%</div>
+        {% if p.email_body %}
+        <div class="email-snippet">{{ p.email_body | truncate(160) }}</div>
+        <details class="email-full">
+          <summary>View full email</summary>
+          <div class="email-meta">
+            From: {{ p.email_sender or "Unknown sender" }}
+            {% if p.email_subject %}&middot; Subject: {{ p.email_subject }}{% endif %}
+          </div>
+          <pre class="email-body">{{ p.email_body }}</pre>
+        </details>
+        {% endif %}
       </div>
       <div class="actions">
         <form action="confirm" method="post">

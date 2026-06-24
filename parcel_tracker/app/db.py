@@ -46,6 +46,9 @@ def init_db() -> None:
                 estimated_delivery TEXT,
                 confidence REAL NOT NULL DEFAULT 0,
                 source_message_id TEXT,
+                email_sender TEXT,
+                email_subject TEXT,
+                email_body TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 delivered_at TEXT,
@@ -62,6 +65,14 @@ def init_db() -> None:
             """
         )
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+
+        # Added after the initial release - existing databases need these
+        # columns added rather than created, since CREATE TABLE IF NOT
+        # EXISTS is a no-op once the table already exists.
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(parcels)")}
+        for column in ("email_sender", "email_subject", "email_body"):
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE parcels ADD COLUMN {column} TEXT")
 
 
 def is_processed(message_id: str) -> bool:
@@ -87,6 +98,9 @@ def upsert_parcel(
     confidence: float,
     source_message_id: str | None,
     initial_status: str,
+    email_sender: str | None = None,
+    email_subject: str | None = None,
+    email_body: str | None = None,
 ) -> int:
     now = now_iso()
     with _connect() as conn:
@@ -97,8 +111,17 @@ def upsert_parcel(
             if confidence > existing["confidence"]:
                 conn.execute(
                     "UPDATE parcels SET carrier_name = ?, description = ?, confidence = ?, "
-                    "updated_at = ? WHERE id = ?",
-                    (carrier_name, description, confidence, now, existing["id"]),
+                    "email_sender = ?, email_subject = ?, email_body = ?, updated_at = ? WHERE id = ?",
+                    (
+                        carrier_name,
+                        description,
+                        confidence,
+                        email_sender,
+                        email_subject,
+                        email_body,
+                        now,
+                        existing["id"],
+                    ),
                 )
             else:
                 conn.execute("UPDATE parcels SET updated_at = ? WHERE id = ?", (now, existing["id"]))
@@ -106,7 +129,8 @@ def upsert_parcel(
 
         cur = conn.execute(
             "INSERT INTO parcels (tracking_number, carrier_name, description, status, "
-            "confidence, source_message_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+            "confidence, source_message_id, email_sender, email_subject, email_body, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
                 tracking_number,
                 carrier_name,
@@ -114,6 +138,9 @@ def upsert_parcel(
                 initial_status,
                 confidence,
                 source_message_id,
+                email_sender,
+                email_subject,
+                email_body,
                 now,
                 now,
             ),

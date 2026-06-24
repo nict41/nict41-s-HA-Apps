@@ -47,6 +47,11 @@ def _parse_mailboxes(raw_json: str) -> list[dict]:
 MAILBOXES: list[dict] = _parse_mailboxes(os.environ.get("MAILBOXES_JSON", "[]"))
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
 
+# Bounds how much of a source email gets stored per parcel, for the
+# dashboard's "view full email" preview. Shipping emails are short; this is
+# just a backstop against storing an unbounded amount of text per parcel.
+MAX_EMAIL_BODY_CHARS = 8000
+
 # Comma-separated extra sender domains to treat as trusted retailers (their
 # tracking numbers get the high-confidence label parser instead of the
 # generic regex fallback). Lets users add e.g. a niche retailer without a
@@ -187,6 +192,9 @@ def _sync_account(account: dict) -> dict:
                     confidence=candidate.confidence,
                     source_message_id=message_id,
                     initial_status=initial_status,
+                    email_sender=sender,
+                    email_subject=subject,
+                    email_body=body_text[:MAX_EMAIL_BODY_CHARS],
                 )
                 new_candidates += 1
 
