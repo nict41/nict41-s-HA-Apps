@@ -10,6 +10,7 @@ declare auto_archive_after_days
 declare trusted_senders
 declare ignore_senders
 declare seventeentrack_api_key
+declare track123_api_key
 
 mailboxes_json=$(bashio::config 'mailboxes' '[]')
 lookback_days=$(bashio::config 'lookback_days')
@@ -18,6 +19,7 @@ auto_archive_after_days=$(bashio::config 'auto_archive_after_days')
 trusted_senders=$(bashio::config 'trusted_senders')
 ignore_senders=$(bashio::config 'ignore_senders')
 seventeentrack_api_key=$(bashio::config 'seventeentrack_api_key')
+track123_api_key=$(bashio::config 'track123_api_key')
 
 export MAILBOXES_JSON="${mailboxes_json}"
 export LOOKBACK_DAYS="${lookback_days}"
@@ -26,6 +28,7 @@ export AUTO_ARCHIVE_AFTER_DAYS="${auto_archive_after_days}"
 export TRUSTED_SENDERS="${trusted_senders}"
 export IGNORE_SENDERS="${ignore_senders}"
 export SEVENTEENTRACK_API_KEY="${seventeentrack_api_key}"
+export TRACK123_API_KEY="${track123_api_key}"
 
 bashio::log.info "Starting Parcel Tracker dashboard on port 8000..."
 

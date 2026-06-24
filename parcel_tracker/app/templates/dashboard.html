@@ -110,7 +110,7 @@
   <div class="sync-row">
     <div class="sub">
       {% if last_sync_at %}Last checked {{ last_sync_at }}{% if last_sync_summary %} &mdash; {{ last_sync_summary }}{% endif %}{% else %}Not checked yet.{% endif %}
-      {% if not seventeentrack_configured %}<br />No 17track API key configured &mdash; showing carrier links only, no live status.{% endif %}
+      {% if not tracking_providers_configured %}<br />No tracking provider API key configured &mdash; showing carrier links only, no live status.{% endif %}
     </div>
     <form action="sync" method="post">
       <button class="primary" type="submit">Check mail now</button>
@@ -141,6 +141,9 @@
       <div class="info">
         <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span></div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; confidence {{ (p.confidence * 100) | round | int }}%</div>
+        {% if p.status_detail %}
+        <div class="status-line">{{ p.status_detail }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
+        {% endif %}
         {% if p.email_body %}
         <div class="email-snippet">{{ p.email_body | truncate(160) }}</div>
         <details class="email-full">

@@ -22,12 +22,17 @@ copy-pasting of tracking numbers required.
 3. High-confidence matches are tracked automatically. Lower-confidence
    matches land in a **needs confirmation** queue on the dashboard, so
    nothing gets auto-tracked on a guess.
-4. If a [17track](https://www.17track.net/) API key is configured, the app
+4. If a [17track](https://www.17track.net/) and/or
+   [Track123](https://www.track123.com/) API key is configured, the app
    registers each tracking number for auto-detected carrier lookup (useful
    for AliExpress/eBay shipments, which are often routed through one of
-   dozens of regional carriers) and pulls live status on every check.
-   Without a key, parcels are still detected and listed, just with a
-   carrier tracking link instead of live status.
+   dozens of regional carriers) and pulls live status on every check -
+   including for parcels still awaiting confirmation, so the detected
+   carrier and a status preview show up before you've even confirmed it's a
+   real parcel. Each parcel sticks to whichever provider it was first
+   registered with, even if you add or remove the other provider's key
+   later. Without any provider configured, parcels are still detected and
+   listed, just with a carrier tracking link instead of live status.
 5. Delivered parcels are kept on the dashboard for a configurable number
    of days, then automatically archived.
 
@@ -84,16 +89,33 @@ The remaining options apply across all configured mailboxes:
 | `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
 | `ignore_senders` | _(blank)_ | Comma-separated sender domains to skip entirely. |
 | `seventeentrack_api_key` | _(blank)_ | Optional [17track](https://www.17track.net/en/api) API key for live status. |
+| `track123_api_key` | _(blank)_ | Optional [Track123](https://www.track123.com/) API key for live status. |
 
-### 3. (Optional) Get a 17track API key
+### 3. (Optional) Get a tracking provider API key
 
-Without an API key, the dashboard still detects and lists every parcel,
-with a tracking link per carrier (or 17track's own universal tracker for
-carriers without a known link). With a free
-[17track API](https://www.17track.net/en/api) key, the dashboard instead
-shows live status (in transit, out for delivery, delivered, exception)
-pulled directly into each parcel's card. The free tier covers 100 tracking
-numbers/month.
+Without any provider key, the dashboard still detects and lists every
+parcel, with a tracking link per carrier (or 17track's own universal
+tracker for carriers without a known link). With a key configured for
+either provider below, the dashboard instead shows live status (in
+transit, out for delivery, delivered, exception) pulled directly into
+each parcel's card, including a carrier/status preview on cards still
+awaiting confirmation.
+
+You can configure one provider or both:
+
+- **[17track](https://www.17track.net/en/api)** - new accounts get a
+  one-time trial allocation of 200 tracking numbers that does **not**
+  renew monthly; beyond that it's a paid prepaid quota. Good for a
+  starting batch, but not a sustainable free option on its own.
+- **[Track123](https://www.track123.com/)** - the free tier covers 50
+  tracking numbers and renews every month, making it the better default
+  for ongoing use.
+
+If both are configured, new parcels register with Track123 first (since
+its free quota renews) and fall back to 17track only once Track123 is
+unconfigured or unavailable. Once a parcel is registered with a provider,
+it keeps using that same provider on every later refresh rather than
+switching (and consuming quota on both).
 
 ## Using the dashboard
 
@@ -101,8 +123,9 @@ Open the app's ingress panel from your sidebar:
 
 - **Needs confirmation** - lower-confidence detections. Each card shows a
   short preview of the source email, with a "View full email" section to
-  expand the sender, subject, and full body - useful for judging whether
-  it's a real tracking number before you decide. Confirm to start
+  expand the sender, subject, and full body, plus a live carrier/status
+  preview if a tracking provider key is configured - useful for judging
+  whether it's a real tracking number before you decide. Confirm to start
   tracking, or dismiss if it isn't actually a parcel.
 - **In transit** - actively tracked parcels with their latest status.
 - **Delivered** - parcels marked delivered, until they're auto-archived.

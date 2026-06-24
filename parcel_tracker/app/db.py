@@ -73,6 +73,16 @@ def init_db() -> None:
         for column in ("email_sender", "email_subject", "email_body"):
             if column not in existing_columns:
                 conn.execute(f"ALTER TABLE parcels ADD COLUMN {column} TEXT")
+        if "tracking_provider" not in existing_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN tracking_provider TEXT")
+            # Parcels already being tracked before this column existed were
+            # always registered with 17track (the only provider available at
+            # the time) - backfill so they keep using it instead of being
+            # re-registered with a newly-added second provider.
+            conn.execute(
+                "UPDATE parcels SET tracking_provider = '17track' WHERE status IN (?, ?)",
+                (STATUS_ACTIVE, STATUS_EXCEPTION),
+            )
 
 
 def is_processed(message_id: str) -> bool:
@@ -195,29 +205,44 @@ def delete_parcel(parcel_id: int) -> None:
 
 
 def parcels_needing_refresh() -> list[dict]:
+    """Pending candidates are included too, so their carrier guess can be
+    corrected and a status preview shown - but callers must leave their
+    `status` column untouched (pass status=None to update_tracking_status)
+    since only an explicit confirm/dismiss should move them out of pending."""
     with _connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM parcels WHERE status IN (?, ?)", (STATUS_ACTIVE, STATUS_EXCEPTION)
+            "SELECT * FROM parcels WHERE status IN (?, ?, ?)",
+            (STATUS_PENDING, STATUS_ACTIVE, STATUS_EXCEPTION),
         ).fetchall()
         return [dict(r) for r in rows]
 
 
 def update_tracking_status(
     parcel_id: int,
-    status: str,
+    status: str | None,
     status_detail: str | None,
     last_event_time: str | None,
     estimated_delivery: str | None,
+    carrier_name: str | None = None,
+    tracking_provider: str | None = None,
 ) -> None:
+    """status=None leaves the parcel's lifecycle status untouched - used for
+    pending candidates, where only a preview is wanted, not auto-confirmation."""
     now = now_iso()
-    delivered_at = now if status == STATUS_DELIVERED else None
+    assignments = ["status_detail = ?", "last_event_time = ?", "estimated_delivery = ?", "updated_at = ?"]
+    params = [status_detail, last_event_time, estimated_delivery, now]
+    if status is not None:
+        assignments += ["status = ?", "delivered_at = COALESCE(delivered_at, ?)"]
+        params += [status, now if status == STATUS_DELIVERED else None]
+    if carrier_name:
+        assignments.append("carrier_name = ?")
+        params.append(carrier_name)
+    if tracking_provider:
+        assignments.append("tracking_provider = ?")
+        params.append(tracking_provider)
+    params.append(parcel_id)
     with _connect() as conn:
-        conn.execute(
-            "UPDATE parcels SET status=?, status_detail=?, last_event_time=?, "
-            "estimated_delivery=?, updated_at=?, "
-            "delivered_at=COALESCE(delivered_at, ?) WHERE id=?",
-            (status, status_detail, last_event_time, estimated_delivery, now, delivered_at, parcel_id),
-        )
+        conn.execute(f"UPDATE parcels SET {', '.join(assignments)} WHERE id = ?", params)
 
 
 def auto_archive_delivered(days: int) -> int:

@@ -12,6 +12,7 @@ _TMP_DATA_DIR = tempfile.mkdtemp(prefix="parcel-tracker-test-")
 os.environ["DATA_DIR"] = _TMP_DATA_DIR
 os.environ.setdefault("MAILBOXES_JSON", "[]")
 os.environ.setdefault("SEVENTEENTRACK_API_KEY", "")
+os.environ.setdefault("TRACK123_API_KEY", "")
 
 
 @pytest.fixture(scope="session", autouse=True)

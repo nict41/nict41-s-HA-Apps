@@ -43,6 +43,15 @@ configuration:
   seventeentrack_api_key:
     name: 17track API key
     description: >-
-      Optional. Enables live delivery status lookups via 17track.net. Without
-      it, parcels still get detected and listed, with carrier tracking links
-      only.
+      Optional. Enables live delivery status lookups via 17track.net. Can be
+      configured alongside a Track123 API key - each parcel sticks to
+      whichever provider it was first registered with. Without any provider
+      configured, parcels still get detected and listed, with carrier
+      tracking links only.
+  track123_api_key:
+    name: Track123 API key
+    description: >-
+      Optional. Enables live delivery status lookups via track123.com, as an
+      alternative or addition to 17track. New parcels are registered with
+      whichever configured provider has room first; each then sticks to that
+      provider for future refreshes.

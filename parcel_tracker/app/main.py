@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 import carriers
 import db
 import mail_worker
-from providers import seventeentrack
+from providers import seventeentrack, track123
 
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "30"))
 AUTO_ARCHIVE_AFTER_DAYS = int(os.environ.get("AUTO_ARCHIVE_AFTER_DAYS", "14"))
@@ -22,24 +22,55 @@ db.init_db()
 
 scheduler = BackgroundScheduler()
 
+# Preference order for numbers that have never been registered with either
+# provider. Track123's free tier renews monthly while 17track's is a
+# one-time allowance, so new candidates draw from the renewing one first.
+# A parcel's `tracking_provider` is sticky once set, so a number already
+# registered elsewhere keeps using that provider rather than being
+# re-registered (and re-charged against quota) on the other one.
+_TRACKING_PROVIDERS = [("track123", track123), ("17track", seventeentrack)]
+
+
+def tracking_providers_configured() -> bool:
+    return any(mod.configured() for _, mod in _TRACKING_PROVIDERS)
+
 
 def run_sync_cycle() -> None:
     sync_result = mail_worker.sync_mailbox()
 
     refresh_candidates = db.parcels_needing_refresh()
-    if refresh_candidates and seventeentrack.configured():
-        numbers = [p["tracking_number"] for p in refresh_candidates]
-        seventeentrack.register(numbers)
-        track_info = seventeentrack.get_track_info(numbers)
+    active_providers = [(name, mod) for name, mod in _TRACKING_PROVIDERS if mod.configured()]
+    if refresh_candidates and active_providers:
+        by_provider: dict[str, list[dict]] = {}
         for parcel in refresh_candidates:
-            info = track_info.get(parcel["tracking_number"])
-            if info:
+            provider_name = next(
+                (name for name, _ in active_providers if name == parcel["tracking_provider"]),
+                active_providers[0][0],
+            )
+            by_provider.setdefault(provider_name, []).append(parcel)
+
+        providers_by_name = dict(active_providers)
+        for provider_name, parcels in by_provider.items():
+            mod = providers_by_name[provider_name]
+            numbers = [p["tracking_number"] for p in parcels]
+            mod.register(numbers)
+            track_info = mod.get_track_info(numbers)
+            for parcel in parcels:
+                info = track_info.get(parcel["tracking_number"])
+                if not info:
+                    continue
+                # Pending candidates only get a preview (carrier/status
+                # text) - their lifecycle status stays "pending" until the
+                # user explicitly confirms or dismisses it.
+                new_status = None if parcel["status"] == db.STATUS_PENDING else info["status"]
                 db.update_tracking_status(
                     parcel["id"],
-                    status=info["status"],
+                    status=new_status,
                     status_detail=info["status_detail"],
                     last_event_time=info["last_event_time"],
                     estimated_delivery=info["estimated_delivery"],
+                    carrier_name=info.get("carrier_name"),
+                    tracking_provider=provider_name,
                 )
 
     archived = db.auto_archive_delivered(AUTO_ARCHIVE_AFTER_DAYS)
@@ -78,7 +109,7 @@ def _dashboard_context() -> dict:
         "archived": archived,
         "last_sync_at": db.get_state("last_sync_at"),
         "last_sync_summary": db.get_state("last_sync_summary"),
-        "seventeentrack_configured": seventeentrack.configured(),
+        "tracking_providers_configured": tracking_providers_configured(),
         "get_tracking_url": carriers.get_tracking_url,
     }
 

@@ -91,10 +91,20 @@ def _map_status(track_info: dict) -> tuple[str, str | None, str | None]:
     return status, detail, event_time
 
 
+def _detected_carrier_name(track_info: dict) -> str | None:
+    """`tracking.providers` holds the carrier(s) 17track actually matched
+    the number to, as opposed to the carrier code (0/auto-detect) we
+    registered it with."""
+    providers = (track_info.get("tracking") or {}).get("providers") or []
+    if not providers:
+        return None
+    return (providers[0].get("provider") or {}).get("name") or None
+
+
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery"}}. Numbers with no data back from the API are
-    omitted from the result rather than guessed at."""
+    "estimated_delivery", "carrier_name"}}. Numbers with no data back from
+    the API are omitted from the result rather than guessed at."""
     results: dict[str, dict] = {}
     if not API_KEY or not tracking_numbers:
         return results
@@ -120,6 +130,7 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 "status_detail": detail,
                 "last_event_time": event_time,
                 "estimated_delivery": estimated_delivery,
+                "carrier_name": _detected_carrier_name(track_info),
             }
 
     return results

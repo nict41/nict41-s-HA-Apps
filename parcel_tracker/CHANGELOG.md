@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- Added [Track123](https://www.track123.com/) as a second, independently
+  metered tracking provider alongside 17track, since 17track's free
+  allowance is now a one-time, non-renewing 200-number trial rather than a
+  monthly quota. Configure either or both via the `track123_api_key` /
+  `seventeentrack_api_key` options - a parcel sticks to whichever provider
+  it was first registered with, and new parcels prefer whichever
+  configured provider's quota renews (Track123) before falling back to
+  the other.
+- Parcels awaiting confirmation are now also registered with a configured
+  tracking provider, so their card shows the actual detected carrier and a
+  live status preview (e.g. correcting cases where the generic carrier
+  guess was wrong) instead of relying solely on the email-text guess.
+  Confirming or dismissing is still required before a parcel is tracked
+  for real - the preview doesn't change its pending status.
+
 ## 0.3.0
 
 - Pending parcel cards on the dashboard now show a short preview of the

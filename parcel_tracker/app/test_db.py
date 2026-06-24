@@ -117,12 +117,13 @@ def test_delete_parcel_removes_row():
     assert db.get_parcel(parcel_id) is None
 
 
-def test_parcels_needing_refresh_returns_active_and_exception_only():
+def test_parcels_needing_refresh_returns_pending_active_and_exception_only():
     db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_ACTIVE)
     db.upsert_parcel("B", "USPS", "b", 0.9, None, db.STATUS_EXCEPTION)
     db.upsert_parcel("C", "DHL", "c", 0.9, None, db.STATUS_DELIVERED)
+    db.upsert_parcel("D", "Unknown", "d", 0.4, None, db.STATUS_PENDING)
     refresh = {p["tracking_number"] for p in db.parcels_needing_refresh()}
-    assert refresh == {"A", "B"}
+    assert refresh == {"A", "B", "D"}
 
 
 def test_update_tracking_status_sets_delivered_at_once():
@@ -134,6 +135,36 @@ def test_update_tracking_status_sets_delivered_at_once():
     db.update_tracking_status(parcel_id, db.STATUS_DELIVERED, "Delivered again", "2024-01-02T00:00:00Z", None)
     second = db.get_parcel(parcel_id)
     assert second["delivered_at"] == first["delivered_at"]
+
+
+def test_update_tracking_status_with_none_status_leaves_lifecycle_status_untouched():
+    parcel_id = db.upsert_parcel("A", "Unknown", "a", 0.4, None, db.STATUS_PENDING)
+    db.update_tracking_status(
+        parcel_id,
+        status=None,
+        status_detail="In transit",
+        last_event_time="2024-01-01T00:00:00Z",
+        estimated_delivery="2024-01-05",
+    )
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status"] == db.STATUS_PENDING
+    assert parcel["status_detail"] == "In transit"
+
+
+def test_update_tracking_status_sets_carrier_name_and_tracking_provider():
+    parcel_id = db.upsert_parcel("A", "FedEx", "a", 0.4, None, db.STATUS_PENDING)
+    db.update_tracking_status(
+        parcel_id,
+        status=None,
+        status_detail="In transit",
+        last_event_time=None,
+        estimated_delivery=None,
+        carrier_name="Cainiao",
+        tracking_provider="track123",
+    )
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["carrier_name"] == "Cainiao"
+    assert parcel["tracking_provider"] == "track123"
 
 
 def test_auto_archive_delivered_respects_days_and_zero_disables():
