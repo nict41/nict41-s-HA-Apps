@@ -26,12 +26,12 @@ _REQUEST_DELAY_SECONDS = 0.25  # stays under the documented 5 req/sec cap
 # Track123 courier codes (the slug from a carrier's https://www.track123.com/
 # carriers/<slug> page) for carriers we can identify confidently enough at
 # detection time to tell Track123 outright, keyed by the carrier_name string
-# our own detectors (carriers.py) assign. AliExpress Standard Shipping is a
-# multi-carrier Cainiao network handoff, not a single courier, so "cainiao"
-# names the network rather than whichever local/postal carrier ends up
-# making the last-mile delivery.
+# our own detectors (carriers.py) assign. Track123 maintains a dedicated
+# "aliexpress" courier page/code (distinct from the generic "cainiao" one)
+# that it resolves correctly for both LP- and JJD-prefixed Cainiao/AliExpress
+# Standard Shipping numbers.
 _COURIER_CODES = {
-    "Cainiao / AliExpress Standard Shipping": "cainiao",
+    "Cainiao / AliExpress Standard Shipping": "aliexpress",
 }
 
 # Track123's transitStatus enum. Anything not listed here (including codes

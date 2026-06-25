@@ -291,7 +291,7 @@ def test_track123_register_includes_courier_code_for_known_carrier(monkeypatch):
 
     track123.register([("JJD3", "Cainiao / AliExpress Standard Shipping")])
 
-    assert captured_payload == [[{"trackNo": "JJD3", "courierCode": "cainiao"}]]
+    assert captured_payload == [[{"trackNo": "JJD3", "courierCode": "aliexpress"}]]
 
 
 def test_track123_register_omits_courier_code_for_unmapped_carrier(monkeypatch):

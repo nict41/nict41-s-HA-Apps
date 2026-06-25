@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.10
+
+- Cainiao/AliExpress Standard Shipping numbers (the `LP`/`JJD`-prefixed
+  formats) are now registered with Track123 under its dedicated `aliexpress`
+  courier code instead of the generic `cainiao` one. Track123 tracks
+  AliExpress as its own courier, separate from the broader Cainiao network
+  these numbers were previously registered under.
+
 ## 0.6.9
 
 - Fixed a tracked parcel's status reverting to "No status yet" after
