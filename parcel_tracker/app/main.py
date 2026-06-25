@@ -58,7 +58,7 @@ def run_sync_cycle() -> None:
         for provider_name, parcels in by_provider.items():
             mod = providers_by_name[provider_name]
             numbers = [p["tracking_number"] for p in parcels]
-            mod.register(numbers)
+            mod.register([(p["tracking_number"], p["carrier_name"]) for p in parcels])
             track_info = mod.get_track_info(numbers)
             for parcel in parcels:
                 info = track_info.get(parcel["tracking_number"])

@@ -70,13 +70,18 @@ def _chunks(items: list, size: int):
         yield items[i : i + size]
 
 
-def register(tracking_numbers: list[str]) -> None:
-    """Register numbers for tracking. Safe to call repeatedly - 17track
-    no-ops on numbers it's already tracking."""
-    if not API_KEY or not tracking_numbers:
+def register(parcels: list[tuple[str, str | None]]) -> None:
+    """Register (tracking_number, carrier_name) pairs for tracking. Safe to
+    call repeatedly - 17track no-ops on numbers it's already tracking.
+
+    carrier_name is accepted only for call-site symmetry with the Track123
+    provider - it's deliberately ignored here, since carrier 0 (auto-detect)
+    is the whole point for the cross-border numbers this matters most for
+    (see module docstring)."""
+    if not API_KEY or not parcels:
         return
-    for chunk in _chunks(tracking_numbers, _MAX_NUMBERS_PER_REQUEST):
-        _post("register", [{"number": n, "carrier": 0} for n in chunk])
+    for chunk in _chunks(parcels, _MAX_NUMBERS_PER_REQUEST):
+        _post("register", [{"number": number, "carrier": 0} for number, _ in chunk])
         time.sleep(_REQUEST_DELAY_SECONDS)
 
 
