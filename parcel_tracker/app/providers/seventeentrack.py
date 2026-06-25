@@ -138,12 +138,15 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 "last_event_time": event_time,
                 "estimated_delivery": estimated_delivery,
                 "carrier_name": carrier_name,
-                # "Recognized" = 17track matched the number to a real carrier
-                # or returned an actual movement event, as opposed to merely
-                # echoing back a number it has no data for. Used to auto-confirm
-                # pending candidates, a far stronger signal than our own
-                # pattern-based carrier guess.
-                "confirmed": bool(carrier_name) or bool(event_time),
+                # "Recognized" requires *both* a matched carrier and an
+                # actual movement event, not just one or the other - 17track
+                # will sometimes match a number to a carrier from its shape
+                # alone (e.g. a phone number that happens to match a
+                # carrier's number-length pattern) with no real tracking data
+                # behind it, which would otherwise let exactly the kind of
+                # bogus number auto-dismiss exists to clean up count as
+                # permanently confirmed instead.
+                "confirmed": bool(carrier_name) and bool(event_time),
             }
 
     return results

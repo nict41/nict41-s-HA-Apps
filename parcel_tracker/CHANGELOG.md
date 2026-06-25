@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.5
+
+- A tracking number that 17track/Track123 only matched to a carrier by the
+  shape of the number itself - with no actual movement event behind that
+  guess - is no longer treated as provider-confirmed. Both providers will
+  occasionally guess a carrier from a number's format alone (e.g. a phone
+  number, an eBay Item ID, or an order ID that happens to fit a carrier's
+  number-length pattern), and since `provider_confirmed` is sticky, that
+  false "confirmation" permanently exempted exactly this kind of false
+  positive from the auto-dismiss feature meant to clean it up. A number now
+  needs both a detected carrier *and* a real tracking event before it
+  counts as confirmed. This only affects new confirmations going forward -
+  a parcel already marked provider-confirmed under the old, looser check
+  stays that way and can be removed by hand (Archive, then Delete) if it's
+  actually bogus.
+
 ## 0.6.4
 
 - A number Track123 explicitly rejects (e.g. quota exhausted, already

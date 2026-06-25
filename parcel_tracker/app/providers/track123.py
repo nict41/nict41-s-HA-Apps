@@ -166,12 +166,15 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 "last_event_time": event_time,
                 "estimated_delivery": entry.get("expectedDelivery"),
                 "carrier_name": carrier_name,
-                # "Recognized" = Track123 identified the courier or returned an
-                # actual movement event, as opposed to merely echoing back a
-                # number with no record. Used to auto-confirm pending
-                # candidates, a far stronger signal than our own pattern-based
-                # carrier guess.
-                "confirmed": bool(carrier_name) or bool(event_time),
+                # "Recognized" requires *both* a detected courier and an
+                # actual movement event, not just one or the other - Track123
+                # will sometimes guess a courier from a number's shape alone
+                # (e.g. a phone number that happens to match a carrier's
+                # number-length pattern) with no real tracking data behind
+                # it, which would otherwise let exactly the kind of bogus
+                # number auto-dismiss exists to clean up count as permanently
+                # confirmed instead.
+                "confirmed": bool(carrier_name) and bool(event_time),
             }
 
     return results

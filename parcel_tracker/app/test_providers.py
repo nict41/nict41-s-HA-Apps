@@ -21,6 +21,7 @@ def test_seventeentrack_confirms_a_number_the_provider_recognizes(monkeypatch):
                         "number": "REAL1",
                         "track_info": {
                             "latest_status": {"status": "InTransit"},
+                            "latest_event": {"description": "Departed facility", "time_iso": "2024-01-01T00:00:00Z"},
                             "tracking": {"providers": [{"provider": {"name": "Cainiao"}}]},
                         },
                     }
@@ -33,6 +34,35 @@ def test_seventeentrack_confirms_a_number_the_provider_recognizes(monkeypatch):
 
     assert results["REAL1"]["confirmed"] is True
     assert results["REAL1"]["carrier_name"] == "Cainiao"
+
+
+def test_seventeentrack_does_not_confirm_a_carrier_guess_with_no_actual_event(monkeypatch):
+    # 17track can match a number to a carrier from its shape alone (e.g. a
+    # phone number that happens to fit a carrier's number-length pattern)
+    # with no real tracking data behind it - that bare guess isn't enough to
+    # call the number confirmed, since that's exactly the kind of false
+    # positive auto-dismiss exists to clean up.
+    monkeypatch.setattr(
+        seventeentrack,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": [
+                    {
+                        "number": "FAKE1",
+                        "track_info": {
+                            "latest_status": {"status": "InTransit"},
+                            "tracking": {"providers": [{"provider": {"name": "Canada Post"}}]},
+                        },
+                    }
+                ]
+            }
+        },
+    )
+
+    results = seventeentrack.get_track_info(["FAKE1"])
+
+    assert results["FAKE1"]["confirmed"] is False
 
 
 def test_seventeentrack_marks_unrecognized_number_as_unconfirmed_rather_than_omitting_it(monkeypatch):
@@ -67,7 +97,12 @@ def test_track123_confirms_a_number_the_provider_recognizes(monkeypatch):
                         {
                             "trackNo": "REAL2",
                             "transitStatus": "IN_TRANSIT",
-                            "localLogisticsInfo": {"courierNameEN": "Cainiao"},
+                            "localLogisticsInfo": {
+                                "courierNameEN": "Cainiao",
+                                "trackingDetails": [
+                                    {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                                ],
+                            },
                         }
                     ]
                 }
@@ -79,6 +114,35 @@ def test_track123_confirms_a_number_the_provider_recognizes(monkeypatch):
 
     assert results["REAL2"]["confirmed"] is True
     assert results["REAL2"]["carrier_name"] == "Cainiao"
+
+
+def test_track123_does_not_confirm_a_carrier_guess_with_no_actual_event(monkeypatch):
+    # Track123 can guess a courier from a number's shape alone (e.g. a phone
+    # number that happens to fit a carrier's number-length pattern) with no
+    # real tracking data behind it - that bare guess isn't enough to call
+    # the number confirmed, since that's exactly the kind of false positive
+    # auto-dismiss exists to clean up.
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "FAKE2",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {"courierNameEN": "DHL"},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    results = track123.get_track_info(["FAKE2"])
+
+    assert results["FAKE2"]["confirmed"] is False
 
 
 def test_track123_prefers_last_mile_events_once_handed_off(monkeypatch):
