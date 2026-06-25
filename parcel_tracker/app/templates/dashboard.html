@@ -330,8 +330,15 @@
         fetch("sync/status")
           .then(function (r) { return r.json(); })
           .then(function (progress) {
+            // "mail" and "providers" are run_sync_cycle's two slow phases, in
+            // order - without branching on stage here, the label would keep
+            // saying "Checking mail…" (with a stale count) all through the
+            // provider-refresh phase, which can easily outlast the mail scan.
+            var stageLabel = progress.stage === "providers" ? "Checking carrier status…" : "Checking mail…";
             if (progress.total > 0) {
-              label.textContent = "Checking mail… (" + progress.checked + "/" + progress.total + ")";
+              label.textContent = stageLabel + " (" + progress.checked + "/" + progress.total + ")";
+            } else {
+              label.textContent = stageLabel;
             }
           })
           .catch(function () {});

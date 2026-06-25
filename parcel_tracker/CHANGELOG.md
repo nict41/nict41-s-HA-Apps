@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.14
+
+- Track123 could leave a real, trackable number stuck showing "No status
+  yet" indefinitely: the batch `track/query` endpoint it's normally polled
+  through only reflects however far Track123's own background polling of
+  the carrier has gotten, which can lag well behind the carrier's actual
+  state for slower-to-sync cross-border networks (e.g. Cainiao) - even
+  though Track123's own web tracker showed real events for the same number
+  the whole time, since it queries the carrier live instead. A number
+  accepted but still showing no tracking events now gets one rate-limited
+  fallback call to that same live endpoint (`track/query-realtime`) before
+  giving up for this cycle.
+- The "Check mail now" progress count used to stop updating the instant the
+  mail scan finished, then sit frozen for however long the tracking-provider
+  refresh that follows took - indistinguishable from no progress being made
+  at all. Live progress now spans both phases of a sync, with the button
+  label switching to "Checking carrier status…" once the mail scan hands
+  off to the provider refresh.
+- The dashboard page is no longer cached by the browser, so a tab left open
+  across an add-on rebuild always picks up the latest version on next load
+  instead of continuing to serve whatever JS/HTML it loaded before.
+
 ## 0.6.13
 
 - 0.6.12's switch to letting Track123 fully auto-detect the courier for

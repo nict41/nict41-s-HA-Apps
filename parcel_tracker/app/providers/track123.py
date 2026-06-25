@@ -11,6 +11,19 @@ API's auto-detect can reject a number outright (A0400: trackNo not
 registered) that Track123's own web tracker resolves just fine once a
 courier is known, so for those carriers it's worth telling Track123
 outright rather than risking the number never getting registered at all.
+
+A registered number can also sit "accepted" by track/query with no
+trackingDetails for a while even once a courier's been detected - the
+batch query endpoint serves whatever Track123's own background polling of
+the carrier has caught up to so far, which can lag behind the carrier's
+real tracking state for a slow-to-sync cross-border network like Cainiao's
+- exactly what Track123's own web tracker doesn't suffer from, since it
+calls track/query-realtime, a separate "instant" lookup that queries the
+carrier live with no registration involved. _query_instant() below is
+that same endpoint, used as a targeted fallback only for numbers stuck in
+that accepted-but-empty state, not for every lookup - it's explicitly
+documented as quota-consuming and "not recommended for bulk or frequent
+calls", unlike the batch endpoints.
 """
 
 import json
@@ -24,6 +37,11 @@ API_KEY = os.environ.get("TRACK123_API_KEY", "").strip()
 _BASE_URL = "https://api.track123.com/gateway/open-api"
 _MAX_NUMBERS_PER_REQUEST = 40
 _REQUEST_DELAY_SECONDS = 0.25  # stays under the documented 5 req/sec cap
+
+# track/query-realtime is documented as a 1 req/sec endpoint - much stricter
+# than the batch endpoints above, in line with it being meant for occasional
+# fallback use rather than routine bulk polling.
+_INSTANT_QUERY_DELAY_SECONDS = 1.05
 
 # Track123 courier codes (the slug from a carrier's https://www.track123.com/
 # carriers/<slug> page) for carriers we can identify confidently enough at
@@ -147,6 +165,21 @@ def _map_status(entry: dict, leg: dict) -> tuple[str, str | None, str | None]:
     return status, detail, event_time
 
 
+def _query_instant(number: str, courier_code: str | None) -> dict | None:
+    """track/query-realtime - queries the carrier live with no registration
+    involved, the same way Track123's own web tracker does. Used only as a
+    fallback for a number track/query has accepted but has no events for
+    yet, since the docs call this endpoint quota-consuming and unsuited to
+    routine/bulk use, unlike the batch endpoints above."""
+    payload = {"trackNo": number}
+    if courier_code:
+        payload["courierCode"] = courier_code
+    response = _post("tk/v2.1/track/query-realtime", payload)
+    if not response:
+        return None
+    return (response.get("data") or {}).get("accepted") or None
+
+
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
     "estimated_delivery", "carrier_name", "confirmed"}}.
@@ -183,7 +216,14 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
             entry = entry or {}
             leg = _logistics_leg(entry)
             if entry and not leg.get("trackingDetails"):
-                print(f"[parcel_tracker] Track123 accepted '{number}' but its response had no tracking events yet")
+                print(f"[parcel_tracker] Track123 accepted '{number}' but its response had no tracking events yet - trying instant tracking")
+                instant_entry = _query_instant(number, leg.get("courierCode"))
+                time.sleep(_INSTANT_QUERY_DELAY_SECONDS)
+                instant_leg = _logistics_leg(instant_entry) if instant_entry else {}
+                if instant_leg.get("trackingDetails"):
+                    entry, leg = instant_entry, instant_leg
+                else:
+                    print(f"[parcel_tracker] Track123 instant tracking for '{number}' also had no tracking events yet")
             status, detail, event_time = _map_status(entry, leg)
             carrier_name = leg.get("courierNameEN") or None
             if not detail and number in reasons:

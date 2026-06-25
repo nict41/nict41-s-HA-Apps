@@ -23,13 +23,13 @@ import email
 import imaplib
 import json
 import os
-import threading
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.message import Message
 
 import carriers
 import db
+import sync_progress
 
 
 def _parse_mailboxes(raw_json: str) -> list[dict]:
@@ -114,39 +114,6 @@ def _search_criteria(since: str) -> list[str]:
     if ALLOWED_SENDERS:
         criteria.extend(_from_search_terms(sorted(ALLOWED_SENDERS)))
     return criteria
-
-
-# Lets the dashboard poll for a live "checked X of Y" count while a sync is
-# running, instead of just showing a spinner for however long the mail check
-# takes. Guarded by a lock since the sync itself runs on a worker thread
-# (via run_in_threadpool) while the status poll runs on the main event loop.
-_progress_lock = threading.Lock()
-_progress = {"running": False, "checked": 0, "total": 0}
-
-
-def get_progress() -> dict:
-    with _progress_lock:
-        return dict(_progress)
-
-
-def _progress_start() -> None:
-    with _progress_lock:
-        _progress.update(running=True, checked=0, total=0)
-
-
-def _progress_finish() -> None:
-    with _progress_lock:
-        _progress["running"] = False
-
-
-def _progress_add_total(count: int) -> None:
-    with _progress_lock:
-        _progress["total"] += count
-
-
-def _progress_increment_checked() -> None:
-    with _progress_lock:
-        _progress["checked"] += 1
 
 
 def _decode(value: str | None) -> str:
@@ -252,7 +219,7 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
         return {"ok": False, "error": f"{label}/{folder}: search failed: {status}", "new_candidates": 0, "scanned": 0}
 
     message_nums = data[0].split()
-    _progress_add_total(len(message_nums))
+    sync_progress.add_total(len(message_nums))
 
     for num in message_nums:
         try:
@@ -314,7 +281,7 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
 
             db.mark_processed(message_id)
         finally:
-            _progress_increment_checked()
+            sync_progress.increment()
 
     return {"ok": True, "error": None, "new_candidates": new_candidates, "scanned": scanned}
 
@@ -369,7 +336,7 @@ def sync_mailbox() -> dict:
     if not MAILBOXES:
         return {"ok": False, "error": "no mailboxes configured", "new_candidates": 0, "scanned": 0}
 
-    _progress_start()
+    sync_progress.start_stage("mail")
     try:
         scanned = 0
         new_candidates = 0
@@ -388,4 +355,4 @@ def sync_mailbox() -> dict:
             "scanned": scanned,
         }
     finally:
-        _progress_finish()
+        sync_progress.finish()

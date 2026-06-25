@@ -278,6 +278,117 @@ def test_track123_register_logs_rejection_reason(monkeypatch, capsys):
     assert "quota exceeded" in out
 
 
+def test_track123_falls_back_to_instant_tracking_when_accepted_but_no_events(monkeypatch):
+    # track/query can accept a number (courier detected) well before its own
+    # background polling of the carrier has caught up with real movement
+    # events - track/query-realtime queries the carrier live instead, the
+    # same way Track123's own web tracker does, so a number that tracks fine
+    # there shouldn't be stuck showing "no status yet" in our app too.
+    def fake_post(path, payload):
+        if path == "tk/v2.1/track/query":
+            return {
+                "data": {
+                    "accepted": {
+                        "content": [
+                            {
+                                "trackNo": "JJD9",
+                                "transitStatus": "IN_TRANSIT",
+                                "localLogisticsInfo": {"courierCode": "cainiao", "courierNameEN": "Cainiao"},
+                            }
+                        ]
+                    }
+                }
+            }
+        if path == "tk/v2.1/track/query-realtime":
+            assert payload == {"trackNo": "JJD9", "courierCode": "cainiao"}
+            return {
+                "data": {
+                    "accepted": {
+                        "trackNo": "JJD9",
+                        "localLogisticsInfo": {
+                            "courierNameEN": "Cainiao",
+                            "trackingDetails": [
+                                {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                            ],
+                        },
+                    }
+                }
+            }
+        raise AssertionError(f"unexpected path {path!r}")
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _seconds: None)
+
+    results = track123.get_track_info(["JJD9"])
+
+    assert results["JJD9"]["confirmed"] is True
+    assert results["JJD9"]["status_detail"] == "Departed facility"
+    assert results["JJD9"]["carrier_name"] == "Cainiao"
+
+
+def test_track123_instant_tracking_fallback_still_empty_stays_unconfirmed(monkeypatch):
+    def fake_post(path, payload):
+        if path == "tk/v2.1/track/query":
+            return {
+                "data": {
+                    "accepted": {
+                        "content": [
+                            {
+                                "trackNo": "JJD10",
+                                "transitStatus": "IN_TRANSIT",
+                                "localLogisticsInfo": {"courierCode": "cainiao", "courierNameEN": "Cainiao"},
+                            }
+                        ]
+                    }
+                }
+            }
+        if path == "tk/v2.1/track/query-realtime":
+            return {"data": {"accepted": {"trackNo": "JJD10", "localLogisticsInfo": {"courierNameEN": "Cainiao"}}}}
+        raise AssertionError(f"unexpected path {path!r}")
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _seconds: None)
+
+    results = track123.get_track_info(["JJD10"])
+
+    assert results["JJD10"]["confirmed"] is False
+    assert results["JJD10"]["status_detail"] is None
+
+
+def test_track123_does_not_call_instant_tracking_when_already_has_events(monkeypatch):
+    # The instant endpoint is documented as quota-consuming and unsuited to
+    # routine/bulk use - it must only be tried for numbers actually stuck
+    # without events, not for every lookup.
+    paths_called = []
+
+    def fake_post(path, payload):
+        paths_called.append(path)
+        return {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "JJD11",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {
+                                "courierNameEN": "Cainiao",
+                                "trackingDetails": [
+                                    {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                                ],
+                            },
+                        }
+                    ]
+                }
+            }
+        }
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+
+    track123.get_track_info(["JJD11"])
+
+    assert paths_called == ["tk/v2.1/track/query"]
+
+
 def test_track123_register_includes_courier_code_for_known_carrier(monkeypatch):
     # Auto-detect can reject a Cainiao/AliExpress number outright at
     # registration, even though Track123's own web tracker resolves it fine

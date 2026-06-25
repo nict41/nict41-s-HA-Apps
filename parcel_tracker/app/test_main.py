@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import db
 import main
+import sync_progress
 from providers import track123
 
 
@@ -48,6 +49,13 @@ def test_static_card_js_allows_cross_origin_requests():
 def test_dashboard_route_does_not_get_the_static_cors_header():
     resp = client.get("/")
     assert "access-control-allow-origin" not in resp.headers
+
+
+def test_dashboard_response_is_not_cached():
+    # A browser tab left open across an add-on rebuild would otherwise keep
+    # serving its cached copy of this page (and the sync-form JS in it).
+    resp = client.get("/")
+    assert resp.headers["cache-control"] == "no-store"
 
 
 def test_add_parcel_creates_active_parcel_and_redirects():
@@ -139,14 +147,36 @@ def test_sync_without_imap_configured_does_not_crash():
 
 
 def test_sync_status_reports_progress():
-    # mail_worker's progress state is process-global and other test modules
-    # exercise it too, so this only checks the endpoint's shape/wiring - the
-    # actual checked/total bookkeeping is covered in test_mail_worker.py.
+    # sync_progress's state is process-global and other test modules exercise
+    # it too, so this only checks the endpoint's shape/wiring - the actual
+    # checked/total bookkeeping is covered in test_mail_worker.py and below.
     resp = client.get("/sync/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body.keys()) == {"running", "checked", "total"}
+    assert set(body.keys()) == {"running", "stage", "checked", "total"}
     assert body["running"] is False
+
+
+def test_sync_cycle_reports_providers_stage_progress(monkeypatch):
+    # Without this, the dashboard's progress count would freeze the moment
+    # the mail scan finishes, even though run_sync_cycle keeps running the
+    # (potentially much slower) provider-refresh phase afterward.
+    db.upsert_parcel("PROV1", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    captured = {}
+
+    def fake_get_track_info(numbers):
+        captured["progress"] = sync_progress.get()
+        return {"PROV1": dict(_UNCONFIRMED_INFO, confirmed=True)}
+
+    monkeypatch.setattr(track123, "configured", lambda: True)
+    monkeypatch.setattr(track123, "register", lambda numbers: None)
+    monkeypatch.setattr(track123, "get_track_info", fake_get_track_info)
+
+    main.run_sync_cycle()
+
+    assert captured["progress"]["stage"] == "providers"
+    assert captured["progress"]["total"] == 1
+    assert sync_progress.get() == {"running": False, "stage": None, "checked": 1, "total": 1}
 
 
 def test_api_parcels_returns_json():

@@ -5,6 +5,7 @@ import pytest
 
 import db
 import mail_worker
+import sync_progress
 
 
 @pytest.fixture(autouse=True)
@@ -462,8 +463,8 @@ def test_sync_folder_passes_allowed_senders_into_imap_search(monkeypatch):
 
 
 def test_get_progress_initial_state():
-    progress = mail_worker.get_progress()
-    assert progress == {"running": False, "checked": 0, "total": 0}
+    progress = sync_progress.get()
+    assert progress == {"running": False, "stage": None, "checked": 0, "total": 0}
 
 
 def test_sync_mailbox_reports_progress_after_completion(monkeypatch):
@@ -479,8 +480,8 @@ def test_sync_mailbox_reports_progress_after_completion(monkeypatch):
 
     mail_worker.sync_mailbox()
 
-    progress = mail_worker.get_progress()
-    assert progress == {"running": False, "checked": 2, "total": 2}
+    progress = sync_progress.get()
+    assert progress == {"running": False, "stage": None, "checked": 2, "total": 2}
 
 
 def test_sync_mailbox_resets_progress_between_cycles(monkeypatch):
@@ -496,4 +497,4 @@ def test_sync_mailbox_resets_progress_between_cycles(monkeypatch):
 
     # The second cycle re-scans the same (now already-processed) message, so
     # progress should reflect just that cycle, not accumulate across cycles.
-    assert mail_worker.get_progress() == {"running": False, "checked": 1, "total": 1}
+    assert sync_progress.get() == {"running": False, "stage": None, "checked": 1, "total": 1}

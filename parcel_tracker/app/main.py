@@ -16,6 +16,7 @@ import carriers
 import db
 import ha_sync
 import mail_worker
+import sync_progress
 from providers import seventeentrack, track123
 
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "30"))
@@ -47,6 +48,9 @@ def run_sync_cycle() -> None:
     refresh_candidates = db.parcels_needing_refresh()
     active_providers = [(name, mod) for name, mod in _TRACKING_PROVIDERS if mod.configured()]
     if refresh_candidates and active_providers:
+        sync_progress.start_stage("providers")
+        sync_progress.add_total(len(refresh_candidates))
+
         by_provider: dict[str, list[dict]] = {}
         for parcel in refresh_candidates:
             provider_name = next(
@@ -63,6 +67,7 @@ def run_sync_cycle() -> None:
             track_info = mod.get_track_info(numbers)
             for parcel in parcels:
                 info = track_info.get(parcel["tracking_number"])
+                sync_progress.increment()
                 if not info:
                     continue
 
@@ -107,6 +112,8 @@ def run_sync_cycle() -> None:
                     tracking_provider=provider_name,
                     confirmed=info["confirmed"],
                 )
+
+        sync_progress.finish()
 
     archived = db.auto_archive_delivered(AUTO_ARCHIVE_AFTER_DAYS)
 
@@ -188,7 +195,12 @@ def _dashboard_context() -> dict:
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    return templates.TemplateResponse(request, "dashboard.html", _dashboard_context())
+    # Without this, a browser tab left open across an add-on rebuild can keep
+    # serving its cached copy of this page (and the sync-form JS embedded in
+    # it) indefinitely, masking fixes here behind what looks like a UI bug.
+    response = templates.TemplateResponse(request, "dashboard.html", _dashboard_context())
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.post("/sync")
@@ -205,7 +217,7 @@ async def sync_status():
     # Polled by the dashboard while a sync is in flight, to show a live
     # "checked X of Y" count instead of a bare spinner for however long the
     # mail check takes.
-    return JSONResponse(mail_worker.get_progress())
+    return JSONResponse(sync_progress.get())
 
 
 @app.post("/add")
