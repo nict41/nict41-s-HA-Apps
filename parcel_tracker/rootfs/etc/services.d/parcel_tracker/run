@@ -10,6 +10,7 @@ declare auto_archive_after_days
 declare dismiss_unconfirmed_after_days
 declare trusted_senders
 declare ignore_senders
+declare allowed_senders
 declare seventeentrack_api_key
 declare track123_api_key
 
@@ -20,6 +21,7 @@ auto_archive_after_days=$(bashio::config 'auto_archive_after_days')
 dismiss_unconfirmed_after_days=$(bashio::config 'dismiss_unconfirmed_after_days')
 trusted_senders=$(bashio::config 'trusted_senders')
 ignore_senders=$(bashio::config 'ignore_senders')
+allowed_senders=$(bashio::config 'allowed_senders')
 seventeentrack_api_key=$(bashio::config 'seventeentrack_api_key')
 track123_api_key=$(bashio::config 'track123_api_key')
 
@@ -30,6 +32,7 @@ export AUTO_ARCHIVE_AFTER_DAYS="${auto_archive_after_days}"
 export DISMISS_UNCONFIRMED_AFTER_DAYS="${dismiss_unconfirmed_after_days}"
 export TRUSTED_SENDERS="${trusted_senders}"
 export IGNORE_SENDERS="${ignore_senders}"
+export ALLOWED_SENDERS="${allowed_senders}"
 export SEVENTEENTRACK_API_KEY="${seventeentrack_api_key}"
 export TRACK123_API_KEY="${track123_api_key}"
 

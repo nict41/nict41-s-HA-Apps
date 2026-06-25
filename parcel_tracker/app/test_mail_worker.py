@@ -48,6 +48,8 @@ class _FakeConn:
         self.logged_out = False
         self.selected_folders = []
         self._current_folder = None
+        self.search_criteria = None
+        self.fetch_calls: list[tuple[int, str]] = []
 
     def select(self, folder, readonly=False):
         self.selected_folders.append(folder)
@@ -62,12 +64,14 @@ class _FakeConn:
         return self._messages
 
     def search(self, charset, *criteria):
+        self.search_criteria = criteria
         if self._fail_search:
             return "NO", [b""]
         nums = b" ".join(str(n).encode() for n in self._active_messages())
         return "OK", [nums]
 
     def fetch(self, num, parts):
+        self.fetch_calls.append((int(num), parts))
         raw = self._active_messages().get(int(num))
         if raw is None:
             return "NO", [None]
@@ -342,3 +346,154 @@ def test_sync_account_respects_ignore_senders(monkeypatch):
     assert result["scanned"] == 1
     assert result["new_candidates"] == 0
     assert db.list_parcels() == []
+
+
+def test_sync_account_skips_full_body_fetch_for_already_processed_message(monkeypatch):
+    # The whole point of the header-first fetch is that a message already
+    # seen on a prior cycle never has its (much larger) body re-fetched -
+    # only the cheap headers-only FETCH happens for it.
+    raw = _raw_email(
+        "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-dup2@aliexpress.com>"
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+    assert fake_conn.fetch_calls.count((1, mail_worker._BODY_FETCH_PARTS)) == 1
+
+    fake_conn.fetch_calls.clear()
+    mail_worker.sync_mailbox()
+
+    assert fake_conn.fetch_calls == [(1, mail_worker._HEADER_FETCH_PARTS)]
+
+
+def test_sync_account_skips_full_body_fetch_for_ignored_sender(monkeypatch):
+    raw = _raw_email(
+        "newsletter@noisyretailer.com",
+        "Your parcel is on its way",
+        "Tracking Number: LP00123456789CN",
+        "<msg-ignored2@noisyretailer.com>",
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+    monkeypatch.setattr(mail_worker, "IGNORE_SENDERS", frozenset({"noisyretailer.com"}))
+
+    mail_worker.sync_mailbox()
+
+    assert fake_conn.fetch_calls == [(1, mail_worker._HEADER_FETCH_PARTS)]
+
+
+def test_sync_account_fetches_body_for_a_new_unignored_message(monkeypatch):
+    raw = _raw_email(
+        "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-new@aliexpress.com>"
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    assert fake_conn.fetch_calls == [
+        (1, mail_worker._HEADER_FETCH_PARTS),
+        (1, mail_worker._BODY_FETCH_PARTS),
+    ]
+
+
+def test_from_search_terms_single_domain():
+    assert mail_worker._from_search_terms(["a.com"]) == ["FROM", "a.com"]
+
+
+def test_from_search_terms_two_domains():
+    assert mail_worker._from_search_terms(["a.com", "b.com"]) == [
+        "OR",
+        "FROM",
+        "a.com",
+        "FROM",
+        "b.com",
+    ]
+
+
+def test_from_search_terms_three_domains_nests_or():
+    # IMAP's OR search key takes exactly two operands, so 3+ alternatives
+    # need right-nesting - this is what lets a flat instruction list parse
+    # correctly without explicit parenthesization.
+    assert mail_worker._from_search_terms(["a.com", "b.com", "c.com"]) == [
+        "OR",
+        "FROM",
+        "a.com",
+        "OR",
+        "FROM",
+        "b.com",
+        "FROM",
+        "c.com",
+    ]
+
+
+def test_search_criteria_without_allowed_senders_is_just_since(monkeypatch):
+    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset())
+    assert mail_worker._search_criteria("01-Jan-2024") == ["SINCE", "01-Jan-2024"]
+
+
+def test_search_criteria_with_allowed_senders_adds_from_terms(monkeypatch):
+    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset({"b.com", "a.com"}))
+    assert mail_worker._search_criteria("01-Jan-2024") == [
+        "SINCE",
+        "01-Jan-2024",
+        "OR",
+        "FROM",
+        "a.com",
+        "FROM",
+        "b.com",
+    ]
+
+
+def test_sync_folder_passes_allowed_senders_into_imap_search(monkeypatch):
+    fake_conn = _FakeConn({})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset({"aliexpress.com"}))
+
+    mail_worker.sync_mailbox()
+
+    assert "FROM" in fake_conn.search_criteria
+    assert "aliexpress.com" in fake_conn.search_criteria
+
+
+def test_get_progress_initial_state():
+    progress = mail_worker.get_progress()
+    assert progress == {"running": False, "checked": 0, "total": 0}
+
+
+def test_sync_mailbox_reports_progress_after_completion(monkeypatch):
+    raw_a = _raw_email(
+        "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-prog-a@aliexpress.com>"
+    )
+    raw_b = _raw_email(
+        "ebay@ebay.com", "Your item has shipped", "Tracking number: 1Z999AA10123456784 Carrier: UPS", "<msg-prog-b@ebay.com>"
+    )
+    fake_conn = _FakeConn({1: raw_a, 2: raw_b})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    progress = mail_worker.get_progress()
+    assert progress == {"running": False, "checked": 2, "total": 2}
+
+
+def test_sync_mailbox_resets_progress_between_cycles(monkeypatch):
+    raw = _raw_email(
+        "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-prog-reset@aliexpress.com>"
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+    mail_worker.sync_mailbox()
+
+    # The second cycle re-scans the same (now already-processed) message, so
+    # progress should reflect just that cycle, not accumulate across cycles.
+    assert mail_worker.get_progress() == {"running": False, "checked": 1, "total": 1}

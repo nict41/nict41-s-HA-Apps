@@ -138,6 +138,17 @@ def test_sync_without_imap_configured_does_not_crash():
     assert db.get_state("last_sync_at") is not None
 
 
+def test_sync_status_reports_progress():
+    # mail_worker's progress state is process-global and other test modules
+    # exercise it too, so this only checks the endpoint's shape/wiring - the
+    # actual checked/total bookkeeping is covered in test_mail_worker.py.
+    resp = client.get("/sync/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert set(body.keys()) == {"running", "checked", "total"}
+    assert body["running"] is False
+
+
 def test_api_parcels_returns_json():
     db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
     resp = client.get("/api/parcels")

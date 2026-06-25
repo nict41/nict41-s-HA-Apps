@@ -102,6 +102,7 @@ The remaining options apply across all configured mailboxes:
 | `dismiss_unconfirmed_after_days` | `3` | Auto-dismiss a candidate this many days after a tracking provider first checks it without ever confirming it's a real number. `0` disables. Only applies when a tracking provider is configured. |
 | `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
 | `ignore_senders` | _(blank)_ | Comma-separated sender domains to skip entirely. |
+| `allowed_senders` | _(blank)_ | Comma-separated sender domains to scan exclusively - everything else is excluded before it's even fetched, speeding up mail checks. Leave blank to scan every sender. |
 | `seventeentrack_api_key` | _(blank)_ | Optional [17track](https://www.17track.net/en/api) API key for live status. |
 | `track123_api_key` | _(blank)_ | Optional [Track123](https://www.track123.com/) API key for live status. |
 
@@ -160,7 +161,8 @@ scratch. If it came from an email, that email is re-scanned and re-detected
 on the next mail check rather than being skipped as already processed.
 
 "**Check mail now**" runs a sync immediately instead of waiting for the
-next scheduled check.
+next scheduled check, showing a live "checked X/Y" count for however long
+it takes.
 
 A **Data management** menu near the top of the dashboard lets you export
 every tracked parcel as a JSON file, or wipe all parcels and sync history

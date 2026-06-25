@@ -315,11 +315,26 @@
     // The sync POST blocks (real IMAP/HTTP I/O) until the redirect comes
     // back, so without this the button just sits there looking unclicked
     // for however long the check takes - this gives immediate feedback
-    // that the click registered and a sync is in progress.
+    // that the click registered and a sync is in progress. While it runs,
+    // poll /sync/status for a live "checked X/Y" count instead of leaving
+    // the label static for however long the check takes.
     document.getElementById("sync-form").addEventListener("submit", function () {
       document.getElementById("sync-button").disabled = true;
       document.getElementById("sync-spinner").hidden = false;
-      document.getElementById("sync-button-label").textContent = "Checking mail…";
+      var label = document.getElementById("sync-button-label");
+      label.textContent = "Checking mail…";
+
+      var poll = setInterval(function () {
+        fetch("sync/status")
+          .then(function (r) { return r.json(); })
+          .then(function (progress) {
+            if (progress.total > 0) {
+              label.textContent = "Checking mail… (" + progress.checked + "/" + progress.total + ")";
+            }
+            if (!progress.running) clearInterval(poll);
+          })
+          .catch(function () { clearInterval(poll); });
+      }, 1000);
     });
 
     // The tracking_number column is globally unique, so re-adding a number

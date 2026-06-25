@@ -40,6 +40,13 @@ configuration:
   ignore_senders:
     name: Ignored sender domains
     description: Comma-separated sender domains to skip entirely, e.g. noisy newsletters.
+  allowed_senders:
+    name: Allowed sender domains
+    description: >-
+      Optional. Comma-separated sender domains to scan exclusively - everything
+      else is excluded before it's even fetched, which speeds up mail checks on
+      a general-purpose inbox where shipping notifications only come from a
+      known handful of senders. Leave blank (the default) to scan every sender.
   seventeentrack_api_key:
     name: 17track API key
     description: >-

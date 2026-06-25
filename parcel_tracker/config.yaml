@@ -1,5 +1,5 @@
 name: "Parcel Tracker"
-version: "0.6.10"
+version: "0.6.11"
 slug: "parcel_tracker"
 description: "Automatically detects tracking numbers from your email and tracks deliveries"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/parcel_tracker"
@@ -25,6 +25,7 @@ options:
   dismiss_unconfirmed_after_days: 3
   trusted_senders: ""
   ignore_senders: ""
+  allowed_senders: ""
   seventeentrack_api_key: ""
   track123_api_key: ""
 schema:
@@ -42,5 +43,6 @@ schema:
   dismiss_unconfirmed_after_days: int(0,90)
   trusted_senders: str
   ignore_senders: str
+  allowed_senders: str
   seventeentrack_api_key: password
   track123_api_key: password

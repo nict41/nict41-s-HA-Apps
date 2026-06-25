@@ -7,12 +7,23 @@ header rather than IMAP UID, since UIDs are only stable within a single
 UIDVALIDITY epoch and that epoch can change (e.g. if the mail provider
 rebuilds the folder), which would otherwise risk silently re-processing
 (or skipping) messages after a reconnect.
+
+Every message returned by the date-bounded SEARCH is fetched twice at
+most: a small headers-only FETCH first (Message-ID/From/Subject/Date),
+cheap enough to do for the whole lookback window every cycle, followed by
+a full-body FETCH only for messages that turn out to be new and not from
+an ignored sender. Without this split, every message in the lookback
+window - including ones already processed on a prior cycle - would have
+its entire body (HTML, embedded images, attachments) pulled over the wire
+again on every single poll, which is the main reason a mail check can be
+slow on a busy or long-lookback inbox.
 """
 
 import email
 import imaplib
 import json
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from email.header import decode_header
 from email.message import Message
@@ -69,6 +80,73 @@ TRUSTED_SENDERS = frozenset(
 IGNORE_SENDERS = frozenset(
     d.strip().lower() for d in os.environ.get("IGNORE_SENDERS", "").split(",") if d.strip()
 )
+
+# Comma-separated sender domains to scan exclusively - everything else is
+# excluded straight out of the IMAP SEARCH itself, before any FETCH happens,
+# rather than fetched and then discarded. Left blank (the default), every
+# sender is scanned as before. Most useful on a general-purpose inbox where
+# shipping notifications only ever come from a known handful of senders.
+ALLOWED_SENDERS = frozenset(
+    d.strip().lower() for d in os.environ.get("ALLOWED_SENDERS", "").split(",") if d.strip()
+)
+
+
+def _from_search_terms(domains: list[str]) -> list[str]:
+    """Builds an IMAP SEARCH term matching any of the given sender domains:
+    `FROM d1` for one domain, or a right-nested `OR FROM d1 OR FROM d2 ...
+    FROM dN` chain for several - IMAP's OR takes exactly two operands, so 3+
+    alternatives need nesting, but the grammar parses this flat chain
+    correctly without explicit parentheses since each operand is itself a
+    complete search-key (and "OR ..." is one). FROM matches as a substring
+    against the raw header, same as IMAP servers do natively, so a
+    subdomain like notice.aliexpress.com still matches an aliexpress.com
+    entry."""
+    terms: list[str] = []
+    for i, domain in enumerate(domains):
+        if i < len(domains) - 1:
+            terms.append("OR")
+        terms.extend(["FROM", domain])
+    return terms
+
+
+def _search_criteria(since: str) -> list[str]:
+    criteria = ["SINCE", since]
+    if ALLOWED_SENDERS:
+        criteria.extend(_from_search_terms(sorted(ALLOWED_SENDERS)))
+    return criteria
+
+
+# Lets the dashboard poll for a live "checked X of Y" count while a sync is
+# running, instead of just showing a spinner for however long the mail check
+# takes. Guarded by a lock since the sync itself runs on a worker thread
+# (via run_in_threadpool) while the status poll runs on the main event loop.
+_progress_lock = threading.Lock()
+_progress = {"running": False, "checked": 0, "total": 0}
+
+
+def get_progress() -> dict:
+    with _progress_lock:
+        return dict(_progress)
+
+
+def _progress_start() -> None:
+    with _progress_lock:
+        _progress.update(running=True, checked=0, total=0)
+
+
+def _progress_finish() -> None:
+    with _progress_lock:
+        _progress["running"] = False
+
+
+def _progress_add_total(count: int) -> None:
+    with _progress_lock:
+        _progress["total"] += count
+
+
+def _progress_increment_checked() -> None:
+    with _progress_lock:
+        _progress["checked"] += 1
 
 
 def _decode(value: str | None) -> str:
@@ -148,6 +226,17 @@ def _connect(account: dict) -> imaplib.IMAP4:
     return conn
 
 
+_HEADER_FETCH_PARTS = "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID FROM SUBJECT DATE)])"
+_BODY_FETCH_PARTS = "(RFC822)"
+
+
+def _fetch_part(conn: imaplib.IMAP4, num: bytes, parts: str) -> bytes | None:
+    status, msg_data = conn.fetch(num, parts)
+    if status != "OK" or not msg_data:
+        return None
+    return _message_bytes(msg_data[0])
+
+
 def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> dict:
     scanned = 0
     new_candidates = 0
@@ -158,60 +247,74 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
     if status != "OK":
         return {"ok": False, "error": f"{label}/{folder}: select failed: {status}", "new_candidates": 0, "scanned": 0}
 
-    status, data = conn.search(None, "SINCE", since)
+    status, data = conn.search(None, *_search_criteria(since))
     if status != "OK":
         return {"ok": False, "error": f"{label}/{folder}: search failed: {status}", "new_candidates": 0, "scanned": 0}
 
     message_nums = data[0].split()
+    _progress_add_total(len(message_nums))
+
     for num in message_nums:
-        status, msg_data = conn.fetch(num, "(RFC822)")
-        if status != "OK" or not msg_data:
-            continue
-        raw = _message_bytes(msg_data[0])
-        if not raw:
-            continue
-        scanned += 1
-        msg = email.message_from_bytes(raw)
+        try:
+            # Headers only first - cheap enough to do for every message in
+            # the lookback window every cycle. Only a message that turns out
+            # to be new and not ignored is worth the much costlier full-body
+            # fetch below.
+            header_raw = _fetch_part(conn, num, _HEADER_FETCH_PARTS)
+            if not header_raw:
+                continue
+            scanned += 1
+            header_msg = email.message_from_bytes(header_raw)
 
-        message_id = msg.get("Message-ID", "").strip()
-        if not message_id:
-            # Fall back to a synthetic id so messages without one (rare,
-            # but seen from some legacy senders) still get deduped.
-            message_id = f"{msg.get('From', '')}|{msg.get('Date', '')}|{msg.get('Subject', '')}"
-        if db.is_processed(message_id):
-            continue
+            message_id = header_msg.get("Message-ID", "").strip()
+            if not message_id:
+                # Fall back to a synthetic id so messages without one (rare,
+                # but seen from some legacy senders) still get deduped.
+                message_id = (
+                    f"{header_msg.get('From', '')}|{header_msg.get('Date', '')}|"
+                    f"{header_msg.get('Subject', '')}"
+                )
+            if db.is_processed(message_id):
+                continue
 
-        sender = _decode(msg.get("From", ""))
-        if carriers.sender_domain(sender) in IGNORE_SENDERS:
+            sender = _decode(header_msg.get("From", ""))
+            if carriers.sender_domain(sender) in IGNORE_SENDERS:
+                db.mark_processed(message_id)
+                continue
+
+            raw = _fetch_part(conn, num, _BODY_FETCH_PARTS)
+            if not raw:
+                continue
+            msg = email.message_from_bytes(raw)
+
+            subject = _decode(header_msg.get("Subject", ""))
+            body_text = _extract_body(msg)
+
+            candidates = carriers.detect_candidates(
+                sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
+            )
+            for candidate in candidates:
+                initial_status = (
+                    db.STATUS_ACTIVE
+                    if candidate.confidence >= carriers.CONFIRM_THRESHOLD
+                    else db.STATUS_PENDING
+                )
+                db.upsert_parcel(
+                    tracking_number=candidate.tracking_number,
+                    carrier_name=candidate.carrier_name,
+                    description=candidate.description,
+                    confidence=candidate.confidence,
+                    source_message_id=message_id,
+                    initial_status=initial_status,
+                    email_sender=sender,
+                    email_subject=subject,
+                    email_body=body_text[:MAX_EMAIL_BODY_CHARS],
+                )
+                new_candidates += 1
+
             db.mark_processed(message_id)
-            continue
-
-        subject = _decode(msg.get("Subject", ""))
-        body_text = _extract_body(msg)
-
-        candidates = carriers.detect_candidates(
-            sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
-        )
-        for candidate in candidates:
-            initial_status = (
-                db.STATUS_ACTIVE
-                if candidate.confidence >= carriers.CONFIRM_THRESHOLD
-                else db.STATUS_PENDING
-            )
-            db.upsert_parcel(
-                tracking_number=candidate.tracking_number,
-                carrier_name=candidate.carrier_name,
-                description=candidate.description,
-                confidence=candidate.confidence,
-                source_message_id=message_id,
-                initial_status=initial_status,
-                email_sender=sender,
-                email_subject=subject,
-                email_body=body_text[:MAX_EMAIL_BODY_CHARS],
-            )
-            new_candidates += 1
-
-        db.mark_processed(message_id)
+        finally:
+            _progress_increment_checked()
 
     return {"ok": True, "error": None, "new_candidates": new_candidates, "scanned": scanned}
 
@@ -266,19 +369,23 @@ def sync_mailbox() -> dict:
     if not MAILBOXES:
         return {"ok": False, "error": "no mailboxes configured", "new_candidates": 0, "scanned": 0}
 
-    scanned = 0
-    new_candidates = 0
-    errors = []
-    for account in MAILBOXES:
-        result = _sync_account(account)
-        scanned += result["scanned"]
-        new_candidates += result["new_candidates"]
-        if not result["ok"]:
-            errors.append(result["error"])
+    _progress_start()
+    try:
+        scanned = 0
+        new_candidates = 0
+        errors = []
+        for account in MAILBOXES:
+            result = _sync_account(account)
+            scanned += result["scanned"]
+            new_candidates += result["new_candidates"]
+            if not result["ok"]:
+                errors.append(result["error"])
 
-    return {
-        "ok": not errors,
-        "error": "; ".join(errors) if errors else None,
-        "new_candidates": new_candidates,
-        "scanned": scanned,
-    }
+        return {
+            "ok": not errors,
+            "error": "; ".join(errors) if errors else None,
+            "new_candidates": new_candidates,
+            "scanned": scanned,
+        }
+    finally:
+        _progress_finish()

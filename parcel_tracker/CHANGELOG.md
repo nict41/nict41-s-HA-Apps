@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.11
+
+- Sped up mail checks: every message in the lookback window used to have
+  its *entire* body (HTML, embedded images, attachments) fetched over IMAP
+  on every single check, even ones already processed on a prior cycle -
+  the dedup check only happened afterwards. A small headers-only fetch
+  (Message-ID/From/Subject/Date) now happens first, cheap enough to do for
+  the whole lookback window every time, and the much costlier full-body
+  fetch only follows for messages that turn out to be new and not from an
+  ignored sender.
+- Added an `allowed_senders` option: a comma-separated list of sender
+  domains to scan exclusively. When set, everything else is excluded
+  straight out of the IMAP search itself, before any fetch happens at all
+  - the fastest option on a general-purpose inbox where shipping
+  notifications only ever come from a known handful of senders. Leave
+  blank (the default) to keep scanning every sender, as before.
+- "Check mail now" now shows a live "checked X/Y" count for however long
+  the check takes, instead of just a spinner with no sense of progress.
+
 ## 0.6.10
 
 - Cainiao/AliExpress Standard Shipping numbers (the `LP`/`JJD`-prefixed

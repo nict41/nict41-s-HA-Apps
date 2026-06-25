@@ -200,6 +200,14 @@ async def trigger_sync():
     return RedirectResponse("./", status_code=303)
 
 
+@app.get("/sync/status")
+async def sync_status():
+    # Polled by the dashboard while a sync is in flight, to show a live
+    # "checked X of Y" count instead of a bare spinner for however long the
+    # mail check takes.
+    return JSONResponse(mail_worker.get_progress())
+
+
 @app.post("/add")
 async def add_parcel(
     tracking_number: str = Form(...),
