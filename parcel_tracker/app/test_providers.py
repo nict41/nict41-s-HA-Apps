@@ -173,3 +173,42 @@ def test_track123_omits_numbers_entirely_when_request_fails(monkeypatch):
     results = track123.get_track_info(["ANY2"])
 
     assert results == {}
+
+
+def test_track123_surfaces_rejection_reason_as_status_detail(monkeypatch):
+    # A number Track123 explicitly rejects (rather than just having no data
+    # for) gets that reason shown instead of silently staying "No status
+    # yet" with no indication of why it's stuck.
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": {"content": []},
+                "rejected": [
+                    {"trackNo": "REJ1", "error": {"code": "A0400", "msg": "The order number has been imported"}}
+                ],
+            }
+        },
+    )
+
+    results = track123.get_track_info(["REJ1"])
+
+    assert results["REJ1"]["confirmed"] is False
+    assert results["REJ1"]["status_detail"] == "Track123: A0400: The order number has been imported"
+
+
+def test_track123_register_logs_rejection_reason(monkeypatch, capsys):
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {"rejected": [{"trackNo": "REJ2", "error": {"code": "A0400", "msg": "quota exceeded"}}]}
+        },
+    )
+
+    track123.register(["REJ2"])
+
+    out = capsys.readouterr().out
+    assert "REJ2" in out
+    assert "quota exceeded" in out

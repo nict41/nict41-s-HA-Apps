@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.4
+
+- A number Track123 explicitly rejects (e.g. quota exhausted, already
+  imported under a different state) is no longer indistinguishable from one
+  it simply has no data for yet - it previously just sat at "No status yet"
+  forever with no clue why, even though the carrier's own tracking page (via
+  the "Track" link) showed real updates. The rejection reason Track123
+  returns is now shown as the status text, and also logged, including for
+  registration-time rejections which have no status field to show it in.
+
 ## 0.6.3
 
 - "Check mail now" now shows a spinner and disables the button for the

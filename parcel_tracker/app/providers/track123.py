@@ -63,13 +63,37 @@ def _chunks(items: list, size: int):
         yield items[i : i + size]
 
 
+def _rejection_reasons(response: dict) -> dict[str, str]:
+    """Alongside `accepted`, Track123 can return a `rejected` array for
+    numbers it couldn't register or find, each with an error code/message -
+    otherwise indistinguishable from a number it simply has no data for yet.
+    Surfaced so a permanently-rejected number doesn't just sit unexplained."""
+    rejected = (response.get("data") or {}).get("rejected") or response.get("rejected") or []
+    reasons: dict[str, str] = {}
+    for entry in rejected:
+        number = entry.get("trackNo") or entry.get("number")
+        if not number:
+            continue
+        error = entry.get("error") or {}
+        code = error.get("code") or entry.get("code")
+        msg = error.get("msg") or error.get("message") or entry.get("msg")
+        if code and msg:
+            reasons[number] = f"{code}: {msg}"
+        elif msg or code:
+            reasons[number] = msg or code
+    return reasons
+
+
 def register(tracking_numbers: list[str]) -> None:
     """Register numbers for tracking. Safe to call repeatedly - Track123
     no-ops on numbers it's already tracking."""
     if not API_KEY or not tracking_numbers:
         return
     for chunk in _chunks(tracking_numbers, _MAX_NUMBERS_PER_REQUEST):
-        _post("tk/v2.1/track/import", [{"trackNo": n} for n in chunk])
+        response = _post("tk/v2.1/track/import", [{"trackNo": n} for n in chunk])
+        if response:
+            for number, reason in _rejection_reasons(response).items():
+                print(f"[parcel_tracker] Track123 declined to register '{number}': {reason}")
         time.sleep(_REQUEST_DELAY_SECONDS)
 
 
@@ -125,12 +149,17 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
         accepted = ((response.get("data") or {}).get("accepted") or {}).get("content") or []
         by_number = {entry.get("trackNo"): entry for entry in accepted if entry.get("trackNo")}
+        reasons = _rejection_reasons(response)
+        for number, reason in reasons.items():
+            print(f"[parcel_tracker] Track123 rejected '{number}': {reason}")
 
         for number in chunk:
             entry = by_number.get(number) or {}
             leg = _logistics_leg(entry)
             status, detail, event_time = _map_status(entry, leg)
             carrier_name = leg.get("courierNameEN") or None
+            if not detail and number in reasons:
+                detail = f"Track123: {reasons[number]}"
             results[number] = {
                 "status": status,
                 "status_detail": detail,
