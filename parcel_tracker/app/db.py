@@ -215,6 +215,47 @@ def delete_parcel(parcel_id: int) -> None:
         conn.execute("DELETE FROM parcels WHERE id = ?", (parcel_id,))
 
 
+def reset_parcel(parcel_id: int) -> None:
+    """Puts a parcel back to a freshly-detected state, so it goes through
+    confirmation and tracking-provider lookup again from scratch - for when
+    a parcel's status/carrier ended up wrong and needs a do-over rather than
+    a delete-and-re-add.
+
+    If it came from an email, that email's Message-ID is cleared from
+    processed_messages too, so the next "Check mail now" re-scans it and
+    re-runs detection on its actual content instead of leaving the parcel's
+    stale fields untouched (a re-scanned message that's still marked
+    processed would otherwise just be skipped). confidence is reset to 0 so
+    that re-detection - whatever confidence it comes back with - is always
+    treated as an improvement and allowed to overwrite carrier_name/
+    description, the same way a brand new candidate would."""
+    parcel = get_parcel(parcel_id)
+    if not parcel:
+        return
+    with _connect() as conn:
+        if parcel["source_message_id"]:
+            conn.execute(
+                "DELETE FROM processed_messages WHERE message_id = ?", (parcel["source_message_id"],)
+            )
+        conn.execute(
+            "UPDATE parcels SET status = ?, status_detail = NULL, last_event_time = NULL, "
+            "estimated_delivery = NULL, confidence = 0, provider_confirmed = 0, "
+            "first_checked_at = NULL, tracking_provider = NULL, delivered_at = NULL, "
+            "archived_at = NULL, updated_at = ? WHERE id = ?",
+            (STATUS_PENDING, now_iso(), parcel_id),
+        )
+
+
+def reset_all_data() -> None:
+    """Wipes every tracked parcel and mail-sync bookkeeping, for a full
+    factory reset. Irreversible - callers are responsible for confirming
+    this is really what's wanted before calling it."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM parcels")
+        conn.execute("DELETE FROM processed_messages")
+        conn.execute("DELETE FROM app_state")
+
+
 def parcels_needing_refresh() -> list[dict]:
     """Pending candidates are included too, so the provider can correct their
     carrier guess and auto-confirm them once it positively recognises the

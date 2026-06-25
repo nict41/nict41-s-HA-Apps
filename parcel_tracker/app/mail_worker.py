@@ -126,14 +126,14 @@ def _message_bytes(fetch_part) -> bytes | None:
 
 
 def _account_folders(account: dict) -> list[str]:
-    """A mailbox normally scans just `folder` (default INBOX), but can list
-    several under `folders` instead - e.g. to also cover a "Shipping" label
-    or an "Archive" folder shipping notifications get filtered into."""
+    """A mailbox scans `folders` - e.g. INBOX plus a "Shipping" label or an
+    "Archive" folder shipping notifications get filtered into. Defaults to
+    just INBOX when left blank."""
     folders = account.get("folders") or []
     if isinstance(folders, str):
         folders = [folders]
     folders = [f.strip() for f in folders if f and str(f).strip()]
-    return folders or [account.get("folder") or "INBOX"]
+    return folders or ["INBOX"]
 
 
 def _connect(account: dict) -> imaplib.IMAP4:

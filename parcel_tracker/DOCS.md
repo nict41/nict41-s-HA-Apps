@@ -90,8 +90,7 @@ Under **Mailboxes**, add one entry per email account to scan:
 | `use_ssl` | `true` | Use IMAP over SSL. Turn off for STARTTLS. |
 | `username` | _(required)_ | Mailbox login, usually the full email address. |
 | `password` | _(required)_ | Mailbox password or app-specific password. |
-| `folder` | `INBOX` | Folder to scan. |
-| `folders` | _(blank)_ | Optional list of folders to scan instead of just `folder` - e.g. `INBOX` plus a "Shipping" label or filtered-into folder. |
+| `folders` | `INBOX` | List of folders to scan - e.g. `INBOX` plus a "Shipping" label or filtered-into folder. Defaults to just `INBOX` when left blank. |
 
 The remaining options apply across all configured mailboxes:
 
@@ -150,10 +149,23 @@ Open the app's ingress panel from your sidebar:
   This includes numbers auto-dismissed because a tracking provider never
   confirmed them - if that happens to a real parcel, just re-add it by hand.
 - An **add parcel** form lets you track a number manually, e.g. for a
-  shipment that didn't arrive by email at all.
+  shipment that didn't arrive by email at all. Re-adding a tracking number
+  that's already tracked asks for confirmation first, since it would
+  otherwise silently overwrite that parcel's carrier and description.
+
+Every tracked parcel also has a **Reset** action, which puts it back into
+**Needs confirmation** and clears its tracking status - useful if a parcel
+got mismatched to the wrong carrier, or you just want it re-checked from
+scratch. If it came from an email, that email is re-scanned and re-detected
+on the next mail check rather than being skipped as already processed.
 
 "**Check mail now**" runs a sync immediately instead of waiting for the
 next scheduled check.
+
+A **Data management** menu near the top of the dashboard lets you export
+every tracked parcel as a JSON file, or wipe all parcels and sync history
+to start fresh - the latter requires typing `RESET` to confirm, since it
+can't be undone.
 
 ## Home Assistant entities
 

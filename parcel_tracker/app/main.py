@@ -1,3 +1,4 @@
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -6,7 +7,7 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -161,11 +162,22 @@ def _dashboard_context() -> dict:
     active = db.list_parcels([db.STATUS_ACTIVE, db.STATUS_EXCEPTION])
     delivered = db.list_parcels([db.STATUS_DELIVERED])
     archived = db.list_parcels([db.STATUS_ARCHIVED, db.STATUS_DISMISSED])
+    # Lets the add-parcel form warn before silently overwriting a tracking
+    # number that's already tracked (the DB's uniqueness constraint is
+    # global, not scoped to a status, so a dismissed/archived entry counts
+    # as "already exists" too). Escaping "</" guards against breaking out of
+    # the <script> tag this gets embedded in if a carrier/description string
+    # ever contained it.
+    existing_parcels = {
+        p["tracking_number"]: {"status": p["status"], "carrier_name": p["carrier_name"]}
+        for p in pending + active + delivered + archived
+    }
     return {
         "pending": pending,
         "active": active,
         "delivered": delivered,
         "archived": archived,
+        "existing_parcels_json": json.dumps(existing_parcels).replace("</", "<\\/"),
         "last_sync_at": db.get_state("last_sync_at"),
         "last_sync_summary": db.get_state("last_sync_summary"),
         "tracking_providers_configured": tracking_providers_configured(),
@@ -231,6 +243,33 @@ async def delete(parcel_id: int = Form(...)):
     return RedirectResponse("./", status_code=303)
 
 
+@app.post("/reset")
+async def reset(parcel_id: int = Form(...)):
+    db.reset_parcel(parcel_id)
+    return RedirectResponse("./", status_code=303)
+
+
+@app.post("/admin/reset-all")
+async def admin_reset_all(confirm_text: str = Form("")):
+    # A second, server-side check behind the page's own confirmation prompt -
+    # this wipes every parcel and all mail-sync bookkeeping with no undo, so
+    # a bare POST (e.g. a stray retry, or anyone bypassing the page's JS)
+    # shouldn't be enough on its own to trigger it.
+    if confirm_text.strip() == "RESET":
+        db.reset_all_data()
+    return RedirectResponse("./", status_code=303)
+
+
 @app.get("/api/parcels")
 async def api_parcels():
     return JSONResponse({"parcels": db.list_parcels()})
+
+
+@app.get("/export")
+async def export_data():
+    payload = json.dumps({"parcels": db.list_parcels()}, indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=parcel-tracker-export.json"},
+    )

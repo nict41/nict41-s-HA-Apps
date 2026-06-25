@@ -101,6 +101,32 @@
     }
     .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .sync-row .sub { margin: 0; }
+    .data-menu {
+      background: #1b1f27;
+      border-radius: 10px;
+      border: 1px solid #2a2f3a;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+    }
+    .data-menu summary { cursor: pointer; font-size: 0.85rem; color: #9aa0a6; }
+    .data-menu-body {
+      margin-top: 0.75rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+    }
+    .reset-all-form { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .reset-all-form input {
+      background: #111318;
+      border: 1px solid #383e4a;
+      border-radius: 6px;
+      color: #e3e3e3;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.82rem;
+      width: 7rem;
+    }
+    .reset-all-hint { color: #9aa0a6; font-size: 0.78rem; margin: 0 0 0.4rem; }
     button:disabled { opacity: 0.65; cursor: default; }
     .spinner {
       display: inline-block;
@@ -136,7 +162,21 @@
     </form>
   </div>
 
-  <form class="add-form" action="add" method="post">
+  <details class="data-menu">
+    <summary>Data management</summary>
+    <div class="data-menu-body">
+      <a class="link-btn" href="export">Export data (JSON)</a>
+      <div>
+        <p class="reset-all-hint">Type RESET below to enable wiping every parcel and sync history. This cannot be undone.</p>
+        <form class="reset-all-form" action="admin/reset-all" method="post" id="reset-all-form">
+          <input id="reset-all-confirm" name="confirm_text" placeholder="RESET" autocomplete="off" />
+          <button class="danger" type="submit" id="reset-all-button" disabled>Reset all data</button>
+        </form>
+      </div>
+    </div>
+  </details>
+
+  <form class="add-form" action="add" method="post" id="add-form">
     <div>
       <label for="tracking_number">Tracking number</label>
       <input id="tracking_number" name="tracking_number" required />
@@ -207,6 +247,10 @@
       </div>
       <div class="actions">
         <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
+        <form action="reset" method="post" class="reset-form">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Reset</button>
+        </form>
         <form action="archive" method="post">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
           <button type="submit">Archive</button>
@@ -229,6 +273,10 @@
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; delivered {{ p.delivered_at }}</div>
       </div>
       <div class="actions">
+        <form action="reset" method="post" class="reset-form">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Reset</button>
+        </form>
         <form action="archive" method="post">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
           <button type="submit">Archive</button>
@@ -249,6 +297,10 @@
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
       </div>
       <div class="actions">
+        <form action="reset" method="post" class="reset-form">
+          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+          <button type="submit">Reset</button>
+        </form>
         <form action="delete" method="post">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
           <button class="danger" type="submit">Delete</button>
@@ -268,6 +320,50 @@
       document.getElementById("sync-button").disabled = true;
       document.getElementById("sync-spinner").hidden = false;
       document.getElementById("sync-button-label").textContent = "Checking mail…";
+    });
+
+    // The tracking_number column is globally unique, so re-adding a number
+    // that's already tracked (in any state, including archived/dismissed)
+    // would otherwise silently overwrite its carrier/description with
+    // whatever's in the form, with no indication that happened.
+    var EXISTING_PARCELS = {{ existing_parcels_json | safe }};
+    document.getElementById("add-form").addEventListener("submit", function (e) {
+      var number = document.getElementById("tracking_number").value.trim();
+      var existing = EXISTING_PARCELS[number];
+      if (!existing) return;
+      var label = (existing.status || "").replace(/_/g, " ");
+      var ok = confirm(
+        'A parcel with tracking number "' + number + '" already exists (' + label +
+        (existing.carrier_name ? ", " + existing.carrier_name : "") + ').\n\n' +
+        "Adding it again will overwrite its carrier and description with what you just entered. Continue?"
+      );
+      if (!ok) e.preventDefault();
+    });
+
+    // Resetting discards the parcel's tracking history and carrier/status
+    // data (it goes back to needs-confirmation, to be re-detected from
+    // scratch), so it gets a confirmation prompt just like the other
+    // state-losing actions below.
+    document.querySelectorAll(".reset-form").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        if (!confirm("Reset this parcel? It will go back to needs-confirmation and lose its current tracking status.")) {
+          e.preventDefault();
+        }
+      });
+    });
+
+    // Wiping all data is irreversible, so the button stays disabled until
+    // the exact word RESET is typed - a stray click or Enter keypress alone
+    // can't trigger it. The server enforces the same check independently.
+    var resetAllConfirm = document.getElementById("reset-all-confirm");
+    var resetAllButton = document.getElementById("reset-all-button");
+    resetAllConfirm.addEventListener("input", function () {
+      resetAllButton.disabled = resetAllConfirm.value.trim() !== "RESET";
+    });
+    document.getElementById("reset-all-form").addEventListener("submit", function (e) {
+      if (!confirm("This will permanently delete every parcel and sync history. Continue?")) {
+        e.preventDefault();
+      }
     });
   </script>
 </body>

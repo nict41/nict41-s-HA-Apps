@@ -210,6 +210,64 @@ def test_auto_archive_delivered_respects_days_and_zero_disables():
     assert db.get_parcel(parcel_id)["status"] == db.STATUS_ARCHIVED
 
 
+def test_reset_parcel_clears_processed_message_and_state():
+    parcel_id = db.upsert_parcel(
+        "A", "UPS", "a", 0.9, "msg-1", db.STATUS_ACTIVE,
+        email_sender="ups@ups.com", email_subject="Shipped", email_body="body",
+    )
+    db.mark_processed("msg-1")
+    db.update_tracking_status(
+        parcel_id, status=db.STATUS_EXCEPTION, status_detail="Delayed",
+        last_event_time="2024-01-01T00:00:00Z", estimated_delivery="2024-01-05", confirmed=True,
+    )
+
+    db.reset_parcel(parcel_id)
+
+    assert not db.is_processed("msg-1")
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status"] == db.STATUS_PENDING
+    assert parcel["status_detail"] is None
+    assert parcel["last_event_time"] is None
+    assert parcel["estimated_delivery"] is None
+    assert parcel["confidence"] == 0
+    assert parcel["provider_confirmed"] == 0
+    assert parcel["first_checked_at"] is None
+    assert parcel["tracking_provider"] is None
+    # The email itself stays - only the lifecycle/tracking state resets.
+    assert parcel["email_body"] == "body"
+
+
+def test_reset_parcel_without_source_message_does_not_error():
+    parcel_id = db.upsert_parcel("A", "UPS", "a", 1.0, None, db.STATUS_ACTIVE)
+    db.reset_parcel(parcel_id)
+    assert db.get_parcel(parcel_id)["status"] == db.STATUS_PENDING
+
+
+def test_reset_parcel_clears_delivered_and_archived_at():
+    parcel_id = db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_DELIVERED)
+    db.archive_parcel(parcel_id)
+    db.reset_parcel(parcel_id)
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["delivered_at"] is None
+    assert parcel["archived_at"] is None
+
+
+def test_reset_parcel_missing_id_is_noop():
+    db.reset_parcel(999)  # should not raise
+
+
+def test_reset_all_data_clears_parcels_processed_messages_and_state():
+    db.upsert_parcel("A", "UPS", "a", 0.9, "msg-1", db.STATUS_ACTIVE)
+    db.mark_processed("msg-1")
+    db.set_state("last_sync_at", "2024-01-01T00:00:00Z")
+
+    db.reset_all_data()
+
+    assert db.list_parcels() == []
+    assert not db.is_processed("msg-1")
+    assert db.get_state("last_sync_at") is None
+
+
 def test_get_state_and_set_state_roundtrip():
     assert db.get_state("missing", "default") == "default"
     db.set_state("last_sync_at", "2024-01-01T00:00:00Z")

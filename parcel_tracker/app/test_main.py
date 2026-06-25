@@ -93,6 +93,45 @@ def test_delete_removes_parcel():
     assert db.get_parcel(parcel_id) is None
 
 
+def test_reset_puts_parcel_back_to_pending():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    resp = client.post("/reset", data={"parcel_id": parcel_id}, follow_redirects=False)
+    assert resp.status_code == 303
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status"] == db.STATUS_PENDING
+    assert parcel["confidence"] == 0
+
+
+def test_admin_reset_all_wipes_data_when_confirmed():
+    db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    resp = client.post("/admin/reset-all", data={"confirm_text": "RESET"}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert db.list_parcels() == []
+
+
+def test_admin_reset_all_does_nothing_without_exact_confirmation():
+    db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    client.post("/admin/reset-all", data={"confirm_text": "reset"})
+    client.post("/admin/reset-all", data={})
+    assert len(db.list_parcels()) == 1
+
+
+def test_export_returns_json_attachment_of_all_parcels():
+    db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    resp = client.get("/export")
+    assert resp.status_code == 200
+    assert "attachment" in resp.headers["content-disposition"]
+    body = resp.json()
+    assert len(body["parcels"]) == 1
+    assert body["parcels"][0]["tracking_number"] == "ABC123"
+
+
+def test_dashboard_includes_reset_button_for_active_parcel():
+    db.upsert_parcel("ABC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    html = client.get("/").text
+    assert "action=\"reset\"" in html
+
+
 def test_sync_without_imap_configured_does_not_crash():
     resp = client.post("/sync", follow_redirects=False)
     assert resp.status_code == 303

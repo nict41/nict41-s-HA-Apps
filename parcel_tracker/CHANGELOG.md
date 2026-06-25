@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.8
+
+- Removed the single-`folder` mailbox option. The `folders` list option
+  introduced in 0.6.0 covers the same need (and defaults to `INBOX` when
+  left blank), so configuring both was redundant - any mailbox still using
+  `folder` should switch to `folders` before upgrading.
+- Manually adding a tracking number that's already tracked (in any state,
+  including archived/dismissed) now asks for confirmation first, since the
+  tracking number column is unique and re-adding it would otherwise
+  silently overwrite that parcel's carrier and description.
+- Added a **Reset** action to every tracked parcel, which puts it back into
+  needs-confirmation and clears its tracking status - useful when a parcel
+  ended up mismatched to the wrong carrier, or you just want it picked up
+  fresh. If the parcel came from an email, that email is re-scanned and
+  re-detected on the next mail check instead of being skipped as already
+  processed.
+- Added a **Data management** menu to the dashboard, with an option to
+  export every tracked parcel as a JSON file, and an option to wipe all
+  parcels and sync history to start over completely - the latter requires
+  typing `RESET` to confirm, since it can't be undone.
+
 ## 0.6.7
 
 - Cainiao/AliExpress Standard Shipping numbers (the `LP`/`JJD`-prefixed

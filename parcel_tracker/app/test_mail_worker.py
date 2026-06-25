@@ -235,12 +235,8 @@ def test_account_folders_defaults_to_inbox():
     assert mail_worker._account_folders({}) == ["INBOX"]
 
 
-def test_account_folders_uses_singular_folder():
-    assert mail_worker._account_folders({"folder": "Shipping"}) == ["Shipping"]
-
-
 def test_account_folders_uses_folders_list():
-    assert mail_worker._account_folders({"folder": "INBOX", "folders": ["INBOX", "Shipping"]}) == [
+    assert mail_worker._account_folders({"folders": ["INBOX", "Shipping"]}) == [
         "INBOX",
         "Shipping",
     ]
