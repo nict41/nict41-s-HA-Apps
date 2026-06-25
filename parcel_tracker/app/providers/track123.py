@@ -73,10 +73,26 @@ def register(tracking_numbers: list[str]) -> None:
         time.sleep(_REQUEST_DELAY_SECONDS)
 
 
-def _map_status(entry: dict) -> tuple[str, str | None, str | None]:
+def _logistics_leg(entry: dict) -> dict:
+    """A cross-border parcel (e.g. AliExpress/Cainiao) is first handled by
+    an international leg (`localLogisticsInfo`), then handed off to a local
+    last-mile courier once it reaches the destination country -
+    `lastMileInfo.openApiWayBillInfo` mirrors `localLogisticsInfo`'s shape
+    but covers just that final leg, and only appears once the handoff has
+    actually happened. It holds the freshest events when present; relying
+    on `localLogisticsInfo` alone goes stale the moment a parcel moves past
+    the international leg it covers, even though the destination carrier's
+    own tracking page keeps showing new events."""
+    last_mile = (entry.get("lastMileInfo") or {}).get("openApiWayBillInfo") or {}
+    if last_mile.get("trackingDetails"):
+        return last_mile
+    return entry.get("localLogisticsInfo") or {}
+
+
+def _map_status(entry: dict, leg: dict) -> tuple[str, str | None, str | None]:
     status = _STATUS_MAP.get(entry.get("transitStatus") or "", "in_transit")
 
-    details = (entry.get("localLogisticsInfo") or {}).get("trackingDetails") or []
+    details = leg.get("trackingDetails") or []
     latest = details[0] if details else {}
     detail = latest.get("eventDetail")
     event_time = latest.get("eventTime")
@@ -112,8 +128,9 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
         for number in chunk:
             entry = by_number.get(number) or {}
-            status, detail, event_time = _map_status(entry)
-            carrier_name = (entry.get("localLogisticsInfo") or {}).get("courierNameEN") or None
+            leg = _logistics_leg(entry)
+            status, detail, event_time = _map_status(entry, leg)
+            carrier_name = leg.get("courierNameEN") or None
             results[number] = {
                 "status": status,
                 "status_detail": detail,

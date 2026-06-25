@@ -81,6 +81,82 @@ def test_track123_confirms_a_number_the_provider_recognizes(monkeypatch):
     assert results["REAL2"]["carrier_name"] == "Cainiao"
 
 
+def test_track123_prefers_last_mile_events_once_handed_off(monkeypatch):
+    # A cross-border parcel (e.g. Cainiao) hands off to a local last-mile
+    # courier once it reaches the destination country - lastMileInfo's
+    # events are the freshest ones at that point, even though
+    # localLogisticsInfo still has its (now-stale) international-leg event.
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "JJD1",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {
+                                "courierNameEN": "Cainiao",
+                                "trackingDetails": [
+                                    {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                                ],
+                            },
+                            "lastMileInfo": {
+                                "openApiWayBillInfo": {
+                                    "courierNameEN": "Royal Mail",
+                                    "trackingDetails": [
+                                        {"eventDetail": "Out for delivery", "eventTime": "2024-01-05T00:00:00Z"}
+                                    ],
+                                }
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    results = track123.get_track_info(["JJD1"])
+
+    assert results["JJD1"]["status_detail"] == "Out for delivery"
+    assert results["JJD1"]["carrier_name"] == "Royal Mail"
+
+
+def test_track123_falls_back_to_international_leg_before_last_mile_handoff(monkeypatch):
+    # lastMileInfo appears in the response shape even before the handoff
+    # happens, but with no trackingDetails yet - localLogisticsInfo is
+    # still the freshest source until that handoff actually occurs.
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "JJD2",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {
+                                "courierNameEN": "Cainiao",
+                                "trackingDetails": [
+                                    {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                                ],
+                            },
+                            "lastMileInfo": {"openApiWayBillInfo": {"trackingDetails": []}},
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    results = track123.get_track_info(["JJD2"])
+
+    assert results["JJD2"]["status_detail"] == "Departed facility"
+    assert results["JJD2"]["carrier_name"] == "Cainiao"
+
+
 def test_track123_marks_unrecognized_number_as_unconfirmed_rather_than_omitting_it(monkeypatch):
     monkeypatch.setattr(track123, "_post", lambda path, payload: {"data": {"accepted": {"content": []}}})
 

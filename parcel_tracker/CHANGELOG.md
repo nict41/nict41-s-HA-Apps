@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.2
+
+- Fixed Track123-tracked parcels getting stuck showing "in transit" with no
+  status text, despite the carrier's own tracking page showing real
+  updates. A cross-border parcel (e.g. AliExpress/Cainiao) is tracked by
+  Track123 in two legs: an international leg, then a local last-mile
+  courier once it reaches the destination country - and the last-mile
+  leg's events, which are the freshest ones once that handoff happens,
+  were never read, only the (by then stale) international leg's. Both legs
+  are now checked, preferring the last-mile leg's events and carrier name
+  once it has any.
+
 ## 0.6.1
 
 - Fixed the Lovelace card not showing up in the card picker, and failing
