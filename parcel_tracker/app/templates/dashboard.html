@@ -139,6 +139,14 @@
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
+    /* Setting `display` above on a class selector beats the browser's own
+       `[hidden] { display: none }` UA rule even at equal specificity, since
+       an author rule always wins over a UA rule regardless of source order -
+       so without this, the `hidden` attribute on #sync-spinner is silently
+       ignored and the spinner spins on every page load, sync or no sync. */
+    .spinner[hidden] {
+      display: none;
+    }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -319,38 +327,83 @@
     // they do happen. Submitting via fetch() instead keeps this page in
     // place for the duration of the sync, so the live count below is
     // actually visible, and only navigates (via reload) once it's done.
-    document.getElementById("sync-form").addEventListener("submit", function (e) {
-      e.preventDefault();
-      document.getElementById("sync-button").disabled = true;
-      document.getElementById("sync-spinner").hidden = false;
-      var label = document.getElementById("sync-button-label");
-      label.textContent = "Checking mail…";
+    var syncButton = document.getElementById("sync-button");
+    var syncSpinner = document.getElementById("sync-spinner");
+    var syncLabel = document.getElementById("sync-button-label");
+    var reloaded = false;
 
+    function showRunning() {
+      syncButton.disabled = true;
+      syncSpinner.hidden = false;
+    }
+
+    function reloadOnce() {
+      if (!reloaded) {
+        reloaded = true;
+        window.location.reload();
+      }
+    }
+
+    // run_sync_cycle() runs in a background thread once a sync is kicked
+    // off (POST /sync), independent of whatever HTTP request started it -
+    // so a sync the user triggered can still be running on the server long
+    // after the page (and its fetch()) that started it is gone, e.g.
+    // navigating away and back, or just reloading. Polling /sync/status -
+    // rather than only reacting to this page's own POST finishing - means
+    // this page always reflects the server's real state instead of
+    // defaulting to "Check mail now" while a sync is still in flight.
+    function pollUntilFinished() {
       var poll = setInterval(function () {
         fetch("sync/status")
           .then(function (r) { return r.json(); })
           .then(function (progress) {
+            if (!progress.running) {
+              clearInterval(poll);
+              reloadOnce();
+              return;
+            }
+            showRunning();
             // "mail" and "providers" are run_sync_cycle's two slow phases, in
             // order - without branching on stage here, the label would keep
             // saying "Checking mail…" (with a stale count) all through the
             // provider-refresh phase, which can easily outlast the mail scan.
             var stageLabel = progress.stage === "providers" ? "Checking carrier status…" : "Checking mail…";
-            if (progress.total > 0) {
-              label.textContent = stageLabel + " (" + progress.checked + "/" + progress.total + ")";
-            } else {
-              label.textContent = stageLabel;
-            }
+            syncLabel.textContent = progress.total > 0
+              ? stageLabel + " (" + progress.checked + "/" + progress.total + ")"
+              : stageLabel;
           })
           .catch(function () {});
       }, 1000);
+      return poll;
+    }
 
+    document.getElementById("sync-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      showRunning();
+      syncLabel.textContent = "Checking mail…";
+      var poll = pollUntilFinished();
+      // The POST's own completion is a faster signal than waiting for the
+      // next 1-second poll tick, so it gets its own direct reload too -
+      // reloadOnce() makes the two paths racing here harmless.
       fetch("sync", { method: "POST" })
         .catch(function () {})
         .finally(function () {
           clearInterval(poll);
-          window.location.reload();
+          reloadOnce();
         });
     });
+
+    // Covers exactly the navigate-away-and-back case above: on load, ask the
+    // server whether a sync is already running rather than assuming "Check
+    // mail now" (the page's default markup) is accurate.
+    fetch("sync/status")
+      .then(function (r) { return r.json(); })
+      .then(function (progress) {
+        if (progress.running) {
+          pollUntilFinished();
+        }
+      })
+      .catch(function () {});
 
     // The tracking_number column is globally unique, so re-adding a number
     // that's already tracked (in any state, including archived/dismissed)

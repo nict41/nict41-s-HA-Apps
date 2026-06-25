@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.15
+
+- Fixed the "Check mail now" spinner spinning on every page load, sync or
+  not: its CSS set `display` unconditionally, which silently overrides the
+  browser's own `[hidden] { display: none }` rule regardless of the
+  `hidden` attribute actually being present on the element.
+- The dashboard now also asks the server on every load whether a sync is
+  already running, instead of just assuming "Check mail now" is accurate.
+  A sync keeps running on the server once started regardless of whether
+  the page that triggered it is still around, so navigating away mid-sync
+  and back (or just reloading) used to show the idle button even while a
+  sync was genuinely still in progress - now it resumes showing live
+  progress until the sync actually finishes.
+
 ## 0.6.14
 
 - Track123 could leave a real, trackable number stuck showing "No status

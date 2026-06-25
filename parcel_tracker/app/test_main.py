@@ -58,6 +58,28 @@ def test_dashboard_response_is_not_cached():
     assert resp.headers["cache-control"] == "no-store"
 
 
+def test_dashboard_spinner_css_respects_hidden_attribute():
+    # A `.spinner { display: ... }` rule alone always wins over the
+    # browser's UA `[hidden] { display: none }` rule regardless of selector
+    # specificity (an author-origin rule beats a UA-origin one even at equal
+    # specificity) - without this override, the spinner attribute is
+    # silently ignored and it spins on every page load, sync or no sync.
+    html = client.get("/").text
+    assert ".spinner[hidden]" in html
+
+
+def test_dashboard_checks_for_an_already_running_sync_on_load():
+    # run_sync_cycle() runs on a background thread once started, independent
+    # of whatever request kicked it off - a page (re)load needs to ask
+    # /sync/status what's actually happening rather than just assuming the
+    # page's default "Check mail now" markup reflects reality, otherwise a
+    # sync started from another tab/visit (or one outliving a closed tab)
+    # looks done when it's still running.
+    html = client.get("/").text
+    assert 'fetch("sync/status")' in html
+    assert "pollUntilFinished" in html
+
+
 def test_add_parcel_creates_active_parcel_and_redirects():
     resp = client.post(
         "/add",
