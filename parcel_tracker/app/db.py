@@ -283,6 +283,13 @@ def update_tracking_status(
     """status=None leaves the parcel's lifecycle status untouched - used for
     pending candidates, where only a preview is wanted, not auto-confirmation.
 
+    status_detail/last_event_time/estimated_delivery only overwrite their
+    stored value when the provider actually returned one on *this* check -
+    a momentary gap in the provider's response (rate limiting, a not-yet-
+    indexed registration, a parsing edge case) shouldn't blank out
+    previously-known-good status text just because this particular refresh
+    came back empty.
+
     `confirmed` reflects whether the provider positively recognised the
     number on *this* check. `first_checked_at` is stamped on every call
     (it's only ever called once a provider has actually returned a result for
@@ -291,9 +298,9 @@ def update_tracking_status(
     can't undo it."""
     now = now_iso()
     assignments = [
-        "status_detail = ?",
-        "last_event_time = ?",
-        "estimated_delivery = ?",
+        "status_detail = COALESCE(?, status_detail)",
+        "last_event_time = COALESCE(?, last_event_time)",
+        "estimated_delivery = COALESCE(?, estimated_delivery)",
         "updated_at = ?",
         "first_checked_at = COALESCE(first_checked_at, ?)",
     ]

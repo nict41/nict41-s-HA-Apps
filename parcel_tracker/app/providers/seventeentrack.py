@@ -131,7 +131,11 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
         for number in chunk:
             entry = by_number.get(number)
+            if entry is None:
+                print(f"[parcel_tracker] 17track query for '{number}' returned no accepted entry")
             track_info = (entry or {}).get("track_info") or {}
+            if entry and not track_info.get("latest_event"):
+                print(f"[parcel_tracker] 17track accepted '{number}' but its response had no tracking events yet")
             status, detail, event_time = _map_status(track_info)
             estimated_delivery = (track_info.get("time_metrics") or {}).get(
                 "estimated_delivery_date", {}

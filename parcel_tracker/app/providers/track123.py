@@ -175,8 +175,13 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
             print(f"[parcel_tracker] Track123 rejected '{number}': {reason}")
 
         for number in chunk:
-            entry = by_number.get(number) or {}
+            entry = by_number.get(number)
+            if entry is None and number not in reasons:
+                print(f"[parcel_tracker] Track123 query for '{number}' returned no accepted or rejected entry")
+            entry = entry or {}
             leg = _logistics_leg(entry)
+            if entry and not leg.get("trackingDetails"):
+                print(f"[parcel_tracker] Track123 accepted '{number}' but its response had no tracking events yet")
             status, detail, event_time = _map_status(entry, leg)
             carrier_name = leg.get("courierNameEN") or None
             if not detail and number in reasons:

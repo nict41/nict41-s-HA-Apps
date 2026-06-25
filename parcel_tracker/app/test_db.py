@@ -195,6 +195,39 @@ def test_update_tracking_status_confirmed_is_sticky():
     assert db.get_parcel(parcel_id)["provider_confirmed"] == 1
 
 
+def test_update_tracking_status_does_not_blank_known_good_fields_on_empty_response():
+    parcel_id = db.upsert_parcel("A", "Cainiao", "a", 0.9, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="In transit", last_event_time="2024-01-01T00:00:00Z",
+        estimated_delivery="2024-01-05",
+    )
+    # A later check that comes back with no fresh data (e.g. a momentary gap
+    # in the provider's response) shouldn't erase the status text we already
+    # had - it should leave the parcel showing its last-known-good status
+    # rather than reverting to "no status yet".
+    db.update_tracking_status(parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None)
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status_detail"] == "In transit"
+    assert parcel["last_event_time"] == "2024-01-01T00:00:00Z"
+    assert parcel["estimated_delivery"] == "2024-01-05"
+
+
+def test_update_tracking_status_overwrites_with_fresh_non_empty_data():
+    parcel_id = db.upsert_parcel("A", "Cainiao", "a", 0.9, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="In transit", last_event_time="2024-01-01T00:00:00Z",
+        estimated_delivery="2024-01-05",
+    )
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="Out for delivery", last_event_time="2024-01-06T00:00:00Z",
+        estimated_delivery="2024-01-06",
+    )
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["status_detail"] == "Out for delivery"
+    assert parcel["last_event_time"] == "2024-01-06T00:00:00Z"
+    assert parcel["estimated_delivery"] == "2024-01-06"
+
+
 def test_auto_archive_delivered_respects_days_and_zero_disables():
     parcel_id = db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_DELIVERED)
     with db._connect() as conn:

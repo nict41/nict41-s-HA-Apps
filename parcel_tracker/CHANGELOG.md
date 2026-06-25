@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.9
+
+- Fixed a tracked parcel's status reverting to "No status yet" after
+  previously showing real tracking events. A refresh cycle that came back
+  from the tracking provider with no fresh status text (a momentary gap in
+  the provider's response, a not-yet-indexed registration, etc.) was
+  unconditionally overwriting the parcel's last-known-good status, event
+  time, and estimated delivery with blanks instead of just leaving them as
+  they were. The dashboard now keeps showing the most recent real status
+  until the provider actually has something new to report.
+- 17track/Track123 requests that succeed but don't return any usable
+  tracking data for a specific number are now noted in the add-on's logs,
+  to make it easier to tell a provider-side gap apart from a bug in this
+  add-on if a parcel's status still looks wrong after the above fix.
+
 ## 0.6.8
 
 - Removed the single-`folder` mailbox option. The `folders` list option
