@@ -1,5 +1,5 @@
 name: "Parcel Tracker"
-version: "0.6.5"
+version: "0.6.6"
 slug: "parcel_tracker"
 description: "Automatically detects tracking numbers from your email and tracks deliveries"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/parcel_tracker"

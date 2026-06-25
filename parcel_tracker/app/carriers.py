@@ -10,12 +10,11 @@ Two-tier approach:
    lands in the dashboard's "needs confirmation" queue instead of being
    trusted outright.
 
-Carrier names here are for display and for the no-API-key tracking-URL
-fallback only. Status lookups always register with 17track using carrier
-code 0 (auto-detect), since AliExpress/eBay cross-border shipments are
-fragmented across dozens of regional carriers (Cainiao, 4PX, YunExpress,
-Yanwen, ...) that 17track is specifically built to resolve from the number
-itself.
+Carrier names here are for display only - the "Track" link always points
+at Track123's own web tracker (see get_tracking_url()) rather than a
+carrier-specific URL, since Track123 reliably resolves the correct carrier
+from the number itself even for formats our own detection gets only
+approximately right (e.g. cross-border Cainiao/AliExpress numbers).
 """
 
 import re
@@ -81,25 +80,6 @@ SHIPPING_KEYWORDS = (
     "dispatched",
     "in transit",
 )
-
-_TRACKING_URL_TEMPLATES = {
-    "USPS": "https://tools.usps.com/go/TrackConfirmAction?tLabels={number}",
-    "UPS": "https://www.ups.com/track?tracknum={number}",
-    "FedEx": "https://www.fedex.com/fedextrack/?trknbr={number}",
-    "DHL": "https://www.dhl.com/global-en/home/tracking.html?tracking-id={number}",
-    "Royal Mail": "https://www.royalmail.com/track-your-item#/tracking-results/{number}",
-    "Canada Post": "https://www.canadapost-postescanada.ca/track-reperage/en#/search?searchFor={number}",
-    "Australia Post": "https://auspost.com.au/mypost/track/#/details/{number}",
-    "DPD": "https://track.dpd.co.uk/search?reference={number}",
-    "Evri": "https://www.evri.com/track/parcel/{number}",
-    "Cainiao / AliExpress Standard Shipping": "https://global.cainiao.com/detail.htm?mailNoList={number}",
-    "Amazon Logistics": "https://www.amazon.com/progress-tracker/package/ref=ppx_yo2ov_dt_b_track_package?trackingId={number}",
-}
-# 17track's own public tracker auto-detects the carrier from the number, so
-# it works as a universal fallback for carriers without a known URL
-# template above - including most of AliExpress's long tail of regional
-# logistics providers - whether or not an API key is configured.
-_FALLBACK_TRACKING_URL = "https://t.17track.net/en#nums={number}"
 
 _GENERIC_PATTERNS = [
     # (carrier name, regex, base confidence)
@@ -258,6 +238,11 @@ def detect_candidates(
     return list(found.values())
 
 
-def get_tracking_url(carrier_name: str, tracking_number: str) -> str:
-    template = _TRACKING_URL_TEMPLATES.get(carrier_name, _FALLBACK_TRACKING_URL)
-    return template.format(number=tracking_number)
+def get_tracking_url(tracking_number: str) -> str:
+    """Track123's web tracker auto-detects the carrier from the number
+    itself, the same way its API does - and more reliably than a
+    carrier-specific deep link built from our own (sometimes only
+    approximately right) carrier guess, especially for cross-border
+    numbers (Cainiao/AliExpress) that our own per-carrier URL templates
+    used to send to the wrong site entirely."""
+    return f"https://www.track123.com/track?trackNos={tracking_number}"

@@ -60,7 +60,7 @@ def test_sync_posts_summary_and_per_parcel_state(_calls):
 
     summary_parcel = posts["sensor.parcel_tracker_summary"]["attributes"]["parcels"][0]
     assert summary_parcel["tracking_number"] == "ABC123"
-    assert summary_parcel["tracking_url"] == carriers.get_tracking_url("UPS", "ABC123")
+    assert summary_parcel["tracking_url"] == carriers.get_tracking_url("ABC123")
 
 
 def test_archived_and_dismissed_parcels_are_excluded_from_sync(_calls):

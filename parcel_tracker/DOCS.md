@@ -40,8 +40,8 @@ copy-pasting of tracking numbers required.
    tracking number. Each parcel sticks to whichever provider it was first
    registered with, even if you add or remove the other provider's key
    later. Without any provider configured, parcels are still detected and
-   listed (and never auto-dismissed), just with a carrier tracking link
-   instead of live status.
+   listed (and never auto-dismissed), just with a link to Track123's web
+   tracker instead of live status.
 5. Delivered parcels are kept on the dashboard for a configurable number
    of days, then automatically archived.
 6. Every parcel is also exposed as a Home Assistant sensor entity (no
@@ -109,12 +109,12 @@ The remaining options apply across all configured mailboxes:
 ### 3. (Optional) Get a tracking provider API key
 
 Without any provider key, the dashboard still detects and lists every
-parcel, with a tracking link per carrier (or 17track's own universal
-tracker for carriers without a known link). With a key configured for
-either provider below, the dashboard instead shows live status (in
-transit, out for delivery, delivered, exception) pulled directly into
-each parcel's card, including a carrier/status preview on cards still
-awaiting confirmation.
+parcel, with a tracking link to Track123's own web tracker, which
+auto-detects the carrier from the number regardless of whether its API is
+configured. With a key configured for either provider below, the
+dashboard instead shows live status (in transit, out for delivery,
+delivered, exception) pulled directly into each parcel's card, including
+a carrier/status preview on cards still awaiting confirmation.
 
 You can configure one provider or both:
 

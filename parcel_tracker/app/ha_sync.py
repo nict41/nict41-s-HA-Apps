@@ -124,7 +124,7 @@ def _summary_state(parcels: list[dict]) -> dict:
                     "delivered_at": p["delivered_at"],
                     "confidence": p["confidence"],
                     "tracking_provider": p["tracking_provider"],
-                    "tracking_url": carriers.get_tracking_url(p["carrier_name"], p["tracking_number"]),
+                    "tracking_url": carriers.get_tracking_url(p["tracking_number"]),
                 }
                 for p in parcels
             ],

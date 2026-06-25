@@ -88,16 +88,10 @@ def test_strip_html_removes_tags_and_decodes_entities():
     assert "LP123456789CN" in text
 
 
-def test_get_tracking_url_uses_known_template():
-    url = carriers.get_tracking_url("UPS", "1Z999AA10123456784")
+def test_get_tracking_url_points_at_track123():
+    url = carriers.get_tracking_url("1Z999AA10123456784")
     assert "1Z999AA10123456784" in url
-    assert "ups.com" in url
-
-
-def test_get_tracking_url_falls_back_to_17track_for_unknown_carrier():
-    url = carriers.get_tracking_url("Some Obscure Regional Carrier", "ABC123")
-    assert "17track.net" in url
-    assert "ABC123" in url
+    assert "track123.com" in url
 
 
 def test_retailer_domain_matches_notification_subdomain():

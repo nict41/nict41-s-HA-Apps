@@ -206,7 +206,7 @@
         <div class="status-line">{{ p.status_detail or "No status yet" }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
       </div>
       <div class="actions">
-        <a class="link-btn" href="{{ get_tracking_url(p.carrier_name, p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
+        <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
         <form action="archive" method="post">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
           <button type="submit">Archive</button>

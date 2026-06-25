@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.6
+
+- The dashboard's "Track" link (and the `tracking_url` exposed on each
+  Home Assistant sensor entity / the Lovelace card) now always points at
+  Track123's own web tracker, instead of a per-carrier deep link built from
+  our own carrier guess. Track123 reliably resolves the correct carrier
+  straight from the number itself - including cross-border Cainiao/
+  AliExpress numbers our own per-carrier links didn't handle well - so it
+  works as a single, more reliable destination regardless of which carrier
+  we think a number belongs to, and whether or not a Track123 API key is
+  even configured.
+
 ## 0.6.5
 
 - A tracking number that 17track/Track123 only matched to a carrier by the
