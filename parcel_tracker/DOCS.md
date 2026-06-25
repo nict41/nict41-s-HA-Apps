@@ -154,6 +154,13 @@ Open the app's ingress panel from your sidebar:
   that's already tracked asks for confirmation first, since it would
   otherwise silently overwrite that parcel's carrier and description.
 
+Click any card to expand its full tracking history - every event a
+tracking provider has recorded for that parcel, not just the latest one
+shown on the card itself - along with a carrier tracking link, which
+provider confirmed it, and when it was first detected vs. last checked.
+Parcels with no recorded history yet (e.g. no tracking provider
+configured) show a simple "no history available" message instead.
+
 Every tracked parcel also has a **Reset** action, which puts it back into
 **Needs confirmation** and clears its tracking status - useful if a parcel
 got mismatched to the wrong carrier, or you just want it re-checked from

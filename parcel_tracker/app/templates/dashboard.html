@@ -29,7 +29,36 @@
       gap: 1rem;
       flex-wrap: wrap;
     }
-    .card .info { flex: 1; min-width: 220px; }
+    .card .info { flex: 1; min-width: 220px; cursor: pointer; border-radius: 6px; }
+    .card .info:hover { background: rgba(255, 255, 255, 0.03); }
+    .chevron {
+      display: inline-block;
+      margin-left: 0.3rem;
+      font-size: 0.65rem;
+      color: #7db4ff;
+      transition: transform 0.15s ease;
+    }
+    .chevron.open { transform: rotate(180deg); }
+    .history {
+      flex: 1 0 100%;
+      margin-top: 0.6rem;
+      padding-top: 0.6rem;
+      border-top: 1px solid #2a2f3a;
+    }
+    .history-meta {
+      display: flex;
+      gap: 0.9rem;
+      flex-wrap: wrap;
+      font-size: 0.78rem;
+      color: #9aa0a6;
+      margin-bottom: 0.6rem;
+    }
+    .history-title { font-size: 0.8rem; color: #cfd2d8; margin-bottom: 0.4rem; font-weight: 600; }
+    .history-empty { font-size: 0.8rem; color: #9aa0a6; }
+    .history-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+    .history-timeline li { padding-left: 0.75rem; border-left: 2px solid #2a2f3a; }
+    .history-time { font-size: 0.74rem; color: #7db4ff; }
+    .history-detail { font-size: 0.82rem; color: #e3e3e3; margin-top: 0.1rem; }
     .card .tracking {
       font-weight: 600;
       font-size: 0.95rem;
@@ -153,6 +182,30 @@
   </style>
 </head>
 <body>
+  {% macro history_panel(p) %}
+  <div class="history" hidden>
+    <div class="history-meta">
+      <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Open carrier tracker</a>
+      {% if p.tracking_provider %}<span>Tracked via {{ p.tracking_provider }}</span>{% endif %}
+      {% if p.created_at %}<span>First detected {{ p.created_at }}</span>{% endif %}
+      {% if p.updated_at %}<span>Last checked {{ p.updated_at }}</span>{% endif %}
+    </div>
+    {% if p.tracking_history %}
+    <div class="history-title">Tracking history</div>
+    <ol class="history-timeline">
+      {% for event in p.tracking_history %}
+      <li>
+        <div class="history-time">{{ event.time or "Unknown time" }}</div>
+        <div class="history-detail">{{ event.detail }}{% if event.location %} &middot; {{ event.location }}{% endif %}</div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <div class="history-empty">No tracking history available yet.</div>
+    {% endif %}
+  </div>
+  {% endmacro %}
+
   <h1>Parcel Tracker</h1>
   <div class="sub">Automatically detected and manually added parcels.</div>
 
@@ -206,7 +259,7 @@
     {% for p in pending %}
     <div class="card">
       <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span></div>
+        <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; confidence {{ (p.confidence * 100) | round | int }}%</div>
         {% if p.status_detail %}
         <div class="status-line">{{ p.status_detail }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
@@ -223,6 +276,7 @@
         </details>
         {% endif %}
       </div>
+      {{ history_panel(p) }}
       <div class="actions">
         <form action="confirm" method="post">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
@@ -249,10 +303,12 @@
         <div class="tracking">
           {{ p.tracking_number }}
           <span class="badge {{ 'exception' if p.status == 'exception' else 'active' }}">{{ 'exception' if p.status == 'exception' else 'in transit' }}</span>
+          <span class="chevron" aria-hidden="true">&#9662;</span>
         </div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
         <div class="status-line">{{ p.status_detail or "No status yet" }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
       </div>
+      {{ history_panel(p) }}
       <div class="actions">
         <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
         <form action="reset" method="post" class="reset-form">
@@ -277,9 +333,10 @@
     {% for p in delivered %}
     <div class="card">
       <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge delivered">delivered</span></div>
+        <div class="tracking">{{ p.tracking_number }} <span class="badge delivered">delivered</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; delivered {{ p.delivered_at }}</div>
       </div>
+      {{ history_panel(p) }}
       <div class="actions">
         <form action="reset" method="post" class="reset-form">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
@@ -301,9 +358,10 @@
     {% for p in archived %}
     <div class="card">
       <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge archived">{{ p.status }}</span></div>
+        <div class="tracking">{{ p.tracking_number }} <span class="badge archived">{{ p.status }}</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
         <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
       </div>
+      {{ history_panel(p) }}
       <div class="actions">
         <form action="reset" method="post" class="reset-form">
           <input type="hidden" name="parcel_id" value="{{ p.id }}" />
@@ -432,6 +490,23 @@
         if (!confirm("Reset this parcel? It will go back to needs-confirmation and lose its current tracking status.")) {
           e.preventDefault();
         }
+      });
+    });
+
+    // Clicking a card's info area toggles its history panel - excluded here
+    // are clicks on anything already interactive inside .info (the "View
+    // full email" details/summary today, tracking links or buttons in the
+    // future), so those keep their own behavior instead of also flipping
+    // the history panel open/closed underneath them.
+    document.querySelectorAll(".card .info").forEach(function (info) {
+      info.addEventListener("click", function (e) {
+        if (e.target.closest("a, button, form, summary, details")) return;
+        var card = info.closest(".card");
+        var history = card.querySelector(".history");
+        if (!history) return;
+        history.hidden = !history.hidden;
+        var chevron = info.querySelector(".chevron");
+        if (chevron) chevron.classList.toggle("open", !history.hidden);
       });
     });
 

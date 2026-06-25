@@ -242,6 +242,58 @@ def test_dashboard_omits_email_preview_when_no_source_email():
     assert "View full email" not in html
 
 
+def test_dashboard_renders_tracking_history_timeline_for_parcel_with_events():
+    parcel_id = db.upsert_parcel("ACT123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(
+        parcel_id,
+        status=db.STATUS_ACTIVE,
+        status_detail="In transit",
+        last_event_time="2024-01-02T00:00:00Z",
+        estimated_delivery=None,
+        carrier_name="UPS",
+        tracking_provider="track123",
+        confirmed=True,
+        events=[
+            {"time": "2024-01-02T00:00:00Z", "detail": "Departed facility", "location": "Hong Kong"},
+            {"time": "2024-01-01T00:00:00Z", "detail": "Picked up", "location": None},
+        ],
+    )
+    html = client.get("/").text
+    assert "Tracking history" in html
+    assert "Departed facility" in html
+    assert "Hong Kong" in html
+    assert "Picked up" in html
+    assert "Tracked via track123" in html
+    assert "Open carrier tracker" in html
+
+
+def test_dashboard_shows_empty_history_message_when_parcel_has_no_events():
+    db.upsert_parcel("ACT123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    html = client.get("/").text
+    assert "No tracking history available yet." in html
+
+
+def test_dashboard_includes_carrier_tracking_link_for_delivered_and_archived_parcels():
+    # Only the in-transit section had a "Track" link before this feature -
+    # delivered/archived parcels had no way at all to reopen the carrier's
+    # own tracking page, even though the number is still right there.
+    delivered_id = db.upsert_parcel("DLV123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(
+        delivered_id,
+        status=db.STATUS_DELIVERED,
+        status_detail="Delivered",
+        last_event_time=None,
+        estimated_delivery=None,
+        carrier_name="UPS",
+        tracking_provider=None,
+        confirmed=True,
+    )
+    archived_id = db.upsert_parcel("ARC123", "UPS", "test", 0.9, None, db.STATUS_ACTIVE)
+    db.archive_parcel(archived_id)
+    html = client.get("/").text
+    assert html.count("Open carrier tracker") >= 2
+
+
 def test_sync_auto_confirms_pending_when_provider_recognizes_number(monkeypatch):
     parcel_id = db.upsert_parcel("RECOG1", "FedEx", "ebay item", 0.4, None, db.STATUS_PENDING)
     _stub_provider(
@@ -263,6 +315,31 @@ def test_sync_auto_confirms_pending_when_provider_recognizes_number(monkeypatch)
     # The provider's carrier replaces our wrong pattern guess on confirm.
     assert parcel["carrier_name"] == "Cainiao"
     assert parcel["tracking_provider"] == "track123"
+
+
+def test_sync_cycle_stores_full_event_history_from_provider(monkeypatch):
+    parcel_id = db.upsert_parcel("HIST1", "Cainiao", "test", 0.9, None, db.STATUS_ACTIVE)
+    events = [
+        {"time": "2024-01-02T00:00:00Z", "detail": "Departed facility", "location": "Shenzhen, CN"},
+        {"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None},
+    ]
+    _stub_provider(
+        monkeypatch,
+        {
+            "HIST1": {
+                "status": db.STATUS_ACTIVE,
+                "status_detail": "Departed facility",
+                "last_event_time": "2024-01-02T00:00:00Z",
+                "estimated_delivery": None,
+                "carrier_name": "Cainiao",
+                "confirmed": True,
+                "events": events,
+            }
+        },
+    )
+    main.run_sync_cycle()
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["tracking_history"] == events
 
 
 def test_sync_keeps_pending_as_preview_when_provider_does_not_recognize_number(monkeypatch):

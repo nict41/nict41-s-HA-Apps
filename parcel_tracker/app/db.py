@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -94,6 +95,8 @@ def init_db() -> None:
             # starting from its first real check, instead of immediately
             # qualifying for auto-dismissal because it happens to be old.
             conn.execute("ALTER TABLE parcels ADD COLUMN first_checked_at TEXT")
+        if "tracking_history" not in existing_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN tracking_history TEXT")
 
 
 def is_processed(message_id: str) -> bool:
@@ -169,6 +172,16 @@ def upsert_parcel(
         return cur.lastrowid
 
 
+def _row_to_parcel(row: sqlite3.Row) -> dict:
+    """tracking_history is stored as a JSON string (see update_tracking_status)
+    so it round-trips through SQLite like any other TEXT column - callers
+    want it back as the list it actually represents."""
+    parcel = dict(row)
+    raw_history = parcel.get("tracking_history")
+    parcel["tracking_history"] = json.loads(raw_history) if raw_history else []
+    return parcel
+
+
 def list_parcels(statuses=None) -> list[dict]:
     with _connect() as conn:
         if statuses:
@@ -179,13 +192,13 @@ def list_parcels(statuses=None) -> list[dict]:
             ).fetchall()
         else:
             rows = conn.execute("SELECT * FROM parcels ORDER BY updated_at DESC").fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_parcel(r) for r in rows]
 
 
 def get_parcel(parcel_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM parcels WHERE id = ?", (parcel_id,)).fetchone()
-        return dict(row) if row else None
+        return _row_to_parcel(row) if row else None
 
 
 def _set_fields(parcel_id: int, **fields) -> None:
@@ -241,7 +254,7 @@ def reset_parcel(parcel_id: int) -> None:
             "UPDATE parcels SET status = ?, status_detail = NULL, last_event_time = NULL, "
             "estimated_delivery = NULL, confidence = 0, provider_confirmed = 0, "
             "first_checked_at = NULL, tracking_provider = NULL, delivered_at = NULL, "
-            "archived_at = NULL, updated_at = ? WHERE id = ?",
+            "archived_at = NULL, tracking_history = NULL, updated_at = ? WHERE id = ?",
             (STATUS_PENDING, now_iso(), parcel_id),
         )
 
@@ -267,7 +280,7 @@ def parcels_needing_refresh() -> list[dict]:
             "SELECT * FROM parcels WHERE status IN (?, ?, ?)",
             (STATUS_PENDING, STATUS_ACTIVE, STATUS_EXCEPTION),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [_row_to_parcel(r) for r in rows]
 
 
 def update_tracking_status(
@@ -279,16 +292,17 @@ def update_tracking_status(
     carrier_name: str | None = None,
     tracking_provider: str | None = None,
     confirmed: bool = False,
+    events: list[dict] | None = None,
 ) -> None:
     """status=None leaves the parcel's lifecycle status untouched - used for
     pending candidates, where only a preview is wanted, not auto-confirmation.
 
-    status_detail/last_event_time/estimated_delivery only overwrite their
-    stored value when the provider actually returned one on *this* check -
-    a momentary gap in the provider's response (rate limiting, a not-yet-
-    indexed registration, a parsing edge case) shouldn't blank out
-    previously-known-good status text just because this particular refresh
-    came back empty.
+    status_detail/last_event_time/estimated_delivery/events only overwrite
+    their stored value when the provider actually returned one on *this*
+    check - a momentary gap in the provider's response (rate limiting, a
+    not-yet-indexed registration, a parsing edge case) shouldn't blank out
+    previously-known-good status text (or the journey built up so far) just
+    because this particular refresh came back empty.
 
     `confirmed` reflects whether the provider positively recognised the
     number on *this* check. `first_checked_at` is stamped on every call
@@ -316,6 +330,9 @@ def update_tracking_status(
         params.append(tracking_provider)
     if confirmed:
         assignments.append("provider_confirmed = 1")
+    if events:
+        assignments.append("tracking_history = ?")
+        params.append(json.dumps(events))
     params.append(parcel_id)
     with _connect() as conn:
         conn.execute(f"UPDATE parcels SET {', '.join(assignments)} WHERE id = ?", params)

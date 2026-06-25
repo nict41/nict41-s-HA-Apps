@@ -36,6 +36,55 @@ def test_seventeentrack_confirms_a_number_the_provider_recognizes(monkeypatch):
     assert results["REAL1"]["carrier_name"] == "Cainiao"
 
 
+def test_seventeentrack_returns_full_event_history_not_just_latest(monkeypatch):
+    # latest_event only ever surfaces one entry - the full journey lives in
+    # providers[].events, newest first, and needs to be exposed separately
+    # for a card's expanded history view to show more than just that one.
+    monkeypatch.setattr(
+        seventeentrack,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": [
+                    {
+                        "number": "REAL3",
+                        "track_info": {
+                            "latest_status": {"status": "InTransit"},
+                            "latest_event": {"description": "Departed facility", "time_iso": "2024-01-02T00:00:00Z"},
+                            "tracking": {
+                                "providers": [
+                                    {
+                                        "provider": {"name": "Cainiao"},
+                                        "events": [
+                                            {
+                                                "time_iso": "2024-01-02T00:00:00Z",
+                                                "description": "Departed facility",
+                                                "location": "Shenzhen, CN",
+                                            },
+                                            {
+                                                "time_iso": "2024-01-01T00:00:00Z",
+                                                "description": "Order received",
+                                                "location": None,
+                                            },
+                                        ],
+                                    }
+                                ]
+                            },
+                        },
+                    }
+                ]
+            }
+        },
+    )
+
+    results = seventeentrack.get_track_info(["REAL3"])
+
+    assert results["REAL3"]["events"] == [
+        {"time": "2024-01-02T00:00:00Z", "detail": "Departed facility", "location": "Shenzhen, CN"},
+        {"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None},
+    ]
+
+
 def test_seventeentrack_does_not_confirm_a_carrier_guess_with_no_actual_event(monkeypatch):
     # 17track can match a number to a carrier from its shape alone (e.g. a
     # phone number that happens to fit a carrier's number-length pattern)
@@ -114,6 +163,49 @@ def test_track123_confirms_a_number_the_provider_recognizes(monkeypatch):
 
     assert results["REAL2"]["confirmed"] is True
     assert results["REAL2"]["carrier_name"] == "Cainiao"
+
+
+def test_track123_returns_full_event_history_not_just_latest(monkeypatch):
+    # status_detail/last_event_time only ever surface the single latest
+    # entry - the full journey (with per-event location) needs to be
+    # exposed separately for a card's expanded history view.
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "REAL4",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {
+                                "courierNameEN": "Cainiao",
+                                "trackingDetails": [
+                                    {
+                                        "eventDetail": "Departed facility",
+                                        "eventTime": "2024-01-02T00:00:00Z",
+                                        "address": "Shenzhen, CN",
+                                    },
+                                    {
+                                        "eventDetail": "Order received",
+                                        "eventTime": "2024-01-01T00:00:00Z",
+                                    },
+                                ],
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    )
+
+    results = track123.get_track_info(["REAL4"])
+
+    assert results["REAL4"]["events"] == [
+        {"time": "2024-01-02T00:00:00Z", "detail": "Departed facility", "location": "Shenzhen, CN"},
+        {"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None},
+    ]
 
 
 def test_track123_does_not_confirm_a_carrier_guess_with_no_actual_event(monkeypatch):

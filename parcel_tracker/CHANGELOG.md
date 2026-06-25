@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.16
+
+- Cards on the dashboard are now clickable to reveal a full tracking
+  history panel: every event Track123/17track has recorded for that
+  parcel (time, description, and location when available), not just the
+  single latest one previously shown in the status line.
+- The expanded panel also surfaces a few things that weren't shown
+  anywhere before: a carrier tracking link on every parcel (delivered and
+  archived parcels previously had no tracking link at all), which
+  provider confirmed the parcel, and when it was first detected vs. last
+  checked.
+- Parcels with no recorded history yet (e.g. carrier links only, no
+  tracking provider configured) show a plain "No tracking history
+  available yet" message instead of an empty panel.
+
 ## 0.6.15
 
 - Fixed the "Check mail now" spinner spinning on every page load, sync or

@@ -228,6 +228,53 @@ def test_update_tracking_status_overwrites_with_fresh_non_empty_data():
     assert parcel["estimated_delivery"] == "2024-01-06"
 
 
+def test_get_parcel_defaults_tracking_history_to_empty_list():
+    parcel_id = db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_ACTIVE)
+    assert db.get_parcel(parcel_id)["tracking_history"] == []
+
+
+def test_update_tracking_status_stores_and_returns_events():
+    parcel_id = db.upsert_parcel("A", "Cainiao", "a", 0.9, None, db.STATUS_ACTIVE)
+    events = [
+        {"time": "2024-01-02T00:00:00Z", "detail": "Departed facility", "location": "Shenzhen, CN"},
+        {"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None},
+    ]
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="In transit", last_event_time="2024-01-02T00:00:00Z",
+        estimated_delivery=None, events=events,
+    )
+    parcel = db.get_parcel(parcel_id)
+    assert parcel["tracking_history"] == events
+    # list_parcels() goes through a separate row->dict path - it needs the
+    # same JSON decoding as get_parcel(), not a raw JSON string.
+    assert db.list_parcels([db.STATUS_ACTIVE])[0]["tracking_history"] == events
+
+
+def test_update_tracking_status_does_not_blank_known_good_history_on_empty_response():
+    parcel_id = db.upsert_parcel("A", "Cainiao", "a", 0.9, None, db.STATUS_ACTIVE)
+    events = [{"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None}]
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="In transit", last_event_time="2024-01-01T00:00:00Z",
+        estimated_delivery=None, events=events,
+    )
+    # A later check with no fresh events (rate limiting, a parsing edge case)
+    # shouldn't erase the journey already built up.
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None, events=None,
+    )
+    assert db.get_parcel(parcel_id)["tracking_history"] == events
+
+
+def test_reset_parcel_clears_tracking_history():
+    parcel_id = db.upsert_parcel("A", "Cainiao", "a", 0.9, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail="In transit", last_event_time="2024-01-01T00:00:00Z",
+        estimated_delivery=None, events=[{"time": "2024-01-01T00:00:00Z", "detail": "Order received", "location": None}],
+    )
+    db.reset_parcel(parcel_id)
+    assert db.get_parcel(parcel_id)["tracking_history"] == []
+
+
 def test_auto_archive_delivered_respects_days_and_zero_disables():
     parcel_id = db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_DELIVERED)
     with db._connect() as conn:

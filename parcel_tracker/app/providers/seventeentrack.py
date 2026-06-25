@@ -106,9 +106,30 @@ def _detected_carrier_name(track_info: dict) -> str | None:
     return (providers[0].get("provider") or {}).get("name") or None
 
 
+def _provider_events(track_info: dict) -> list[dict]:
+    """The full journey, newest first (the order providers[].events is
+    already in) - latest_event above only ever surfaces the single latest
+    entry, dropping everything before it."""
+    providers = (track_info.get("tracking") or {}).get("providers") or []
+    if not providers:
+        return []
+    events = []
+    for event in providers[0].get("events") or []:
+        time = event.get("time_iso") or event.get("time_utc") or event.get("time_raw")
+        detail = event.get("description")
+        if not time and not detail:
+            continue
+        events.append({"time": time, "detail": detail, "location": event.get("location") or None})
+    return events
+
+
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name", "confirmed"}}.
+    "estimated_delivery", "carrier_name", "confirmed", "events"}}.
+
+    "events" is the full journey (newest first), each a {"time", "detail",
+    "location"} dict - everything providers[].events has, not just the
+    single latest entry the other fields above are derived from.
 
     A number is only left out of the result if the whole request failed
     (network/auth error) - a request that succeeded but doesn't recognise a
@@ -147,6 +168,7 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 "last_event_time": event_time,
                 "estimated_delivery": estimated_delivery,
                 "carrier_name": carrier_name,
+                "events": _provider_events(track_info),
                 # "Recognized" requires *both* a matched carrier and an
                 # actual movement event, not just one or the other - 17track
                 # will sometimes match a number to a carrier from its shape

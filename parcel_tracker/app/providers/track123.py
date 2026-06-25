@@ -165,6 +165,20 @@ def _map_status(entry: dict, leg: dict) -> tuple[str, str | None, str | None]:
     return status, detail, event_time
 
 
+def _extract_events(leg: dict) -> list[dict]:
+    """The full journey, newest first (the order trackingDetails is already
+    in) - status/status_detail/last_event_time above only ever surface the
+    single latest entry, dropping everything before it."""
+    events = []
+    for detail in leg.get("trackingDetails") or []:
+        time = detail.get("eventTime")
+        text = detail.get("eventDetail")
+        if not time and not text:
+            continue
+        events.append({"time": time, "detail": text, "location": detail.get("address") or None})
+    return events
+
+
 def _query_instant(number: str, courier_code: str | None) -> dict | None:
     """track/query-realtime - queries the carrier live with no registration
     involved, the same way Track123's own web tracker does. Used only as a
@@ -182,7 +196,11 @@ def _query_instant(number: str, courier_code: str | None) -> dict | None:
 
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name", "confirmed"}}.
+    "estimated_delivery", "carrier_name", "confirmed", "events"}}.
+
+    "events" is the full journey (newest first), each a {"time", "detail",
+    "location"} dict - everything trackingDetails has, not just the single
+    latest entry the other fields above are derived from.
 
     A number is only left out of the result if the whole request failed
     (network/auth error) - a request that succeeded but doesn't recognise a
@@ -234,6 +252,7 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 "last_event_time": event_time,
                 "estimated_delivery": entry.get("expectedDelivery"),
                 "carrier_name": carrier_name,
+                "events": _extract_events(leg),
                 # "Recognized" requires *both* a detected courier and an
                 # actual movement event, not just one or the other - Track123
                 # will sometimes guess a courier from a number's shape alone

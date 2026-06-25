@@ -111,6 +111,7 @@ def run_sync_cycle() -> None:
                     carrier_name=info.get("carrier_name"),
                     tracking_provider=provider_name,
                     confirmed=info["confirmed"],
+                    events=info.get("events"),
                 )
 
         sync_progress.finish()
