@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.3
+
+- "Check mail now" now shows a spinner and disables the button for the
+  duration of the check, instead of giving no feedback that the click
+  registered. The check itself can take a while (IMAP connections,
+  tracking-provider lookups), so without this it looked like nothing was
+  happening until the page eventually reloaded.
+
 ## 0.6.2
 
 - Fixed Track123-tracked parcels getting stuck showing "in transit" with no

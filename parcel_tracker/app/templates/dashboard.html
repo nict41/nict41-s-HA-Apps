@@ -101,6 +101,21 @@
     }
     .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .sync-row .sub { margin: 0; }
+    button:disabled { opacity: 0.65; cursor: default; }
+    .spinner {
+      display: inline-block;
+      width: 0.8em;
+      height: 0.8em;
+      margin-right: 0.4rem;
+      vertical-align: -0.1em;
+      border: 2px solid rgba(227, 227, 227, 0.35);
+      border-top-color: #7db4ff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -113,8 +128,11 @@
       {% if not tracking_providers_configured %}<br />No tracking provider API key configured &mdash; showing carrier links only, no live status.{% endif %}
       {% if ha_sync_configured %}<br />Exposed to Home Assistant as sensor entities for dashboards and automations.{% endif %}
     </div>
-    <form action="sync" method="post">
-      <button class="primary" type="submit">Check mail now</button>
+    <form action="sync" method="post" id="sync-form">
+      <button class="primary" type="submit" id="sync-button">
+        <span class="spinner" id="sync-spinner" hidden></span>
+        <span id="sync-button-label">Check mail now</span>
+      </button>
     </form>
   </div>
 
@@ -240,5 +258,17 @@
     {% endfor %}
   </div>
   {% endif %}
+
+  <script>
+    // The sync POST blocks (real IMAP/HTTP I/O) until the redirect comes
+    // back, so without this the button just sits there looking unclicked
+    // for however long the check takes - this gives immediate feedback
+    // that the click registered and a sync is in progress.
+    document.getElementById("sync-form").addEventListener("submit", function () {
+      document.getElementById("sync-button").disabled = true;
+      document.getElementById("sync-spinner").hidden = false;
+      document.getElementById("sync-button-label").textContent = "Checking mail…";
+    });
+  </script>
 </body>
 </html>
