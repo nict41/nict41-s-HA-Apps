@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.12
+
+- Reverted forcing Track123's `aliexpress` courier code onto Cainiao/
+  AliExpress Standard Shipping numbers (`LP`/`JJD`-prefixed). Guessing
+  `cainiao` vs. `aliexpress` ourselves wasn't actually more reliable than
+  Track123's own auto-detection, which now decides the courier for these
+  numbers same as every other carrier.
+
 ## 0.6.11
 
 - Sped up mail checks: every message in the lookback window used to have

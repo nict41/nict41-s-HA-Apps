@@ -278,10 +278,11 @@ def test_track123_register_logs_rejection_reason(monkeypatch, capsys):
     assert "quota exceeded" in out
 
 
-def test_track123_register_includes_courier_code_for_known_carrier(monkeypatch):
-    # Track123's own docs recommend supplying a courier code at registration
-    # when we have one, rather than always relying on auto-detection - so a
-    # Cainiao/AliExpress number's registration payload should include it.
+def test_track123_register_never_includes_courier_code(monkeypatch):
+    # carrier_name is accepted for call-site symmetry with 17track but never
+    # turned into a courierCode override - including for Cainiao/AliExpress
+    # Standard Shipping numbers (LP/JJD-prefixed), where guessing cainiao vs.
+    # aliexpress ourselves is a worse bet than Track123's own auto-detect.
     captured_payload = []
     monkeypatch.setattr(
         track123,
@@ -289,21 +290,6 @@ def test_track123_register_includes_courier_code_for_known_carrier(monkeypatch):
         lambda path, payload: captured_payload.append(payload) or None,
     )
 
-    track123.register([("JJD3", "Cainiao / AliExpress Standard Shipping")])
+    track123.register([("JJD3", "Cainiao / AliExpress Standard Shipping"), ("ANY3", "UPS")])
 
-    assert captured_payload == [[{"trackNo": "JJD3", "courierCode": "aliexpress"}]]
-
-
-def test_track123_register_omits_courier_code_for_unmapped_carrier(monkeypatch):
-    # Anything we don't have a known Track123 courier code for keeps
-    # auto-detecting from the number's own format, same as before.
-    captured_payload = []
-    monkeypatch.setattr(
-        track123,
-        "_post",
-        lambda path, payload: captured_payload.append(payload) or None,
-    )
-
-    track123.register([("ANY3", "UPS")])
-
-    assert captured_payload == [[{"trackNo": "ANY3"}]]
+    assert captured_payload == [[{"trackNo": "JJD3"}, {"trackNo": "ANY3"}]]

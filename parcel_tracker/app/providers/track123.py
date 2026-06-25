@@ -4,11 +4,12 @@ A second, independently-quota'd provider alongside 17track. Useful because
 17track's free allowance is now a one-time pool of numbers rather than a
 recurring monthly quota, while Track123's free tier renews monthly -
 configuring both lets registrations draw from whichever has room. Numbers
-are registered without a courier code, so Track123 auto-detects the
-carrier from the number's own format, *except* for carriers we have a
-known Track123 courier code for (see _COURIER_CODES) - auto-detection can
-fail to recognize a number Track123 can otherwise track just fine once
-told which courier it belongs to.
+are registered without a courier code, so Track123 always auto-detects the
+carrier from the number's own format - including for the LP/JJD-prefixed
+Cainiao/AliExpress Standard Shipping numbers, where guessing a specific
+courier code ourselves (cainiao vs. aliexpress) was a worse bet than
+letting Track123's own detection pick whichever it actually resolves the
+number under.
 """
 
 import json
@@ -22,17 +23,6 @@ API_KEY = os.environ.get("TRACK123_API_KEY", "").strip()
 _BASE_URL = "https://api.track123.com/gateway/open-api"
 _MAX_NUMBERS_PER_REQUEST = 40
 _REQUEST_DELAY_SECONDS = 0.25  # stays under the documented 5 req/sec cap
-
-# Track123 courier codes (the slug from a carrier's https://www.track123.com/
-# carriers/<slug> page) for carriers we can identify confidently enough at
-# detection time to tell Track123 outright, keyed by the carrier_name string
-# our own detectors (carriers.py) assign. Track123 maintains a dedicated
-# "aliexpress" courier page/code (distinct from the generic "cainiao" one)
-# that it resolves correctly for both LP- and JJD-prefixed Cainiao/AliExpress
-# Standard Shipping numbers.
-_COURIER_CODES = {
-    "Cainiao / AliExpress Standard Shipping": "aliexpress",
-}
 
 # Track123's transitStatus enum. Anything not listed here (including codes
 # added to the API after this was written) falls back to "in_transit" in
@@ -100,17 +90,15 @@ def _rejection_reasons(response: dict) -> dict[str, str]:
 
 def register(parcels: list[tuple[str, str | None]]) -> None:
     """Register (tracking_number, carrier_name) pairs for tracking. Safe to
-    call repeatedly - Track123 no-ops on numbers it's already tracking."""
+    call repeatedly - Track123 no-ops on numbers it's already tracking.
+
+    carrier_name is accepted only for call-site symmetry with the 17track
+    provider - it's deliberately ignored here, since auto-detect is what we
+    want for every carrier (see module docstring)."""
     if not API_KEY or not parcels:
         return
     for chunk in _chunks(parcels, _MAX_NUMBERS_PER_REQUEST):
-        payload = []
-        for number, carrier_name in chunk:
-            entry = {"trackNo": number}
-            courier_code = _COURIER_CODES.get(carrier_name)
-            if courier_code:
-                entry["courierCode"] = courier_code
-            payload.append(entry)
+        payload = [{"trackNo": number} for number, _carrier_name in chunk]
         response = _post("tk/v2.1/track/import", payload)
         if response:
             for number, reason in _rejection_reasons(response).items():
