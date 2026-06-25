@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.13
+
+- 0.6.12's switch to letting Track123 fully auto-detect the courier for
+  Cainiao/AliExpress Standard Shipping numbers (`LP`/`JJD`-prefixed) turned
+  out to reintroduce an older bug: auto-detect can reject one of these
+  numbers outright at registration (`A0400: trackNo not registered`), even
+  though Track123's own web tracker resolves it fine once a courier is
+  known. Back to supplying a courier code for these numbers, using
+  `cainiao` (the network handoff itself) rather than 0.6.10's `aliexpress`
+  guess - the value that was actually getting them registered before.
+
 ## 0.6.12
 
 - Reverted forcing Track123's `aliexpress` courier code onto Cainiao/
