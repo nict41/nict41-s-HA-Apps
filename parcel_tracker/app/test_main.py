@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -167,3 +169,73 @@ def test_sync_keeps_pending_as_preview_when_provider_does_not_recognize_number(m
     # status preview written to their card.
     assert parcel["status"] == db.STATUS_PENDING
     assert parcel["status_detail"] == "Pending carrier pickup"
+    # This was the first check, so even an old parcel gets a fresh grace
+    # period from now rather than being dismissed immediately.
+    assert parcel["first_checked_at"] is not None
+
+
+_UNCONFIRMED_INFO = {
+    "status": db.STATUS_ACTIVE,
+    "status_detail": "No data yet",
+    "last_event_time": None,
+    "estimated_delivery": None,
+    "carrier_name": None,
+    "confirmed": False,
+}
+
+
+def _backdate_first_checked_at(parcel_id: int, days: int) -> None:
+    # Matches db.now_iso()'s tz-aware format - the real column is always
+    # written that way, so backdating has to use the same shape.
+    backdated = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    with db._connect() as conn:
+        conn.execute("UPDATE parcels SET first_checked_at = ? WHERE id = ?", (backdated, parcel_id))
+
+
+def test_sync_dismisses_number_never_confirmed_past_grace_period(monkeypatch):
+    # Reproduces the "FedEx"/"Canada Post" false-positive reports: a number
+    # our own pattern-matching guessed at, that the tracking provider has
+    # never once recognised, gets auto-dismissed once it's had a fair chance.
+    parcel_id = db.upsert_parcel("BOGUS1", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
+    _backdate_first_checked_at(parcel_id, days=10)
+    _stub_provider(monkeypatch, {"BOGUS1": _UNCONFIRMED_INFO})
+
+    main.run_sync_cycle()
+
+    assert db.get_parcel(parcel_id)["status"] == db.STATUS_DISMISSED
+
+
+def test_sync_does_not_dismiss_within_grace_period(monkeypatch):
+    parcel_id = db.upsert_parcel("BOGUS2", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
+    _backdate_first_checked_at(parcel_id, days=1)
+    _stub_provider(monkeypatch, {"BOGUS2": _UNCONFIRMED_INFO})
+
+    main.run_sync_cycle()
+
+    assert db.get_parcel(parcel_id)["status"] == db.STATUS_PENDING
+
+
+def test_sync_does_not_dismiss_a_previously_confirmed_parcel(monkeypatch):
+    # provider_confirmed is sticky - a parcel genuinely confirmed in the past
+    # can't be dismissed later just because one check came back inconclusive
+    # (e.g. a transient provider hiccup).
+    parcel_id = db.upsert_parcel("REAL1", "Cainiao", "real parcel", 0.9, None, db.STATUS_ACTIVE)
+    _backdate_first_checked_at(parcel_id, days=10)
+    with db._connect() as conn:
+        conn.execute("UPDATE parcels SET provider_confirmed = 1 WHERE id = ?", (parcel_id,))
+    _stub_provider(monkeypatch, {"REAL1": _UNCONFIRMED_INFO})
+
+    main.run_sync_cycle()
+
+    assert db.get_parcel(parcel_id)["status"] != db.STATUS_DISMISSED
+
+
+def test_sync_dismiss_disabled_when_days_is_zero(monkeypatch):
+    parcel_id = db.upsert_parcel("BOGUS3", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
+    _backdate_first_checked_at(parcel_id, days=999)
+    _stub_provider(monkeypatch, {"BOGUS3": _UNCONFIRMED_INFO})
+    monkeypatch.setattr(main, "DISMISS_UNCONFIRMED_AFTER_DAYS", 0)
+
+    main.run_sync_cycle()
+
+    assert db.get_parcel(parcel_id)["status"] == db.STATUS_PENDING

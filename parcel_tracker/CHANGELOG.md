@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.6.0
+
+- Fixed a freeze during mail sync: IMAP connections had no socket timeout,
+  so an unresponsive mail server could hang a sync indefinitely - and since
+  the "Check mail now" button ran the sync directly on the dashboard's
+  request-handling thread, that hang froze the entire dashboard, not just
+  the sync. Connections now time out after 30 seconds, and "Check mail now"
+  runs the sync off the dashboard's request thread instead of blocking it.
+- Added a `folders` option per mailbox, to scan several folders (e.g.
+  `INBOX` plus a "Shipping" label or a filtered-into folder) instead of
+  just one. Existing single-`folder` configs keep working unchanged. One
+  folder erroring out (a timeout, a transient server hiccup) no longer
+  stops the rest of that account's folders, or any other configured
+  mailbox, from being scanned.
+- A tracking number a configured provider (17track/Track123) has *never*
+  positively recognised - our own pattern-matching guessed wrong, e.g. an
+  order ID that happened to look like a carrier's tracking-number format -
+  is now automatically dismissed after `dismiss_unconfirmed_after_days`
+  (default 3, `0` disables), since the provider's response is the strongest
+  signal available for whether something is actually a real tracking
+  number. A parcel a provider has confirmed even once stays exempt from
+  this even if a later check is inconclusive, and the grace period only
+  starts once a provider has actually had a chance to check a number, so
+  upgrading (or newly configuring a provider) doesn't put existing parcels
+  at risk of being dismissed on the very next check.
+
 ## 0.5.0
 
 - Every tracked parcel is now exposed as a Home Assistant sensor entity

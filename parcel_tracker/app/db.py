@@ -52,7 +52,9 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 delivered_at TEXT,
-                archived_at TEXT
+                archived_at TEXT,
+                provider_confirmed INTEGER NOT NULL DEFAULT 0,
+                first_checked_at TEXT
             )
             """
         )
@@ -83,6 +85,15 @@ def init_db() -> None:
                 "UPDATE parcels SET tracking_provider = '17track' WHERE status IN (?, ?)",
                 (STATUS_ACTIVE, STATUS_EXCEPTION),
             )
+        if "provider_confirmed" not in existing_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN provider_confirmed INTEGER NOT NULL DEFAULT 0")
+        if "first_checked_at" not in existing_columns:
+            # Left NULL (rather than backfilled to created_at) so that a
+            # parcel which predates this column - or one only just registered
+            # with a newly-added/changed provider - gets a fresh grace period
+            # starting from its first real check, instead of immediately
+            # qualifying for auto-dismissal because it happens to be old.
+            conn.execute("ALTER TABLE parcels ADD COLUMN first_checked_at TEXT")
 
 
 def is_processed(message_id: str) -> bool:
@@ -226,12 +237,26 @@ def update_tracking_status(
     estimated_delivery: str | None,
     carrier_name: str | None = None,
     tracking_provider: str | None = None,
+    confirmed: bool = False,
 ) -> None:
     """status=None leaves the parcel's lifecycle status untouched - used for
-    pending candidates, where only a preview is wanted, not auto-confirmation."""
+    pending candidates, where only a preview is wanted, not auto-confirmation.
+
+    `confirmed` reflects whether the provider positively recognised the
+    number on *this* check. `first_checked_at` is stamped on every call
+    (it's only ever called once a provider has actually returned a result for
+    this number), and `provider_confirmed` is sticky - once a provider has
+    ever confirmed a parcel it stays confirmed, so a later inconclusive check
+    can't undo it."""
     now = now_iso()
-    assignments = ["status_detail = ?", "last_event_time = ?", "estimated_delivery = ?", "updated_at = ?"]
-    params = [status_detail, last_event_time, estimated_delivery, now]
+    assignments = [
+        "status_detail = ?",
+        "last_event_time = ?",
+        "estimated_delivery = ?",
+        "updated_at = ?",
+        "first_checked_at = COALESCE(first_checked_at, ?)",
+    ]
+    params = [status_detail, last_event_time, estimated_delivery, now, now]
     if status is not None:
         assignments += ["status = ?", "delivered_at = COALESCE(delivered_at, ?)"]
         params += [status, now if status == STATUS_DELIVERED else None]
@@ -241,6 +266,8 @@ def update_tracking_status(
     if tracking_provider:
         assignments.append("tracking_provider = ?")
         params.append(tracking_provider)
+    if confirmed:
+        assignments.append("provider_confirmed = 1")
     params.append(parcel_id)
     with _connect() as conn:
         conn.execute(f"UPDATE parcels SET {', '.join(assignments)} WHERE id = ?", params)

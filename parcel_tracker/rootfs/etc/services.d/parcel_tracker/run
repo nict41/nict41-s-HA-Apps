@@ -7,6 +7,7 @@ declare mailboxes_json
 declare lookback_days
 declare poll_interval_minutes
 declare auto_archive_after_days
+declare dismiss_unconfirmed_after_days
 declare trusted_senders
 declare ignore_senders
 declare seventeentrack_api_key
@@ -16,6 +17,7 @@ mailboxes_json=$(bashio::config 'mailboxes' '[]')
 lookback_days=$(bashio::config 'lookback_days')
 poll_interval_minutes=$(bashio::config 'poll_interval_minutes')
 auto_archive_after_days=$(bashio::config 'auto_archive_after_days')
+dismiss_unconfirmed_after_days=$(bashio::config 'dismiss_unconfirmed_after_days')
 trusted_senders=$(bashio::config 'trusted_senders')
 ignore_senders=$(bashio::config 'ignore_senders')
 seventeentrack_api_key=$(bashio::config 'seventeentrack_api_key')
@@ -25,6 +27,7 @@ export MAILBOXES_JSON="${mailboxes_json}"
 export LOOKBACK_DAYS="${lookback_days}"
 export POLL_INTERVAL_MINUTES="${poll_interval_minutes}"
 export AUTO_ARCHIVE_AFTER_DAYS="${auto_archive_after_days}"
+export DISMISS_UNCONFIRMED_AFTER_DAYS="${dismiss_unconfirmed_after_days}"
 export TRUSTED_SENDERS="${trusted_senders}"
 export IGNORE_SENDERS="${ignore_senders}"
 export SEVENTEENTRACK_API_KEY="${seventeentrack_api_key}"

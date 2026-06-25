@@ -103,8 +103,14 @@ def _detected_carrier_name(track_info: dict) -> str | None:
 
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name", "confirmed"}}. Numbers with no data
-    back from the API are omitted from the result rather than guessed at."""
+    "estimated_delivery", "carrier_name", "confirmed"}}.
+
+    A number is only left out of the result if the whole request failed
+    (network/auth error) - a request that succeeded but doesn't recognise a
+    given number still gets an entry, with confirmed=False, so callers can
+    tell "17track has never identified this as a real tracking number" apart
+    from "we couldn't ask 17track this time". That distinction is what
+    drives auto-dismissing candidates 17track never confirms."""
     results: dict[str, dict] = {}
     if not API_KEY or not tracking_numbers:
         return results
@@ -112,15 +118,15 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     for chunk in _chunks(tracking_numbers, _MAX_NUMBERS_PER_REQUEST):
         response = _post("gettrackinfo", [{"number": n, "carrier": 0} for n in chunk])
         time.sleep(_REQUEST_DELAY_SECONDS)
-        if not response:
+        if response is None:
             continue
 
         accepted = (response.get("data") or {}).get("accepted") or []
-        for entry in accepted:
-            number = entry.get("number")
-            track_info = entry.get("track_info") or {}
-            if not number or not track_info:
-                continue
+        by_number = {entry.get("number"): entry for entry in accepted if entry.get("number")}
+
+        for number in chunk:
+            entry = by_number.get(number)
+            track_info = (entry or {}).get("track_info") or {}
             status, detail, event_time = _map_status(track_info)
             estimated_delivery = (track_info.get("time_metrics") or {}).get(
                 "estimated_delivery_date", {}

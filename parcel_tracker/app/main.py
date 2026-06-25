@@ -1,10 +1,11 @@
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -17,6 +18,7 @@ from providers import seventeentrack, track123
 
 POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "30"))
 AUTO_ARCHIVE_AFTER_DAYS = int(os.environ.get("AUTO_ARCHIVE_AFTER_DAYS", "14"))
+DISMISS_UNCONFIRMED_AFTER_DAYS = int(os.environ.get("DISMISS_UNCONFIRMED_AFTER_DAYS", "3"))
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -61,6 +63,29 @@ def run_sync_cycle() -> None:
                 info = track_info.get(parcel["tracking_number"])
                 if not info:
                     continue
+
+                # The provider's response is the authority on whether this is
+                # a real tracking number: a candidate it has never once
+                # confirmed (no detected carrier, no movement event) gets
+                # auto-dismissed once it's had a fair amount of time to be
+                # recognised. `provider_confirmed` is sticky, so a parcel
+                # genuinely confirmed in the past can't later be dismissed by
+                # a one-off inconclusive check. The grace period is measured
+                # from this parcel's *first* check rather than its creation
+                # time, so older parcels freshly registered with a provider
+                # (or upgrading onto this feature) aren't dismissed on the
+                # very first look.
+                if (
+                    not info["confirmed"]
+                    and not parcel["provider_confirmed"]
+                    and parcel["first_checked_at"]
+                    and DISMISS_UNCONFIRMED_AFTER_DAYS > 0
+                    and datetime.now(timezone.utc) - datetime.fromisoformat(parcel["first_checked_at"])
+                    >= timedelta(days=DISMISS_UNCONFIRMED_AFTER_DAYS)
+                ):
+                    db.dismiss_parcel(parcel["id"])
+                    continue
+
                 # A pending candidate is auto-confirmed once the provider
                 # positively recognises the number (a detected carrier or a
                 # real tracking event) - the API is a far stronger signal than
@@ -78,6 +103,7 @@ def run_sync_cycle() -> None:
                     estimated_delivery=info["estimated_delivery"],
                     carrier_name=info.get("carrier_name"),
                     tracking_provider=provider_name,
+                    confirmed=info["confirmed"],
                 )
 
     archived = db.auto_archive_delivered(AUTO_ARCHIVE_AFTER_DAYS)
@@ -136,7 +162,10 @@ async def dashboard(request: Request):
 
 @app.post("/sync")
 async def trigger_sync():
-    run_sync_cycle()
+    # run_sync_cycle() does blocking IMAP/HTTP I/O - calling it directly here
+    # would freeze the single-threaded event loop (and the whole dashboard,
+    # not just this request) for as long as the sync takes.
+    await run_in_threadpool(run_sync_cycle)
     return RedirectResponse("./", status_code=303)
 
 

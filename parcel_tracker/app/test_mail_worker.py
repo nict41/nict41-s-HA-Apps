@@ -30,20 +30,45 @@ class _FakeConn:
     real quirk of returning literal-bearing FETCH responses as
     `(header_line, literal_bytes)` tuples rather than plain bytes."""
 
-    def __init__(self, messages: dict[int, bytes], fail_search: bool = False):
-        self._messages = messages
+    def __init__(
+        self,
+        messages: dict[int, bytes] | None = None,
+        fail_search: bool = False,
+        fail_select: bool = False,
+        messages_by_folder: dict[str, dict[int, bytes]] | None = None,
+    ):
+        # Either a flat {num: raw} dict (single-folder tests, folder ignored),
+        # or a {folder: {num: raw}} dict keyed by whichever folder was last
+        # selected (multi-folder tests).
+        self._messages_by_folder = messages_by_folder
+        self._messages = messages or {}
         self._fail_search = fail_search
+        self._fail_select = fail_select
         self.closed = False
         self.logged_out = False
+        self.selected_folders = []
+        self._current_folder = None
+
+    def select(self, folder, readonly=False):
+        self.selected_folders.append(folder)
+        self._current_folder = folder
+        if self._fail_select:
+            return "NO", [b""]
+        return "OK", [b"1"]
+
+    def _active_messages(self) -> dict[int, bytes]:
+        if self._messages_by_folder is not None:
+            return self._messages_by_folder.get(self._current_folder, {})
+        return self._messages
 
     def search(self, charset, *criteria):
         if self._fail_search:
             return "NO", [b""]
-        nums = b" ".join(str(n).encode() for n in self._messages)
+        nums = b" ".join(str(n).encode() for n in self._active_messages())
         return "OK", [nums]
 
     def fetch(self, num, parts):
-        raw = self._messages.get(int(num))
+        raw = self._active_messages().get(int(num))
         if raw is None:
             return "NO", [None]
         header_line = f"{num} (RFC822 {{{len(raw)}}}".encode()
@@ -204,6 +229,104 @@ def test_sync_account_skips_already_processed_messages(monkeypatch):
 
     assert result["scanned"] == 1
     assert result["new_candidates"] == 0
+
+
+def test_account_folders_defaults_to_inbox():
+    assert mail_worker._account_folders({}) == ["INBOX"]
+
+
+def test_account_folders_uses_singular_folder():
+    assert mail_worker._account_folders({"folder": "Shipping"}) == ["Shipping"]
+
+
+def test_account_folders_uses_folders_list():
+    assert mail_worker._account_folders({"folder": "INBOX", "folders": ["INBOX", "Shipping"]}) == [
+        "INBOX",
+        "Shipping",
+    ]
+
+
+def test_account_folders_strips_blank_entries():
+    assert mail_worker._account_folders({"folders": ["INBOX", "  ", ""]}) == ["INBOX"]
+
+
+def test_sync_account_scans_every_configured_folder(monkeypatch):
+    raw_inbox = _raw_email(
+        "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-inbox@aliexpress.com>"
+    )
+    raw_shipping = _raw_email(
+        "ebay@ebay.com", "Your item has shipped", "Tracking number: 1Z999AA10123456784 Carrier: UPS", "<msg-shipping@ebay.com>"
+    )
+    fake_conn = _FakeConn(messages_by_folder={"INBOX": {1: raw_inbox}, "Shipping": {1: raw_shipping}})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(
+        mail_worker,
+        "MAILBOXES",
+        [{"host": "imap.example.com", "username": "a@example.com", "folders": ["INBOX", "Shipping"]}],
+    )
+
+    result = mail_worker.sync_mailbox()
+
+    assert result["ok"] is True
+    assert result["scanned"] == 2
+    assert result["new_candidates"] == 2
+    assert fake_conn.selected_folders == ["INBOX", "Shipping"]
+    assert fake_conn.closed and fake_conn.logged_out
+    tracking_numbers = {p["tracking_number"] for p in db.list_parcels()}
+    assert tracking_numbers == {"LP00123456789CN", "1Z999AA10123456784"}
+
+
+def test_sync_account_continues_past_one_failing_folder(monkeypatch):
+    raw_shipping = _raw_email(
+        "ebay@ebay.com", "Your item has shipped", "Tracking number: 1Z999AA10123456784 Carrier: UPS", "<msg-shipping@ebay.com>"
+    )
+
+    class _PartialFailConn(_FakeConn):
+        def select(self, folder, readonly=False):
+            self.selected_folders.append(folder)
+            self._current_folder = folder
+            if folder == "Broken":
+                return "NO", [b""]
+            return "OK", [b"1"]
+
+    fake_conn = _PartialFailConn(messages_by_folder={"Shipping": {1: raw_shipping}})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(
+        mail_worker,
+        "MAILBOXES",
+        [{"host": "imap.example.com", "username": "a@example.com", "folders": ["Broken", "Shipping"]}],
+    )
+
+    result = mail_worker.sync_mailbox()
+
+    assert result["ok"] is False
+    assert "Broken" in result["error"]
+    assert result["scanned"] == 1
+    assert result["new_candidates"] == 1
+    tracking_numbers = {p["tracking_number"] for p in db.list_parcels()}
+    assert tracking_numbers == {"1Z999AA10123456784"}
+
+
+def test_connect_passes_explicit_timeout(monkeypatch):
+    # Regression test: without an explicit timeout, a stalled IMAP server
+    # blocks the connection's socket forever, freezing the whole sync (and,
+    # via the synchronous "Check mail now" button, the dashboard itself).
+    captured = {}
+
+    class _FakeIMAP4SSL:
+        def __init__(self, host, port, timeout=None):
+            captured["host"] = host
+            captured["port"] = port
+            captured["timeout"] = timeout
+
+        def login(self, username, password):
+            pass
+
+    monkeypatch.setattr(mail_worker.imaplib, "IMAP4_SSL", _FakeIMAP4SSL)
+
+    mail_worker._connect({"host": "imap.example.com", "username": "a", "password": "b"})
+
+    assert captured["timeout"] == mail_worker._IMAP_TIMEOUT_SECONDS
 
 
 def test_sync_account_respects_ignore_senders(monkeypatch):

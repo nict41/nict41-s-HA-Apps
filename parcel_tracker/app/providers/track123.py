@@ -86,8 +86,14 @@ def _map_status(entry: dict) -> tuple[str, str | None, str | None]:
 
 def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
     """Returns {tracking_number: {"status", "status_detail", "last_event_time",
-    "estimated_delivery", "carrier_name", "confirmed"}}. Numbers with no data
-    back from the API are omitted from the result rather than guessed at."""
+    "estimated_delivery", "carrier_name", "confirmed"}}.
+
+    A number is only left out of the result if the whole request failed
+    (network/auth error) - a request that succeeded but doesn't recognise a
+    given number still gets an entry, with confirmed=False, so callers can
+    tell "Track123 has never identified this as a real tracking number" apart
+    from "we couldn't ask Track123 this time". That distinction is what
+    drives auto-dismissing candidates Track123 never confirms."""
     results: dict[str, dict] = {}
     if not API_KEY or not tracking_numbers:
         return results
@@ -98,14 +104,14 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
             {"trackNoInfos": [{"trackNo": n} for n in chunk], "queryPageSize": len(chunk)},
         )
         time.sleep(_REQUEST_DELAY_SECONDS)
-        if not response:
+        if response is None:
             continue
 
         accepted = ((response.get("data") or {}).get("accepted") or {}).get("content") or []
-        for entry in accepted:
-            number = entry.get("trackNo")
-            if not number:
-                continue
+        by_number = {entry.get("trackNo"): entry for entry in accepted if entry.get("trackNo")}
+
+        for number in chunk:
+            entry = by_number.get(number) or {}
             status, detail, event_time = _map_status(entry)
             carrier_name = (entry.get("localLogisticsInfo") or {}).get("courierNameEN") or None
             results[number] = {

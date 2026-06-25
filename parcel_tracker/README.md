@@ -32,12 +32,16 @@ copy-pasting of tracking numbers required.
    carrier or returns an actual tracking event), that number is
    **auto-confirmed** and starts tracking with the provider's carrier,
    replacing our pattern guess - so a number an email mislabelled gets
-   corrected automatically. Numbers the provider can't identify stay in the
-   queue with a status preview, for you to confirm or dismiss by hand. Each
-   parcel sticks to whichever provider it was first registered with, even if
-   you add or remove the other provider's key later. Without any provider
-   configured, parcels are still detected and listed, just with a carrier
-   tracking link instead of live status.
+   corrected automatically. A number the provider has *never once*
+   recognised - our own pattern-matching guessed wrong, e.g. an order ID
+   that happened to look like a tracking number - is automatically
+   **dismissed** after `dismiss_unconfirmed_after_days`, since the
+   provider's response is the authority on whether something is a real
+   tracking number. Each parcel sticks to whichever provider it was first
+   registered with, even if you add or remove the other provider's key
+   later. Without any provider configured, parcels are still detected and
+   listed (and never auto-dismissed), just with a carrier tracking link
+   instead of live status.
 5. Delivered parcels are kept on the dashboard for a configurable number
    of days, then automatically archived.
 6. Every parcel is also exposed as a Home Assistant sensor entity (no
@@ -87,6 +91,7 @@ Under **Mailboxes**, add one entry per email account to scan:
 | `username` | _(required)_ | Mailbox login, usually the full email address. |
 | `password` | _(required)_ | Mailbox password or app-specific password. |
 | `folder` | `INBOX` | Folder to scan. |
+| `folders` | _(blank)_ | Optional list of folders to scan instead of just `folder` - e.g. `INBOX` plus a "Shipping" label or filtered-into folder. |
 
 The remaining options apply across all configured mailboxes:
 
@@ -95,6 +100,7 @@ The remaining options apply across all configured mailboxes:
 | `lookback_days` | `14` | How far back to scan emails on each check. |
 | `poll_interval_minutes` | `30` | How often to check mail and refresh status. |
 | `auto_archive_after_days` | `14` | Auto-archive parcels this many days after delivery. `0` disables. |
+| `dismiss_unconfirmed_after_days` | `3` | Auto-dismiss a candidate this many days after a tracking provider first checks it without ever confirming it's a real number. `0` disables. Only applies when a tracking provider is configured. |
 | `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
 | `ignore_senders` | _(blank)_ | Comma-separated sender domains to skip entirely. |
 | `seventeentrack_api_key` | _(blank)_ | Optional [17track](https://www.17track.net/en/api) API key for live status. |
@@ -141,6 +147,8 @@ Open the app's ingress panel from your sidebar:
 - **In transit** - actively tracked parcels with their latest status.
 - **Delivered** - parcels marked delivered, until they're auto-archived.
 - **Archived** - dismissed or archived parcels, with an option to delete.
+  This includes numbers auto-dismissed because a tracking provider never
+  confirmed them - if that happens to a real parcel, just re-add it by hand.
 - An **add parcel** form lets you track a number manually, e.g. for a
   shipment that didn't arrive by email at all.
 

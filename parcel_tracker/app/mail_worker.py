@@ -1,4 +1,5 @@
-"""Read-only IMAP polling, across one or more configured mailboxes.
+"""Read-only IMAP polling, across one or more configured mailboxes, each of
+which can scan one or several folders.
 
 Connects with `select(folder, readonly=True)` so a mailbox is never
 modified (no read-flag changes, no deletions). Dedup is by the `Message-ID`
@@ -46,6 +47,12 @@ def _parse_mailboxes(raw_json: str) -> list[dict]:
 
 MAILBOXES: list[dict] = _parse_mailboxes(os.environ.get("MAILBOXES_JSON", "[]"))
 LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
+
+# Without an explicit timeout, a stalled/unresponsive IMAP server blocks the
+# underlying socket forever - and since the manual "Check mail now" button
+# runs this synchronously on the request thread, an indefinite hang here
+# previously froze the whole dashboard, not just the sync.
+_IMAP_TIMEOUT_SECONDS = 30
 
 # Bounds how much of a source email gets stored per parcel, for the
 # dashboard's "view full email" preview. Shipping emails are short; this is
@@ -118,19 +125,95 @@ def _message_bytes(fetch_part) -> bytes | None:
     return None
 
 
+def _account_folders(account: dict) -> list[str]:
+    """A mailbox normally scans just `folder` (default INBOX), but can list
+    several under `folders` instead - e.g. to also cover a "Shipping" label
+    or an "Archive" folder shipping notifications get filtered into."""
+    folders = account.get("folders") or []
+    if isinstance(folders, str):
+        folders = [folders]
+    folders = [f.strip() for f in folders if f and str(f).strip()]
+    return folders or [account.get("folder") or "INBOX"]
+
+
 def _connect(account: dict) -> imaplib.IMAP4:
     host = account["host"]
     port = int(account.get("port") or 993)
     if account.get("use_ssl", True):
-        conn = imaplib.IMAP4_SSL(host, port)
+        conn = imaplib.IMAP4_SSL(host, port, timeout=_IMAP_TIMEOUT_SECONDS)
     else:
-        conn = imaplib.IMAP4(host, port)
+        conn = imaplib.IMAP4(host, port, timeout=_IMAP_TIMEOUT_SECONDS)
         conn.starttls()
     conn.login(account["username"], account["password"])
+    return conn
+
+
+def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> dict:
+    scanned = 0
+    new_candidates = 0
+
     # readonly=True: the mailbox's read/unread state and contents are never
     # touched by this app.
-    conn.select(account.get("folder") or "INBOX", readonly=True)
-    return conn
+    status, _data = conn.select(folder, readonly=True)
+    if status != "OK":
+        return {"ok": False, "error": f"{label}/{folder}: select failed: {status}", "new_candidates": 0, "scanned": 0}
+
+    status, data = conn.search(None, "SINCE", since)
+    if status != "OK":
+        return {"ok": False, "error": f"{label}/{folder}: search failed: {status}", "new_candidates": 0, "scanned": 0}
+
+    message_nums = data[0].split()
+    for num in message_nums:
+        status, msg_data = conn.fetch(num, "(RFC822)")
+        if status != "OK" or not msg_data:
+            continue
+        raw = _message_bytes(msg_data[0])
+        if not raw:
+            continue
+        scanned += 1
+        msg = email.message_from_bytes(raw)
+
+        message_id = msg.get("Message-ID", "").strip()
+        if not message_id:
+            # Fall back to a synthetic id so messages without one (rare,
+            # but seen from some legacy senders) still get deduped.
+            message_id = f"{msg.get('From', '')}|{msg.get('Date', '')}|{msg.get('Subject', '')}"
+        if db.is_processed(message_id):
+            continue
+
+        sender = _decode(msg.get("From", ""))
+        if carriers.sender_domain(sender) in IGNORE_SENDERS:
+            db.mark_processed(message_id)
+            continue
+
+        subject = _decode(msg.get("Subject", ""))
+        body_text = _extract_body(msg)
+
+        candidates = carriers.detect_candidates(
+            sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
+        )
+        for candidate in candidates:
+            initial_status = (
+                db.STATUS_ACTIVE
+                if candidate.confidence >= carriers.CONFIRM_THRESHOLD
+                else db.STATUS_PENDING
+            )
+            db.upsert_parcel(
+                tracking_number=candidate.tracking_number,
+                carrier_name=candidate.carrier_name,
+                description=candidate.description,
+                confidence=candidate.confidence,
+                source_message_id=message_id,
+                initial_status=initial_status,
+                email_sender=sender,
+                email_subject=subject,
+                email_body=body_text[:MAX_EMAIL_BODY_CHARS],
+            )
+            new_candidates += 1
+
+        db.mark_processed(message_id)
+
+    return {"ok": True, "error": None, "new_candidates": new_candidates, "scanned": scanned}
 
 
 def _sync_account(account: dict) -> dict:
@@ -143,70 +226,38 @@ def _sync_account(account: dict) -> dict:
 
     scanned = 0
     new_candidates = 0
+    errors = []
     try:
         since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
-        status, data = conn.search(None, "SINCE", since)
-        if status != "OK":
-            return {"ok": False, "error": f"{label}: search failed: {status}", "new_candidates": 0, "scanned": 0}
-
-        message_nums = data[0].split()
-        for num in message_nums:
-            status, msg_data = conn.fetch(num, "(RFC822)")
-            if status != "OK" or not msg_data:
+        for folder in _account_folders(account):
+            try:
+                result = _sync_folder(conn, label, folder, since)
+            except (imaplib.IMAP4.error, OSError) as exc:
+                # One folder erroring out (timeout, transient server hiccup,
+                # ...) shouldn't stop the rest of the account's folders - or
+                # any other configured mailbox - from being scanned.
+                errors.append(f"{label}/{folder}: {exc}")
                 continue
-            raw = _message_bytes(msg_data[0])
-            if not raw:
-                continue
-            scanned += 1
-            msg = email.message_from_bytes(raw)
-
-            message_id = msg.get("Message-ID", "").strip()
-            if not message_id:
-                # Fall back to a synthetic id so messages without one (rare,
-                # but seen from some legacy senders) still get deduped.
-                message_id = f"{msg.get('From', '')}|{msg.get('Date', '')}|{msg.get('Subject', '')}"
-            if db.is_processed(message_id):
-                continue
-
-            sender = _decode(msg.get("From", ""))
-            if carriers.sender_domain(sender) in IGNORE_SENDERS:
-                db.mark_processed(message_id)
-                continue
-
-            subject = _decode(msg.get("Subject", ""))
-            body_text = _extract_body(msg)
-
-            candidates = carriers.detect_candidates(
-                sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
-            )
-            for candidate in candidates:
-                initial_status = (
-                    db.STATUS_ACTIVE
-                    if candidate.confidence >= carriers.CONFIRM_THRESHOLD
-                    else db.STATUS_PENDING
-                )
-                db.upsert_parcel(
-                    tracking_number=candidate.tracking_number,
-                    carrier_name=candidate.carrier_name,
-                    description=candidate.description,
-                    confidence=candidate.confidence,
-                    source_message_id=message_id,
-                    initial_status=initial_status,
-                    email_sender=sender,
-                    email_subject=subject,
-                    email_body=body_text[:MAX_EMAIL_BODY_CHARS],
-                )
-                new_candidates += 1
-
-            db.mark_processed(message_id)
+            scanned += result["scanned"]
+            new_candidates += result["new_candidates"]
+            if not result["ok"]:
+                errors.append(result["error"])
     finally:
         try:
             conn.close()
-        except imaplib.IMAP4.error:
+        except (imaplib.IMAP4.error, OSError):
             pass
-        conn.logout()
+        try:
+            conn.logout()
+        except (imaplib.IMAP4.error, OSError):
+            pass
 
-    return {"ok": True, "error": None, "new_candidates": new_candidates, "scanned": scanned}
+    return {
+        "ok": not errors,
+        "error": "; ".join(errors) if errors else None,
+        "new_candidates": new_candidates,
+        "scanned": scanned,
+    }
 
 
 def sync_mailbox() -> dict:

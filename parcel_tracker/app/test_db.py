@@ -167,6 +167,34 @@ def test_update_tracking_status_sets_carrier_name_and_tracking_provider():
     assert parcel["tracking_provider"] == "track123"
 
 
+def test_update_tracking_status_stamps_first_checked_at_once():
+    parcel_id = db.upsert_parcel("A", "Unknown", "a", 0.4, None, db.STATUS_PENDING)
+    assert db.get_parcel(parcel_id)["first_checked_at"] is None
+
+    db.update_tracking_status(parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None)
+    first = db.get_parcel(parcel_id)["first_checked_at"]
+    assert first is not None
+
+    db.update_tracking_status(parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None)
+    assert db.get_parcel(parcel_id)["first_checked_at"] == first
+
+
+def test_update_tracking_status_confirmed_is_sticky():
+    parcel_id = db.upsert_parcel("A", "Unknown", "a", 0.4, None, db.STATUS_PENDING)
+    assert db.get_parcel(parcel_id)["provider_confirmed"] == 0
+
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None, confirmed=True
+    )
+    assert db.get_parcel(parcel_id)["provider_confirmed"] == 1
+
+    # A later inconclusive check shouldn't undo a confirmation already earned.
+    db.update_tracking_status(
+        parcel_id, status=None, status_detail=None, last_event_time=None, estimated_delivery=None, confirmed=False
+    )
+    assert db.get_parcel(parcel_id)["provider_confirmed"] == 1
+
+
 def test_auto_archive_delivered_respects_days_and_zero_disables():
     parcel_id = db.upsert_parcel("A", "UPS", "a", 0.9, None, db.STATUS_DELIVERED)
     with db._connect() as conn:
