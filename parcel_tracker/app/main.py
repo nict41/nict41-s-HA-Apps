@@ -6,10 +6,12 @@ from pathlib import Path
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import carriers
 import db
+import ha_sync
 import mail_worker
 from providers import seventeentrack, track123
 
@@ -80,6 +82,8 @@ def run_sync_cycle() -> None:
 
     archived = db.auto_archive_delivered(AUTO_ARCHIVE_AFTER_DAYS)
 
+    ha_sync.sync(db.list_parcels())
+
     db.set_state("last_sync_at", db.now_iso())
     db.set_state(
         "last_sync_summary",
@@ -101,6 +105,11 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(title="Parcel Tracker", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
+# Serves the companion Lovelace card JS. Reached via the add-on's direct
+# port (8000/tcp in config.yaml), not its ingress URL - ingress paths are
+# session-scoped and can't be used as a stable Lovelace resource URL.
+app.mount("/static", StaticFiles(directory=str(APP_DIR / "static")), name="static")
+
 
 def _dashboard_context() -> dict:
     pending = db.list_parcels([db.STATUS_PENDING])
@@ -115,6 +124,7 @@ def _dashboard_context() -> dict:
         "last_sync_at": db.get_state("last_sync_at"),
         "last_sync_summary": db.get_state("last_sync_summary"),
         "tracking_providers_configured": tracking_providers_configured(),
+        "ha_sync_configured": ha_sync.configured(),
         "get_tracking_url": carriers.get_tracking_url,
     }
 

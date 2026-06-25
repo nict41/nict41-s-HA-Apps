@@ -111,6 +111,7 @@
     <div class="sub">
       {% if last_sync_at %}Last checked {{ last_sync_at }}{% if last_sync_summary %} &mdash; {{ last_sync_summary }}{% endif %}{% else %}Not checked yet.{% endif %}
       {% if not tracking_providers_configured %}<br />No tracking provider API key configured &mdash; showing carrier links only, no live status.{% endif %}
+      {% if ha_sync_configured %}<br />Exposed to Home Assistant as sensor entities for dashboards and automations.{% endif %}
     </div>
     <form action="sync" method="post">
       <button class="primary" type="submit">Check mail now</button>

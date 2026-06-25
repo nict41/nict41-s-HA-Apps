@@ -98,3 +98,63 @@ def test_get_tracking_url_falls_back_to_17track_for_unknown_carrier():
     url = carriers.get_tracking_url("Some Obscure Regional Carrier", "ABC123")
     assert "17track.net" in url
     assert "ABC123" in url
+
+
+def test_retailer_domain_matches_notification_subdomain():
+    # Real AliExpress shipping updates come from a subdomain, not the bare
+    # domain - this must still get the high-confidence label parser.
+    sender = "AliExpress <transaction@notice.aliexpress.com>"
+    subject = "Package JJD0002234785196396: left the departure region"
+    body = "Tracking Number: JJD0002234785196396."
+    candidates = carriers.detect_candidates(sender, subject, body)
+    assert len(candidates) == 1
+    assert candidates[0].confidence == 0.92
+
+
+def test_aliexpress_jjd_tracking_number_detected_without_explicit_label():
+    sender = "AliExpress <transaction@notice.aliexpress.com>"
+    subject = "Package JJD0002234785196396: left the departure region"
+    body = (
+        "Your package JJD0002234785196396 has left the place of departure "
+        "and is now in transit to the destination country/region. "
+        "Track delivery"
+    )
+    candidates = carriers.detect_candidates(sender, subject, body)
+    numbers = {c.tracking_number for c in candidates}
+    assert "JJD0002234785196396" in numbers
+    candidate = next(c for c in candidates if c.tracking_number == "JJD0002234785196396")
+    assert "Cainiao" in candidate.carrier_name
+    assert candidate.confidence >= carriers.CONFIRM_THRESHOLD
+
+
+def test_ebay_item_id_and_order_number_are_not_picked_up_as_tracking_numbers():
+    # eBay order-confirmation emails print an Item ID and Order number before
+    # a tracking number even exists - a bare 12-digit Item ID otherwise
+    # collides with the generic FedEx-shaped pattern.
+    sender = "eBay <ebay@ebay.com>"
+    subject = "Order update: OXVA XLIM PODS KIT V3 Pod..."
+    body = (
+        "Hi Nicholas, keep track of your order. "
+        "Item ID: 358665784843 "
+        "Order number: 06-14764-13438 "
+        "Seller: vapepoint "
+        "Your order will be dispatched to: 34 Owens Quay"
+    )
+    candidates = carriers.detect_candidates(sender, subject, body)
+    numbers = {c.tracking_number for c in candidates}
+    assert "358665784843" not in numbers
+
+
+def test_ebay_real_tracking_number_still_detected_alongside_item_id():
+    sender = "eBay <ebay@ebay.com>"
+    subject = "Order update: OXVA XLIM PODS KIT V3 Pod..."
+    body = (
+        "Hi Nicholas, keep track of your order. "
+        "Tracking number: 32072900700074E3F1818 "
+        "Item ID: 358665784843 "
+        "Order number: 06-14764-13438 "
+        "Seller: vapepoint"
+    )
+    candidates = carriers.detect_candidates(sender, subject, body)
+    numbers = {c.tracking_number for c in candidates}
+    assert numbers == {"32072900700074E3F1818"}

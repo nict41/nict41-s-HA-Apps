@@ -40,6 +40,10 @@ copy-pasting of tracking numbers required.
    tracking link instead of live status.
 5. Delivered parcels are kept on the dashboard for a configurable number
    of days, then automatically archived.
+6. Every parcel is also exposed as a Home Assistant sensor entity (no
+   extra setup), so you can build automations or a Lovelace card around
+   your packages without opening the app at all - see
+   [Home Assistant entities](#home-assistant-entities) below.
 
 ## Setup
 
@@ -142,6 +146,70 @@ Open the app's ingress panel from your sidebar:
 
 "**Check mail now**" runs a sync immediately instead of waiting for the
 next scheduled check.
+
+## Home Assistant entities
+
+With no extra setup beyond installing the add-on, your parcels are also
+exposed as Home Assistant sensor entities - using the add-on's own
+Supervisor-granted access to the Home Assistant API, so no MQTT setup or
+extra credentials are needed. If you're upgrading from an older version,
+restart the add-on once so this new permission takes effect.
+
+- `sensor.parcel_tracker_summary` - state is the number of currently
+  tracked parcels (everything except archived/dismissed). Attributes
+  include `pending_confirmation`, `in_transit`, and `delivered` counts,
+  plus a `parcels` list with full detail for every tracked parcel (this
+  is what the Lovelace card below reads).
+- `sensor.parcel_tracker_<tracking-number>` - one entity per tracked
+  parcel, state is its status (`pending`, `active`, `exception`, or
+  `delivered`) - useful as an automation trigger for one specific
+  package. The entity disappears once that parcel is archived or
+  dismissed.
+
+Example automation, notifying when a specific parcel is delivered (find
+the exact entity id on the dashboard or under **Developer Tools →
+States**, searching for `parcel_tracker`):
+
+```yaml
+automation:
+  - alias: Notify when a parcel is delivered
+    trigger:
+      - platform: state
+        entity_id: sensor.parcel_tracker_1z999aa10123456784
+        to: "delivered"
+    action:
+      - service: notify.mobile_app_your_phone
+        data:
+          message: "Delivered: {{ trigger.to_state.attributes.description }}"
+```
+
+States set this way aren't tied to a registered integration, so they
+briefly disappear across a Home Assistant restart until the next
+scheduled check (governed by `poll_interval_minutes`) re-creates them.
+
+## Lovelace card
+
+A companion dashboard card ships with the add-on. It reads everything
+from `sensor.parcel_tracker_summary` via the card's normal `hass`
+property, so it needs no network access to the add-on itself.
+
+1. Make sure direct port access is enabled for the add-on (**Settings →
+   Add-ons → Parcel Tracker**, the port row next to `8000`) - the card
+   is served from the add-on's direct port rather than its ingress URL,
+   since ingress paths are session-scoped and can't be used as a stable
+   Lovelace resource URL.
+2. **Settings → Dashboards → Resources → Add resource**. URL:
+   `http://<home-assistant-host-or-ip>:8000/static/parcel-tracker-card.js`,
+   resource type **JavaScript module**.
+3. Edit a dashboard, add a card, choose **Manual**, and use:
+   ```yaml
+   type: custom:parcel-tracker-card
+   title: Parcels
+   ```
+
+The card groups parcels into Needs confirmation / In transit / Delivered,
+same as the app's own dashboard, with a link out to each carrier's
+tracking page per parcel.
 
 ## Storage
 

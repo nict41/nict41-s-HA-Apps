@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0
+
+- Every tracked parcel is now exposed as a Home Assistant sensor entity
+  (`sensor.parcel_tracker_<tracking-number>`), plus a
+  `sensor.parcel_tracker_summary` entity carrying counts and full parcel
+  detail - using the add-on's own Supervisor-granted Home Assistant API
+  access, with no MQTT setup or extra credentials required. Entities for
+  archived/dismissed parcels are removed automatically. Lets automations
+  trigger off a specific package's status.
+- Added a companion Lovelace custom card (`parcel-tracker-card`), served
+  from the add-on's direct port, that reads the summary entity and shows
+  the same Needs confirmation / In transit / Delivered grouping as the
+  app's own dashboard - so parcels can be checked from a normal Home
+  Assistant dashboard without opening the add-on.
+- Improved tracking-number detection accuracy:
+  - Retailer notification mail sent from a subdomain (e.g.
+    `notice.aliexpress.com`) is now correctly recognised as that retailer,
+    rather than only matching the bare domain.
+  - Added support for Cainiao/AliExpress Standard Shipping's `JJD`-prefixed
+    tracking number format, alongside the existing `LP`-prefixed one.
+  - eBay/AliExpress order-confirmation emails no longer have their Item
+    ID, Order number, or invoice/transaction ID mistaken for a tracking
+    number - these numeric IDs happened to collide with the generic
+    carrier-shaped patterns (e.g. a 12-digit eBay Item ID matching the
+    FedEx pattern) used as a fallback when no real tracking number is
+    present yet.
+  - A "Track delivery"/"Track shipment"-style button next to a retailer's
+    tracking-number label is no longer mistaken for the tracking number
+    itself.
+
 ## 0.4.0
 
 - Added [Track123](https://www.track123.com/) as a second, independently
