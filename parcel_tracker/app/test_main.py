@@ -35,6 +35,21 @@ def test_dashboard_loads_when_empty():
     assert "Parcel Tracker" in resp.text
 
 
+def test_static_card_js_allows_cross_origin_requests():
+    # The Lovelace card is loaded by HA's frontend via a cross-origin
+    # `import()` (the add-on's direct port vs. HA's own frontend port) -
+    # without this header the browser silently refuses to run it, so the
+    # card never registers itself even though the URL loads fine on its own.
+    resp = client.get("/static/parcel-tracker-card.js")
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
+
+
+def test_dashboard_route_does_not_get_the_static_cors_header():
+    resp = client.get("/")
+    assert "access-control-allow-origin" not in resp.headers
+
+
 def test_add_parcel_creates_active_parcel_and_redirects():
     resp = client.post(
         "/add",

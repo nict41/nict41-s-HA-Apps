@@ -9,6 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.base import BaseHTTPMiddleware
 
 import carriers
 import db
@@ -128,7 +129,25 @@ async def lifespan(_app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
+class _StaticCORSMiddleware(BaseHTTPMiddleware):
+    """Home Assistant's frontend loads a "JavaScript module" Lovelace
+    resource via a cross-origin `import()` (the add-on's direct port vs.
+    HA's own frontend port), which browsers block without an explicit
+    Access-Control-Allow-Origin header - so without this, the card's script
+    never runs and never registers itself, even though the URL loads fine
+    from a plain browser navigation (which isn't subject to CORS at all).
+    Scoped to `/static` only, rather than a blanket CORSMiddleware, since
+    the rest of the app's routes mutate state and don't need this."""
+
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+
 app = FastAPI(title="Parcel Tracker", lifespan=lifespan)
+app.add_middleware(_StaticCORSMiddleware)
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 # Serves the companion Lovelace card JS. Reached via the add-on's direct

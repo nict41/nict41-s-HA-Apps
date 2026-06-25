@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1
+
+- Fixed the Lovelace card not showing up in the card picker, and failing
+  to load when added manually via YAML (`Custom element doesn't exist:
+  parcel-tracker-card`), even though the resource URL loaded fine when
+  opened directly in a browser. Home Assistant's frontend loads a
+  "JavaScript module" resource via a cross-origin `import()` - the add-on's
+  direct port differs from HA's own frontend port - which browsers silently
+  block without an `Access-Control-Allow-Origin` header, so the card's
+  script never ran and never registered itself. A plain browser
+  navigation to the same URL isn't subject to that restriction, which is
+  why the resource appeared to load fine on its own. The add-on's static
+  asset route now sends that header.
+
 ## 0.6.0
 
 - Fixed a freeze during mail sync: IMAP connections had no socket timeout,
