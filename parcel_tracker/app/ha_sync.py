@@ -47,6 +47,17 @@ _STATUS_ICONS = {
 # parcel cleans up after itself in Home Assistant too.
 _EXCLUDED_STATUSES = {db.STATUS_ARCHIVED, db.STATUS_DISMISSED}
 
+# The entity state (and the summary's per-parcel "status") use a simpler,
+# stable vocabulary than the internal status column - documented in the
+# README as the public contract automations are written against - so
+# internal statuses can be renamed/added without breaking either one.
+_EXTERNAL_STATUS = {
+    db.STATUS_PENDING: "pending",
+    db.STATUS_ACTIVE: "active",
+    db.STATUS_EXCEPTION: "exception",
+    db.STATUS_DELIVERED: "delivered",
+}
+
 
 def configured() -> bool:
     return bool(SUPERVISOR_TOKEN)
@@ -85,7 +96,7 @@ def _delete_state(entity_id: str) -> None:
 
 def _parcel_state(parcel: dict) -> dict:
     return {
-        "state": parcel["status"],
+        "state": _EXTERNAL_STATUS.get(parcel["status"], parcel["status"]),
         "attributes": {
             "friendly_name": parcel["description"] or parcel["tracking_number"],
             "icon": _STATUS_ICONS.get(parcel["status"], _DEFAULT_ICON),
@@ -117,7 +128,7 @@ def _summary_state(parcels: list[dict]) -> dict:
                     "tracking_number": p["tracking_number"],
                     "carrier_name": p["carrier_name"],
                     "description": p["description"],
-                    "status": p["status"],
+                    "status": _EXTERNAL_STATUS.get(p["status"], p["status"]),
                     "status_detail": p["status_detail"],
                     "estimated_delivery": p["estimated_delivery"],
                     "last_event_time": p["last_event_time"],

@@ -51,6 +51,16 @@ def test_dashboard_route_does_not_get_the_static_cors_header():
     assert "access-control-allow-origin" not in resp.headers
 
 
+def test_api_parcels_allows_cross_origin_requests_for_the_lovelace_card():
+    # The card fetches this endpoint from its own origin (the add-on's
+    # direct port) to load a parcel's full tracking history on demand -
+    # without this header the browser would refuse to let the card's script
+    # read the response, the same way it would for the static JS itself.
+    resp = client.get("/api/parcels")
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
+
+
 def test_dashboard_response_is_not_cached():
     # A browser tab left open across an add-on rebuild would otherwise keep
     # serving its cached copy of this page (and the sync-form JS in it).

@@ -54,13 +54,21 @@ def test_sync_posts_summary_and_per_parcel_state(_calls):
     assert posts["sensor.parcel_tracker_summary"]["attributes"]["in_transit"] == 1
 
     parcel_entity_id = ha_sync.entity_id_for(parcel)
-    assert posts[parcel_entity_id]["state"] == db.STATUS_ACTIVE
+    assert posts[parcel_entity_id]["state"] == "active"
     assert posts[parcel_entity_id]["attributes"]["tracking_number"] == "ABC123"
     assert posts[parcel_entity_id]["attributes"]["friendly_name"] == "Cables"
 
     summary_parcel = posts["sensor.parcel_tracker_summary"]["attributes"]["parcels"][0]
     assert summary_parcel["tracking_number"] == "ABC123"
+    assert summary_parcel["status"] == "active"
     assert summary_parcel["tracking_url"] == carriers.get_tracking_url("ABC123")
+
+
+def test_parcel_state_translates_internal_status_to_the_documented_ha_vocabulary(_calls):
+    pending = _make_parcel("PEND1", db.STATUS_PENDING)
+    ha_sync.sync([pending])
+    posts = {entity_id: body for method, entity_id, body in _calls if method == "POST"}
+    assert posts[ha_sync.entity_id_for(pending)]["state"] == "pending"
 
 
 def test_archived_and_dismissed_parcels_are_excluded_from_sync(_calls):

@@ -138,25 +138,28 @@ async def lifespan(_app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-class _StaticCORSMiddleware(BaseHTTPMiddleware):
-    """Home Assistant's frontend loads a "JavaScript module" Lovelace
+class _CardCORSMiddleware(BaseHTTPMiddleware):
+    """Home Assistant's frontend loads the "JavaScript module" Lovelace
     resource via a cross-origin `import()` (the add-on's direct port vs.
-    HA's own frontend port), which browsers block without an explicit
-    Access-Control-Allow-Origin header - so without this, the card's script
-    never runs and never registers itself, even though the URL loads fine
-    from a plain browser navigation (which isn't subject to CORS at all).
-    Scoped to `/static` only, rather than a blanket CORSMiddleware, since
-    the rest of the app's routes mutate state and don't need this."""
+    HA's own frontend port), and that same script later fetches
+    `/api/parcels` from that same origin to read each parcel's full
+    tracking history on demand - too large to fit in the lightweight
+    summary HA exposes via `hass.states` (see ha_sync.py). Both are blocked
+    by browsers without an explicit Access-Control-Allow-Origin header,
+    even though both URLs load fine from a plain browser navigation or curl
+    (neither of which is subject to CORS at all). Scoped to these two
+    read-only routes rather than a blanket CORSMiddleware, since the rest
+    of the app's routes mutate state and don't need this."""
 
     async def dispatch(self, request, call_next):
         response = await call_next(request)
-        if request.url.path.startswith("/static/"):
+        if request.url.path.startswith("/static/") or request.url.path == "/api/parcels":
             response.headers["Access-Control-Allow-Origin"] = "*"
         return response
 
 
 app = FastAPI(title="Parcel Tracker", lifespan=lifespan)
-app.add_middleware(_StaticCORSMiddleware)
+app.add_middleware(_CardCORSMiddleware)
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 # Serves the companion Lovelace card JS. Reached via the add-on's direct

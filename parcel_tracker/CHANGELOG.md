@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.17
+
+- The Lovelace card's rows are now clickable to reveal the same full
+  tracking history panel added to the dashboard in 0.6.16 - carrier link,
+  tracking provider, first-detected/last-checked times, and every
+  recorded event. Since a full history for every parcel wouldn't fit in
+  Home Assistant's entity attribute size limit, the panel is fetched on
+  demand from the add-on's own `/api/parcels` endpoint (the same origin
+  the card's script itself was loaded from) the first time a row is
+  expanded, rather than being carried in `hass.states` at all.
+- Fixed a bug where Home Assistant entity states for pending/in-transit
+  parcels never actually used the simplified `pending`/`active` values
+  documented in the README - they leaked the internal
+  `pending_confirmation`/`in_transit` status strings instead, which meant
+  the Lovelace card's "Needs confirmation" and "In transit" groupings
+  (and any automation written against the documented states) silently
+  never matched real parcels.
+
 ## 0.6.16
 
 - Cards on the dashboard are now clickable to reveal a full tracking

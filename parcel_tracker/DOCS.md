@@ -218,9 +218,9 @@ scheduled check (governed by `poll_interval_minutes`) re-creates them.
 
 ## Lovelace card
 
-A companion dashboard card ships with the add-on. It reads everything
-from `sensor.parcel_tracker_summary` via the card's normal `hass`
-property, so it needs no network access to the add-on itself.
+A companion dashboard card ships with the add-on. It reads the parcel
+list from `sensor.parcel_tracker_summary` via the card's normal `hass`
+property.
 
 1. Make sure direct port access is enabled for the add-on (**Settings →
    Add-ons → Parcel Tracker**, the port row next to `8000`) - the card
@@ -238,7 +238,14 @@ property, so it needs no network access to the add-on itself.
 
 The card groups parcels into Needs confirmation / In transit / Delivered,
 same as the app's own dashboard, with a link out to each carrier's
-tracking page per parcel.
+tracking page per parcel. Click a row to expand its full tracking
+history, fetched on demand from the add-on's own `/api/parcels`
+endpoint - the entity attribute only ever carries each parcel's latest
+status, since a full per-event history for every parcel wouldn't fit
+within Home Assistant's attribute size limit. This reuses the same
+origin (the add-on's direct port) the card's own script was loaded
+from, so it works wherever the card itself already loads, with nothing
+extra to configure.
 
 ## Storage
 
