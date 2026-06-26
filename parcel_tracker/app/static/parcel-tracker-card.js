@@ -16,11 +16,23 @@
 // session-scoped and can't be used as a stable Lovelace resource), type
 // JavaScript Module. Then add a card with `type: custom:parcel-tracker-card`.
 
-// Resolved once at load time from this script's own URL, since that's
-// already known to be reachable (it's how this very file got loaded) -
-// the history fetch below reuses that same origin rather than asking the
-// user to configure it separately.
-const SCRIPT_ORIGIN = new URL(import.meta.url).origin;
+// Resolved once at load time from this script's own <script> tag, not
+// `import.meta.url`. Home Assistant's resource loader (loadModule/loadJS)
+// always injects a real <script src="..."> element for both "JavaScript
+// Module" and "JavaScript File" resource types, so this lookup finds it
+// either way - whereas `import.meta` is a parse-time SyntaxError outside a
+// module, which would take the whole card down (not just this one origin
+// lookup) the moment a resource is registered as "JavaScript File" instead
+// of "JavaScript Module" (an easy mix-up in the resource dialog). Falls
+// back to the page's own origin only if no matching tag is found at all,
+// which would just degrade the on-demand history fetch below, not the row
+// list itself.
+const SCRIPT_ORIGIN = (() => {
+  const tag = Array.from(document.getElementsByTagName("script")).find(
+    (s) => s.src && s.src.includes("parcel-tracker-card.js")
+  );
+  return tag ? new URL(tag.src).origin : location.origin;
+})();
 
 const escapeHtml = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({

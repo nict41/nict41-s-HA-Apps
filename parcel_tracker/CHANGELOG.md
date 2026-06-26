@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.18
+
+- Fixed a regression from 0.6.17 that broke the Lovelace card entirely: it
+  used `import.meta.url` to find the origin to fetch tracking history
+  from, but that's a parse-time error for any script that isn't loaded as
+  an ES module - which silently took down the whole card (the custom
+  element never registered at all) for anyone whose Lovelace resource
+  ended up registered as "JavaScript File" instead of "JavaScript Module"
+  (an easy mix-up in the resource dialog). The origin is now found by
+  looking up the card's own `<script src="...">` tag in the page instead,
+  which Home Assistant's resource loader injects for both resource types,
+  so the card now works (and still fetches history from the right origin)
+  regardless of which one was picked.
+
 ## 0.6.17
 
 - The Lovelace card's rows are now clickable to reveal the same full
