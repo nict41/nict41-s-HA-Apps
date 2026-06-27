@@ -208,6 +208,21 @@ async def list_jobs():
     return {"jobs": _job_records()}
 
 
+@app.post("/jobs/delete")
+async def delete_job(job_id: str = Form(...)):
+    # Clears a capture job's frame directory - used from the gallery to remove
+    # a stuck/abandoned "Capturing now" entry (e.g. a job that never got a
+    # /finish). Only ever touches `current/`; archived GIFs are untouched.
+    job_id = _validate_job_id(job_id)
+    job_dir = (CURRENT_DIR / job_id).resolve()
+    # Defence in depth on top of the job_id charset check: never delete
+    # anything that isn't a direct child of current/.
+    if job_dir.parent != CURRENT_DIR.resolve():
+        raise HTTPException(400, "invalid job_id")
+    shutil.rmtree(job_dir, ignore_errors=True)
+    return {"status": "ok", "job_id": job_id}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def gallery(request: Request):
     gifs = _gif_records()

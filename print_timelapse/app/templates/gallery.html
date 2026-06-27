@@ -14,6 +14,7 @@
       --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
       --accent: #4f46e5; --accent-hover: #4338ca; --accent-contrast: #ffffff;
       --accent-soft: #eef2ff; --accent-soft-text: #4338ca; --focus-ring: rgba(79,70,229,0.35);
+      --danger: #c0392b; --danger-bg: #fde0e0;
       --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
       --shadow-md: 0 4px 14px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
       --radius-sm: 7px; --radius: 12px; --radius-pill: 999px;
@@ -29,6 +30,7 @@
         --text: #e7e9ee; --text-muted: #9aa2b1; --text-faint: #6b7482;
         --accent: #818cf8; --accent-hover: #a5b4fc; --accent-contrast: #0e1014;
         --accent-soft: rgba(99,102,241,0.16); --accent-soft-text: #b4bcff; --focus-ring: rgba(129,140,248,0.45);
+        --danger: #fca5a5; --danger-bg: rgba(248,113,113,0.15);
         --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
         --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
       }
@@ -110,8 +112,40 @@
       box-shadow: var(--shadow-sm); overflow: hidden;
       transition: box-shadow 0.15s ease, border-color 0.15s ease; }
     .card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
-    .card-img { display: block; background: #000; aspect-ratio: 4 / 3; }
-    .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card-img { position: relative; display: block; background: #000; aspect-ratio: 4 / 3;
+      cursor: pointer; overflow: hidden; }
+    .card-img canvas, .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card-img:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--focus-ring); }
+    .play-btn { position: absolute; inset: 0; margin: auto; width: 52px; height: 52px;
+      border: none; border-radius: 50%; background: rgba(15,18,24,0.55); color: #fff;
+      display: grid; place-items: center; cursor: pointer;
+      transition: background 0.12s ease, opacity 0.15s ease; pointer-events: none; }
+    .play-btn svg { width: 22px; height: 22px; }
+    .card-img:hover .play-btn { background: rgba(15,18,24,0.72); }
+    /* While playing, fade the control out until the card is hovered, so the
+       animation isn't covered but pausing is still one move away. */
+    .card-img.is-playing .play-btn { opacity: 0; }
+    .card-img.is-playing:hover .play-btn { opacity: 1; }
+
+    /* Kebab overflow menu (on live job rows) */
+    .kebab { position: relative; flex: none; }
+    .kebab-toggle { display: inline-flex; align-items: center; justify-content: center;
+      width: 30px; height: 30px; border-radius: var(--radius-sm); border: 1px solid transparent;
+      background: transparent; color: var(--text-faint); cursor: pointer; }
+    .kebab-toggle:hover { background: var(--surface-2); color: var(--text); }
+    .kebab-toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    .kebab-toggle svg { width: 18px; height: 18px; }
+    .kebab-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+      min-width: 150px; padding: 0.3rem; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); box-shadow: var(--shadow-md); }
+    .kebab-menu[hidden] { display: none; }
+    .kebab-item { display: flex; align-items: center; gap: 0.55rem; width: 100%;
+      padding: 0.5rem 0.6rem; border: none; border-radius: 6px; background: transparent;
+      color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; }
+    .kebab-item:hover { background: var(--surface-hover); }
+    .kebab-item svg { width: 15px; height: 15px; }
+    .kebab-item-danger { color: var(--danger); }
+    .kebab-item-danger:hover { background: var(--danger-bg); }
     .card-body { padding: var(--space-3) var(--space-4) var(--space-4); }
     .card-name { font-family: var(--mono); font-size: 0.84rem; font-weight: 600; color: var(--text);
       word-break: break-all; line-height: 1.35; }
@@ -142,6 +176,10 @@
     <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
     <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -185,6 +223,12 @@
           <div class="job-bar"><div class="job-fill" style="width: {{ job.percent }}%"></div></div>
         </div>
         <div class="job-pct">{{ job.percent }}%</div>
+        <div class="kebab" data-kebab>
+          <button type="button" class="kebab-toggle" aria-label="More actions" aria-haspopup="true" aria-expanded="false"><svg aria-hidden="true"><use href="#i-dots"/></svg></button>
+          <div class="kebab-menu" role="menu" hidden>
+            <button type="button" class="kebab-item kebab-item-danger job-delete" role="menuitem" data-job-id="{{ job.job_id }}"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+          </div>
+        </div>
       </div>
       {% endfor %}
     </div>
@@ -196,9 +240,10 @@
     <div class="grid">
       {% for gif in gifs %}
       <div class="card">
-        <a class="card-img" href="archive/{{ gif.filename }}" target="_blank" rel="noopener">
-          <img src="archive/{{ gif.filename }}" alt="{{ gif.filename }}" loading="lazy" />
-        </a>
+        <div class="card-img" data-gif="archive/{{ gif.filename }}" role="button" tabindex="0" aria-label="Play {{ gif.filename }}">
+          <canvas class="poster"></canvas>
+          <button type="button" class="play-btn" tabindex="-1" aria-hidden="true"><svg aria-hidden="true"><use href="#i-play"/></svg></button>
+        </div>
         <div class="card-body">
           <div class="card-name">{{ gif.filename }}</div>
           <div class="card-meta">
@@ -254,12 +299,64 @@
     }
     formatAll();
 
+    // ---- Play-on-demand GIFs -------------------------------------------
+    // GIFs autoplay and can't be paused natively, which is distracting in a
+    // wall of them. So each card shows a still first-frame poster (drawn to a
+    // canvas) and only swaps in the live animating GIF when the user presses
+    // play; pressing again restores the still. Entirely client-side, so it
+    // still works through Home Assistant's ingress proxy.
+    document.querySelectorAll(".card-img").forEach(function (holder) {
+      var url = holder.dataset.gif;
+      var canvas = holder.querySelector("canvas");
+      var btn = holder.querySelector(".play-btn");
+      var playing = false, liveImg = null;
+
+      var poster = new Image();
+      poster.onload = function () {
+        canvas.width = poster.naturalWidth || 320;
+        canvas.height = poster.naturalHeight || 240;
+        try { canvas.getContext("2d").drawImage(poster, 0, 0); } catch (e) {}
+      };
+      poster.src = url;
+
+      function setIcon(id) {
+        var use = btn.querySelector("use");
+        if (use) use.setAttribute("href", id);
+      }
+      function play() {
+        if (playing) return;
+        // A fresh <img> (cached src) restarts the animation from frame 1.
+        liveImg = document.createElement("img");
+        liveImg.alt = "";
+        liveImg.src = url;
+        holder.insertBefore(liveImg, btn);
+        canvas.style.display = "none";
+        holder.classList.add("is-playing");
+        setIcon("#i-pause");
+        playing = true;
+      }
+      function pause() {
+        if (!playing) return;
+        if (liveImg) { liveImg.remove(); liveImg = null; }
+        canvas.style.display = "";
+        holder.classList.remove("is-playing");
+        setIcon("#i-play");
+        playing = false;
+      }
+      function toggle() { playing ? pause() : play(); }
+      holder.addEventListener("click", toggle);
+      holder.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+      });
+    });
+
     // ---- Live in-progress jobs -----------------------------------------
     // Poll while the page is open so a running capture updates without a
     // manual refresh. Cheap (a small JSON list) and idempotent.
     var jobsEl = document.getElementById("jobs");
     var jobsHead = document.getElementById("jobs-head");
     var jobsCount = document.getElementById("jobs-count");
+    var lastJobsKey = null;
 
     function esc(s) {
       return String(s).replace(/[&<>"']/g, function (c) {
@@ -267,23 +364,67 @@
       });
     }
 
+    function jobRowHtml(j) {
+      return '<div class="job">' +
+        '<span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>' +
+        '<div class="job-main">' +
+          '<div class="job-title">' + esc(j.job_id) + '</div>' +
+          '<div class="job-meta">' + j.frames + ' frame' + (j.frames === 1 ? '' : 's') +
+            ' &middot; updated <time data-iso="' + esc(j.updated) + '">' + esc(j.updated) + '</time></div>' +
+          '<div class="job-bar"><div class="job-fill" style="width:' + j.percent + '%"></div></div>' +
+        '</div>' +
+        '<div class="job-pct">' + j.percent + '%</div>' +
+        '<div class="kebab" data-kebab>' +
+          '<button type="button" class="kebab-toggle" aria-label="More actions" aria-haspopup="true" aria-expanded="false"><svg aria-hidden="true"><use href="#i-dots"/></svg></button>' +
+          '<div class="kebab-menu" role="menu" hidden>' +
+            '<button type="button" class="kebab-item kebab-item-danger job-delete" role="menuitem" data-job-id="' + esc(j.job_id) + '"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+
     function renderJobs(jobs) {
       jobsCount.textContent = jobs.length;
       jobsHead.hidden = jobs.length === 0;
-      jobsEl.innerHTML = jobs.map(function (j) {
-        return '<div class="job">' +
-          '<span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>' +
-          '<div class="job-main">' +
-            '<div class="job-title">' + esc(j.job_id) + '</div>' +
-            '<div class="job-meta">' + j.frames + ' frame' + (j.frames === 1 ? '' : 's') +
-              ' &middot; updated <time data-iso="' + esc(j.updated) + '">' + esc(j.updated) + '</time></div>' +
-            '<div class="job-bar"><div class="job-fill" style="width:' + j.percent + '%"></div></div>' +
-          '</div>' +
-          '<div class="job-pct">' + j.percent + '%</div>' +
-        '</div>';
-      }).join("");
+      // Skip the DOM rebuild when nothing changed, so an open kebab menu isn't
+      // wiped out by a poll tick (stale jobs don't change between polls).
+      var key = JSON.stringify(jobs);
+      if (key === lastJobsKey) return;
+      lastJobsKey = key;
+      jobsEl.innerHTML = jobs.map(jobRowHtml).join("");
       formatAll(jobsEl);
     }
+
+    function closeJobMenus() {
+      jobsEl.querySelectorAll(".kebab-menu").forEach(function (m) { m.hidden = true; });
+      jobsEl.querySelectorAll(".kebab-toggle").forEach(function (t) { t.setAttribute("aria-expanded", "false"); });
+    }
+
+    // Delegated so it survives job-row re-renders.
+    jobsEl.addEventListener("click", function (e) {
+      var toggle = e.target.closest(".kebab-toggle");
+      if (toggle) {
+        e.stopPropagation();
+        var menu = toggle.parentNode.querySelector(".kebab-menu");
+        var willOpen = menu.hidden;
+        closeJobMenus();
+        menu.hidden = !willOpen;
+        toggle.setAttribute("aria-expanded", String(willOpen));
+        return;
+      }
+      var del = e.target.closest(".job-delete");
+      if (del) {
+        e.stopPropagation();
+        var id = del.dataset.jobId;
+        if (!confirm('Delete capture job "' + id + '"? This removes its captured frames.')) return;
+        var body = new URLSearchParams();
+        body.set("job_id", id);
+        fetch("jobs/delete", { method: "POST", body: body })
+          .then(function () { lastJobsKey = null; pollJobs(); })
+          .catch(function () {});
+      }
+    });
+    document.addEventListener("click", closeJobMenus);
 
     function pollJobs() {
       fetch("jobs").then(function (r) { return r.json(); })

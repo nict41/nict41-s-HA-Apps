@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed `401: Unauthorized` when clicking a GIF in the gallery. The redesign
+  in 0.4.0 reintroduced the old bug where the thumbnail opened the
+  ingress-proxied GIF URL in a new tab, which breaks out of the
+  ingress-scoped session. GIFs now play in place instead of opening a tab.
+- GIFs no longer autoplay: each archived GIF shows a still first-frame
+  preview and only animates when you press play (press again to pause).
+- Added a **⋮** menu on each **Capturing now** row to delete a stuck or
+  abandoned capture job (clears that job's frames only; archived GIFs are
+  never affected).
+
 ## 0.4.0
 
 - Redesigned the gallery onto a proper design system that follows your

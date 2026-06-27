@@ -259,6 +259,36 @@ def test_jobs_endpoint_ignores_empty_job_dirs():
     assert client.get("/jobs").json()["jobs"] == []
 
 
+def test_delete_job_removes_current_dir_and_clears_from_jobs():
+    client.post("/start", data={"job_id": "stuckjob"})
+    client.post("/frame", data={"job_id": "stuckjob", "percent": "100", "image_url": IMAGE_URL})
+    assert (main.CURRENT_DIR / "stuckjob").is_dir()
+
+    resp = client.post("/jobs/delete", data={"job_id": "stuckjob"})
+    assert resp.status_code == 200
+    assert not (main.CURRENT_DIR / "stuckjob").exists()
+    assert client.get("/jobs").json()["jobs"] == []
+
+
+@pytest.mark.parametrize("bad_job_id", ["../archive", "has space", "..", "a/b"])
+def test_delete_job_rejects_unsafe_job_id(bad_job_id):
+    resp = client.post("/jobs/delete", data={"job_id": bad_job_id})
+    assert resp.status_code == 400
+
+
+def test_delete_job_leaves_archive_untouched(tmp_path):
+    # A real GIF in the archive must never be removed by the job-delete route.
+    gif = main.ARCHIVE_DIR / "keep_me.gif"
+    gif.write_bytes(b"GIF89a")
+    client.post("/jobs/delete", data={"job_id": "keep_me"})  # not a current/ job
+    assert gif.exists()
+
+
+def test_delete_nonexistent_job_is_a_noop_ok():
+    resp = client.post("/jobs/delete", data={"job_id": "ghost"})
+    assert resp.status_code == 200
+
+
 # ---- /finish honours runtime settings ----------------------------------
 
 def test_finish_uses_settings_fps_and_width(monkeypatch):

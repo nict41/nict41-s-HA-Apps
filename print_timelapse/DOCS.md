@@ -172,6 +172,13 @@ capture), a live **Capturing now** section for any print currently being
 captured (frame count + progress), and humanized timestamps/sizes. It
 follows your device's light/dark setting.
 
+Each archived GIF shows a still preview and only animates when you press
+**play** (press again to pause), so the gallery isn't a wall of looping
+animations. If a capture ever gets stuck in **Capturing now** (e.g. a print
+that never reached its final frame), use the **⋮** menu on that row to
+delete it — this only clears that job's captured frames, never an archived
+GIF.
+
 ## Options
 
 These can be set either in the add-on **Configuration** tab (the values
