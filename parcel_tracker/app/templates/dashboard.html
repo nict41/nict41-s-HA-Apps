@@ -5,411 +5,975 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Parcel Tracker</title>
   <style>
-    :root { color-scheme: dark; }
+    /* ---- Design tokens -------------------------------------------------
+       One light palette in :root, overridden for dark under
+       prefers-color-scheme so the panel follows whatever Home Assistant /
+       the OS is set to. Everything below is built from these tokens rather
+       than hard-coded colours, so the two themes stay in lockstep. */
+    :root {
+      color-scheme: light dark;
+
+      --bg: #f5f6f8;
+      --surface: #ffffff;
+      --surface-2: #f1f3f6;
+      --surface-hover: #f7f8fa;
+      --border: #e4e7ec;
+      --border-strong: #d4d9e0;
+      --text: #1b1f27;
+      --text-muted: #5b6473;
+      --text-faint: #8a92a0;
+
+      --accent: #4f46e5;
+      --accent-hover: #4338ca;
+      --accent-contrast: #ffffff;
+      --accent-soft: #eef2ff;
+      --accent-soft-text: #4338ca;
+      --focus-ring: rgba(79, 70, 229, 0.35);
+
+      --st-pending-bg: #fef4d8;
+      --st-pending-fg: #8a5a06;
+      --st-transit-bg: #dceafe;
+      --st-transit-fg: #1d4ed8;
+      --st-exception-bg: #fde0e0;
+      --st-exception-fg: #c0392b;
+      --st-delivered-bg: #d8f3e0;
+      --st-delivered-fg: #1c8a4e;
+      --st-archived-bg: #eaecf0;
+      --st-archived-fg: #6b7280;
+
+      --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05);
+      --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08), 0 1px 3px rgba(16, 24, 40, 0.05);
+      --shadow-pop: 0 12px 32px rgba(16, 24, 40, 0.14);
+
+      --radius-sm: 7px;
+      --radius: 12px;
+      --radius-lg: 16px;
+      --radius-pill: 999px;
+
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-5: 1.5rem;
+      --space-6: 2rem;
+
+      --maxw: 940px;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code",
+        "Roboto Mono", Menlo, Consolas, monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1014;
+        --surface: #181b21;
+        --surface-2: #12151b;
+        --surface-hover: #1e222a;
+        --border: #272c36;
+        --border-strong: #343b48;
+        --text: #e7e9ee;
+        --text-muted: #9aa2b1;
+        --text-faint: #6b7482;
+
+        --accent: #818cf8;
+        --accent-hover: #a5b4fc;
+        --accent-contrast: #0e1014;
+        --accent-soft: rgba(99, 102, 241, 0.16);
+        --accent-soft-text: #b4bcff;
+        --focus-ring: rgba(129, 140, 248, 0.45);
+
+        --st-pending-bg: rgba(245, 158, 11, 0.16);
+        --st-pending-fg: #fbbf24;
+        --st-transit-bg: rgba(56, 189, 248, 0.15);
+        --st-transit-fg: #7dd3fc;
+        --st-exception-bg: rgba(248, 113, 113, 0.15);
+        --st-exception-fg: #fca5a5;
+        --st-delivered-bg: rgba(52, 211, 153, 0.15);
+        --st-delivered-fg: #6ee7a7;
+        --st-archived-bg: rgba(148, 163, 184, 0.12);
+        --st-archived-fg: #9aa6b8;
+
+        --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4);
+        --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    /* Defensive default size for every inline icon: each is a <svg> with no
+       width/height attribute referencing the sprite below. Without this, any
+       icon a component rule forgets to size falls back to the SVG default
+       (a huge 300x150 box). The hidden sprite carries width="0" so it's
+       excluded; per-component rules below are equal specificity and win by
+       source order. */
+    svg:not([width]) { width: 15px; height: 15px; flex: none; }
+
     body {
       margin: 0;
-      padding: 1.5rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #111318;
-      color: #e3e3e3;
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
     }
-    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
-    h2 { font-size: 1.05rem; margin: 2rem 0 0.75rem; color: #cfd2d8; }
-    .sub { color: #9aa0a6; margin-bottom: 0.5rem; font-size: 0.9rem; }
-    .empty { color: #9aa0a6; padding: 1.5rem 0; font-size: 0.9rem; }
-    .list { display: flex; flex-direction: column; gap: 0.6rem; }
-    .card {
-      background: #1b1f27;
-      border-radius: 10px;
-      border: 1px solid #2a2f3a;
-      padding: 0.75rem 1rem;
+
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
+
+    /* ---- Top bar ------------------------------------------------------- */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: saturate(1.4) blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .topbar-inner {
+      max-width: var(--maxw);
+      margin: 0 auto;
+      padding: var(--space-3) var(--space-5);
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-      flex-wrap: wrap;
+      gap: var(--space-3);
     }
-    .card .info { flex: 1; min-width: 220px; cursor: pointer; border-radius: 6px; }
-    .card .info:hover { background: rgba(255, 255, 255, 0.03); }
-    .chevron {
-      display: inline-block;
-      margin-left: 0.3rem;
-      font-size: 0.65rem;
-      color: #7db4ff;
-      transition: transform 0.15s ease;
+    .brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+    .brand-logo {
+      width: 38px; height: 38px; flex: none;
+      border-radius: 10px;
+      display: grid; place-items: center;
+      background: var(--accent-soft);
+      color: var(--accent-soft-text);
     }
-    .chevron.open { transform: rotate(180deg); }
-    .history {
-      flex: 1 0 100%;
-      margin-top: 0.6rem;
-      padding-top: 0.6rem;
-      border-top: 1px solid #2a2f3a;
+    .brand-logo svg { width: 22px; height: 22px; }
+    .brand-text { min-width: 0; }
+    .brand-title { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; }
+    .brand-sub {
+      font-size: 0.78rem; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .history-meta {
-      display: flex;
-      gap: 0.9rem;
-      flex-wrap: wrap;
-      font-size: 0.78rem;
-      color: #9aa0a6;
-      margin-bottom: 0.6rem;
-    }
-    .history-title { font-size: 0.8rem; color: #cfd2d8; margin-bottom: 0.4rem; font-weight: 600; }
-    .history-empty { font-size: 0.8rem; color: #9aa0a6; }
-    .history-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
-    .history-timeline li { padding-left: 0.75rem; border-left: 2px solid #2a2f3a; }
-    .history-time { font-size: 0.74rem; color: #7db4ff; }
-    .history-detail { font-size: 0.82rem; color: #e3e3e3; margin-top: 0.1rem; }
-    .card .tracking {
-      font-weight: 600;
-      font-size: 0.95rem;
-      color: #e3e3e3;
-    }
-    .card .desc { color: #9aa0a6; font-size: 0.82rem; margin-top: 0.1rem; }
-    .card .status-line { font-size: 0.82rem; margin-top: 0.25rem; }
-    .badge {
-      display: inline-block;
-      padding: 0.1rem 0.5rem;
-      border-radius: 999px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      margin-right: 0.4rem;
-    }
-    .badge.pending { background: #4a3a14; color: #f2c14e; }
-    .badge.active { background: #1c3a52; color: #7db4ff; }
-    .badge.exception { background: #4a1c1c; color: #ff8f8f; }
-    .badge.delivered { background: #1c4a2a; color: #7fe3a1; }
-    .badge.archived { background: #2a2a2a; color: #9aa0a6; }
-    .email-snippet { color: #b7bcc4; font-size: 0.78rem; margin-top: 0.35rem; font-style: italic; }
-    .email-full { margin-top: 0.35rem; }
-    .email-full summary { cursor: pointer; font-size: 0.78rem; color: #7db4ff; }
-    .email-meta { color: #9aa0a6; font-size: 0.78rem; margin: 0.4rem 0 0.3rem; }
-    .email-body {
-      white-space: pre-wrap;
-      word-break: break-word;
-      background: #111318;
-      border: 1px solid #2a2f3a;
-      border-radius: 6px;
-      padding: 0.6rem;
-      font-size: 0.78rem;
-      color: #cfd2d8;
-      max-height: 260px;
-      overflow-y: auto;
-      margin: 0;
-    }
-    .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-    .actions form { margin: 0; }
-    button, .link-btn {
-      background: #262b35;
-      color: #e3e3e3;
-      border: 1px solid #383e4a;
-      border-radius: 6px;
-      padding: 0.35rem 0.7rem;
-      font-size: 0.78rem;
+    .topbar-spacer { flex: 1; }
+
+    /* ---- Buttons ------------------------------------------------------- */
+    button, .btn {
+      font-family: inherit;
+      font-size: 0.82rem;
+      font-weight: 550;
+      line-height: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.5rem 0.8rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-strong);
+      background: var(--surface);
+      color: var(--text);
       cursor: pointer;
       text-decoration: none;
-      display: inline-block;
+      white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.05s ease,
+        box-shadow 0.12s ease;
     }
-    button.primary { background: #1c3a52; border-color: #2c557a; color: #7db4ff; }
-    button.danger { background: #3a1c1c; border-color: #5a2c2c; color: #ff8f8f; }
-    .add-form, .sync-row {
-      background: #1b1f27;
-      border-radius: 10px;
-      border: 1px solid #2a2f3a;
-      padding: 1rem;
-      margin-bottom: 1rem;
+    button:hover, .btn:hover { background: var(--surface-hover); border-color: var(--text-faint); }
+    button:active, .btn:active { transform: translateY(0.5px); }
+    button svg, .btn svg { width: 15px; height: 15px; }
+    button:focus-visible, .btn:focus-visible, .info:focus-visible,
+    summary:focus-visible, input:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--focus-ring);
     }
-    .add-form { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
-    .add-form label { display: block; font-size: 0.75rem; color: #9aa0a6; margin-bottom: 0.25rem; }
-    .add-form input {
-      background: #111318;
-      border: 1px solid #383e4a;
-      border-radius: 6px;
-      color: #e3e3e3;
-      padding: 0.4rem 0.6rem;
-      font-size: 0.85rem;
+    .btn-primary {
+      background: var(--accent); border-color: var(--accent); color: var(--accent-contrast);
     }
-    .sync-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
-    .sync-row .sub { margin: 0; }
-    .data-menu {
-      background: #1b1f27;
-      border-radius: 10px;
-      border: 1px solid #2a2f3a;
-      padding: 0.75rem 1rem;
-      margin-bottom: 1rem;
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-danger { color: var(--st-exception-fg); }
+    .btn-danger:hover { background: var(--st-exception-bg); border-color: var(--st-exception-fg); }
+    .btn-ghost { background: transparent; border-color: transparent; color: var(--text-muted); }
+    .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+    button:disabled { opacity: 0.55; cursor: default; transform: none; }
+    button:disabled:hover { background: var(--accent); border-color: var(--accent); }
+    .btn-sm { padding: 0.38rem 0.6rem; font-size: 0.78rem; }
+
+    /* ---- Stat tiles ---------------------------------------------------- */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-3);
+      margin: var(--space-5) 0 var(--space-5);
     }
-    .data-menu summary { cursor: pointer; font-size: 0.85rem; color: #9aa0a6; }
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: var(--space-4);
+      box-shadow: var(--shadow-sm);
+    }
+    .stat-num {
+      font-size: 1.7rem; font-weight: 680; letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums; line-height: 1;
+    }
+    .stat-label {
+      display: flex; align-items: center; gap: 0.4rem;
+      margin-top: 0.45rem; font-size: 0.78rem; color: var(--text-muted);
+    }
+    .stat-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .stat.is-pending .stat-dot { background: var(--st-pending-fg); }
+    .stat.is-transit .stat-dot { background: var(--st-transit-fg); }
+    .stat.is-delivered .stat-dot { background: var(--st-delivered-fg); }
+    .stat.is-exception .stat-dot { background: var(--st-exception-fg); }
+    .stat.is-exception .stat-num { color: var(--st-exception-fg); }
+
+    /* ---- Section headers ----------------------------------------------- */
+    .section { margin-top: var(--space-6); }
+    .section-head {
+      display: flex; align-items: baseline; gap: 0.5rem;
+      margin-bottom: var(--space-3);
+    }
+    .section-head h2 {
+      font-size: 0.82rem; font-weight: 650; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--text-muted); margin: 0;
+    }
+    .section-count {
+      font-size: 0.72rem; font-weight: 600; color: var(--text-faint);
+      font-variant-numeric: tabular-nums;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-pill); padding: 0.05rem 0.5rem;
+    }
+
+    /* ---- Cards --------------------------------------------------------- */
+    .list { display: flex; flex-direction: column; gap: var(--space-3); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      overflow: hidden;
+      transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    .card:hover { box-shadow: var(--shadow-md); }
+    .card.is-exception { border-left: 3px solid var(--st-exception-fg); }
+    .card-body {
+      display: flex; align-items: flex-start; gap: var(--space-4);
+      padding: var(--space-4);
+    }
+    .info {
+      flex: 1; min-width: 0; cursor: pointer;
+      border-radius: var(--radius-sm); margin: calc(var(--space-2) * -1);
+      padding: var(--space-2);
+    }
+    .info:hover { background: var(--surface-hover); }
+
+    .card-top {
+      display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap;
+    }
+    .tracking {
+      font-family: var(--mono); font-size: 0.95rem; font-weight: 600;
+      letter-spacing: -0.01em; color: var(--text);
+    }
+    .chevron {
+      margin-left: auto; color: var(--text-faint);
+      transition: transform 0.18s ease; flex: none;
+    }
+    .chevron svg { width: 16px; height: 16px; display: block; }
+    .info[aria-expanded="true"] .chevron { transform: rotate(180deg); }
+
+    .meta-line {
+      display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;
+      margin-top: 0.4rem; font-size: 0.82rem; color: var(--text-muted);
+    }
+    .carrier-chip {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-pill); padding: 0.1rem 0.55rem;
+      font-size: 0.74rem; font-weight: 550; color: var(--text-muted);
+    }
+    .carrier-chip svg { width: 12px; height: 12px; }
+    .meta-sep { color: var(--text-faint); }
+    .desc-text { color: var(--text); }
+
+    .status-line { margin-top: 0.5rem; font-size: 0.84rem; color: var(--text); }
+    .status-line .muted { color: var(--text-muted); }
+    .eta {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      color: var(--accent-soft-text); font-weight: 550;
+    }
+    .eta svg { width: 13px; height: 13px; }
+
+    /* ---- Status badge -------------------------------------------------- */
+    .badge {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      padding: 0.16rem 0.55rem; border-radius: var(--radius-pill);
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.01em;
+    }
+    .badge::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+    }
+    .badge.pending { background: var(--st-pending-bg); color: var(--st-pending-fg); }
+    .badge.active { background: var(--st-transit-bg); color: var(--st-transit-fg); }
+    .badge.exception { background: var(--st-exception-bg); color: var(--st-exception-fg); }
+    .badge.delivered { background: var(--st-delivered-bg); color: var(--st-delivered-fg); }
+    .badge.archived { background: var(--st-archived-bg); color: var(--st-archived-fg); }
+
+    /* ---- Confidence meter (pending) ------------------------------------ */
+    .confidence { display: inline-flex; align-items: center; gap: 0.4rem; }
+    .confidence-track {
+      width: 46px; height: 5px; border-radius: var(--radius-pill);
+      background: var(--surface-2); overflow: hidden;
+    }
+    .confidence-fill { height: 100%; border-radius: inherit; background: var(--st-pending-fg); }
+
+    /* ---- Progress stepper (active / delivered) ------------------------- */
+    .stepper {
+      display: flex; align-items: center; gap: 0;
+      margin-top: 0.85rem; padding-right: 0.25rem;
+    }
+    .step { display: flex; align-items: center; flex: 1; min-width: 0; }
+    .step:last-child { flex: none; }
+    .step-dot {
+      width: 16px; height: 16px; border-radius: 50%; flex: none;
+      border: 2px solid var(--border-strong); background: var(--surface);
+      display: grid; place-items: center; color: var(--accent-contrast);
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+    .step-dot svg { width: 9px; height: 9px; opacity: 0; }
+    .step-bar { flex: 1; height: 2px; background: var(--border-strong); margin: 0 2px; }
+    .step.done .step-dot { background: var(--accent); border-color: var(--accent); }
+    .step.done .step-dot svg { opacity: 1; }
+    .step.done .step-bar { background: var(--accent); }
+    .step.current .step-dot {
+      border-color: var(--accent); background: var(--surface);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+    .step.current .step-dot::after {
+      content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    }
+    .stepper.is-exception .step.current .step-dot {
+      border-color: var(--st-exception-fg); box-shadow: 0 0 0 4px var(--st-exception-bg);
+    }
+    .stepper.is-exception .step.current .step-dot::after { background: var(--st-exception-fg); }
+    .step-labels {
+      display: flex; justify-content: space-between;
+      margin-top: 0.35rem; font-size: 0.68rem; color: var(--text-faint);
+    }
+    .step-labels span { flex: 1; }
+    .step-labels span:first-child { text-align: left; }
+    .step-labels span:last-child { text-align: right; flex: none; }
+    .step-labels span:nth-child(2) { text-align: center; }
+    .step-labels span:nth-child(3) { text-align: center; }
+
+    /* ---- Email snippet (pending) --------------------------------------- */
+    .email-snippet {
+      margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);
+      font-style: italic;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .email-full { margin-top: 0.5rem; }
+    .email-full summary {
+      cursor: pointer; font-size: 0.78rem; color: var(--accent-soft-text);
+      font-weight: 550; display: inline-flex; align-items: center; gap: 0.3rem;
+      list-style: none;
+    }
+    .email-full summary::-webkit-details-marker { display: none; }
+    .email-meta { color: var(--text-muted); font-size: 0.78rem; margin: 0.5rem 0 0.35rem; }
+    .email-body {
+      white-space: pre-wrap; word-break: break-word;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: 0.7rem;
+      font-size: 0.78rem; color: var(--text-muted);
+      max-height: 260px; overflow-y: auto; margin: 0;
+    }
+
+    /* ---- Actions ------------------------------------------------------- */
+    .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; flex: none; align-items: flex-start; }
+    .actions form { margin: 0; }
+
+    /* ---- History panel ------------------------------------------------- */
+    .history {
+      border-top: 1px solid var(--border);
+      padding: var(--space-4);
+      background: var(--surface-2);
+    }
+    .history-meta {
+      display: flex; gap: 0.5rem 1rem; flex-wrap: wrap; align-items: center;
+      font-size: 0.78rem; color: var(--text-muted); margin-bottom: var(--space-4);
+    }
+    .history-meta-item { display: inline-flex; align-items: center; gap: 0.35rem; }
+    .history-meta-item svg { width: 13px; height: 13px; color: var(--text-faint); }
+    .history-title {
+      font-size: 0.72rem; font-weight: 650; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--text-faint); margin-bottom: 0.7rem;
+    }
+    .history-empty {
+      font-size: 0.82rem; color: var(--text-muted);
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .history-empty svg { width: 16px; height: 16px; color: var(--text-faint); }
+    .timeline { list-style: none; margin: 0; padding: 0; }
+    .timeline li {
+      position: relative; padding: 0 0 0.9rem 1.3rem;
+    }
+    .timeline li::before {
+      content: ""; position: absolute; left: 4px; top: 1.45rem; bottom: -0.1rem;
+      width: 2px; background: var(--border-strong);
+    }
+    .timeline li:last-child { padding-bottom: 0; }
+    .timeline li:last-child::before { display: none; }
+    .timeline li::after {
+      content: ""; position: absolute; left: 0; top: 0.35rem;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--surface-2); border: 2px solid var(--border-strong);
+    }
+    .timeline li:first-child::after { border-color: var(--accent); background: var(--accent); }
+    .history-time {
+      font-size: 0.74rem; color: var(--text-faint);
+      font-variant-numeric: tabular-nums;
+    }
+    .history-detail { font-size: 0.84rem; color: var(--text); margin-top: 0.1rem; }
+    .history-loc { color: var(--text-muted); }
+
+    /* ---- Toolbar cards (add / data / sync banner) ---------------------- */
+    .panel {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-sm);
+      padding: var(--space-4); margin-bottom: var(--space-3);
+    }
+    .panel-add { padding: var(--space-4) var(--space-5); }
+    .add-head {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.82rem; font-weight: 600; color: var(--text);
+      margin-bottom: var(--space-4);
+    }
+    .add-head svg { width: 16px; height: 16px; color: var(--text-muted); }
+    .add-form { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field.grow { flex: 1; min-width: 160px; }
+    .field label {
+      font-size: 0.72rem; font-weight: 550; color: var(--text-muted);
+      letter-spacing: 0.01em;
+    }
+    input[type="text"], input:not([type]), .add-form input, .reset-all-form input {
+      font-family: inherit; font-size: 0.86rem;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+      padding: 0.5rem 0.65rem;
+    }
+    input::placeholder { color: var(--text-faint); }
+
+    .notice {
+      display: flex; align-items: flex-start; gap: 0.5rem;
+      font-size: 0.8rem; color: var(--text-muted);
+      margin-top: var(--space-3);
+    }
+    .notice svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--text-faint); }
+
+    .data-menu summary {
+      cursor: pointer; font-size: 0.82rem; color: var(--text-muted);
+      font-weight: 550; display: inline-flex; align-items: center; gap: 0.4rem;
+      list-style: none;
+    }
+    .data-menu summary::-webkit-details-marker { display: none; }
+    .data-menu summary svg { width: 15px; height: 15px; }
+    .data-menu[open] summary { margin-bottom: var(--space-4); }
     .data-menu-body {
-      margin-top: 0.75rem;
-      display: flex;
-      align-items: flex-start;
-      gap: 1.5rem;
-      flex-wrap: wrap;
+      display: flex; align-items: flex-start; gap: var(--space-5); flex-wrap: wrap;
     }
+    .reset-all-hint { color: var(--text-muted); font-size: 0.78rem; margin: 0 0 0.5rem; max-width: 320px; }
     .reset-all-form { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
-    .reset-all-form input {
-      background: #111318;
-      border: 1px solid #383e4a;
-      border-radius: 6px;
-      color: #e3e3e3;
-      padding: 0.35rem 0.6rem;
-      font-size: 0.82rem;
-      width: 7rem;
+    .reset-all-form input { width: 7rem; }
+
+    /* ---- Empty states -------------------------------------------------- */
+    .empty {
+      display: flex; flex-direction: column; align-items: center;
+      text-align: center; gap: 0.5rem;
+      padding: var(--space-6) var(--space-4);
+      color: var(--text-muted); font-size: 0.86rem;
+      background: var(--surface); border: 1px dashed var(--border-strong);
+      border-radius: var(--radius);
     }
-    .reset-all-hint { color: #9aa0a6; font-size: 0.78rem; margin: 0 0 0.4rem; }
-    button:disabled { opacity: 0.65; cursor: default; }
+    .empty svg { width: 28px; height: 28px; color: var(--text-faint); }
+
+    /* ---- Spinner ------------------------------------------------------- */
     .spinner {
-      display: inline-block;
-      width: 0.8em;
-      height: 0.8em;
-      margin-right: 0.4rem;
-      vertical-align: -0.1em;
-      border: 2px solid rgba(227, 227, 227, 0.35);
-      border-top-color: #7db4ff;
-      border-radius: 50%;
+      display: inline-block; width: 0.85em; height: 0.85em;
+      border: 2px solid color-mix(in srgb, currentColor 30%, transparent);
+      border-top-color: currentColor; border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
-    /* Setting `display` above on a class selector beats the browser's own
-       `[hidden] { display: none }` UA rule even at equal specificity, since
-       an author rule always wins over a UA rule regardless of source order -
-       so without this, the `hidden` attribute on #sync-spinner is silently
-       ignored and the spinner spins on every page load, sync or no sync. */
-    .spinner[hidden] {
-      display: none;
+    .spinner[hidden] { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation-duration: 0.001ms !important; }
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+
+    /* ---- Responsive ---------------------------------------------------- */
+    @media (max-width: 720px) {
+      .wrap { padding: 0 var(--space-4) var(--space-5); }
+      .topbar-inner { padding: var(--space-3) var(--space-4); }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .card-body { flex-direction: column; }
+      .actions { width: 100%; }
+      .brand-sub { display: none; }
     }
   </style>
 </head>
 <body>
+  <!-- Inline icon sprite: keeps the panel fully self-contained (no CDN /
+       webfont request), so it renders identically offline inside the
+       add-on. Referenced below via <use href="#id">. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-box" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 8l-9-5-9 5v8l9 5 9-5V8z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>
+    </symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/>
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><path d="M10 12h4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></symbol>
+    <symbol id="i-reset" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-truck" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11v9H3z"/><path d="M14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.6"/><circle cx="17" cy="18" r="1.6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-inbox" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h5l2 3h4l2-3h5"/><path d="M5 5h14l2 7v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
+    <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></symbol>
+  </svg>
+
   {% macro history_panel(p) %}
   <div class="history" hidden>
     <div class="history-meta">
-      <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Open carrier tracker</a>
-      {% if p.tracking_provider %}<span>Tracked via {{ p.tracking_provider }}</span>{% endif %}
-      {% if p.created_at %}<span>First detected {{ p.created_at }}</span>{% endif %}
-      {% if p.updated_at %}<span>Last checked {{ p.updated_at }}</span>{% endif %}
+      <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">
+        <svg aria-hidden="true"><use href="#i-external"/></svg> Open carrier tracker
+      </a>
+      {% if p.tracking_provider %}
+      <span class="history-meta-item"><svg aria-hidden="true"><use href="#i-truck"/></svg>Tracked via {{ p.tracking_provider }}</span>
+      {% endif %}
+      {% if p.created_at %}
+      <span class="history-meta-item"><svg aria-hidden="true"><use href="#i-box"/></svg>First detected <time data-iso="{{ p.created_at }}" data-style="rel">{{ p.created_at }}</time></span>
+      {% endif %}
+      {% if p.updated_at %}
+      <span class="history-meta-item"><svg aria-hidden="true"><use href="#i-clock"/></svg>Last checked <time data-iso="{{ p.updated_at }}" data-style="rel">{{ p.updated_at }}</time></span>
+      {% endif %}
     </div>
     {% if p.tracking_history %}
     <div class="history-title">Tracking history</div>
-    <ol class="history-timeline">
+    <ol class="timeline">
       {% for event in p.tracking_history %}
       <li>
-        <div class="history-time">{{ event.time or "Unknown time" }}</div>
-        <div class="history-detail">{{ event.detail }}{% if event.location %} &middot; {{ event.location }}{% endif %}</div>
+        <div class="history-time">
+          {% if event.time %}<time data-iso="{{ event.time }}" data-style="abs">{{ event.time }}</time>{% else %}Unknown time{% endif %}
+        </div>
+        <div class="history-detail">{{ event.detail }}{% if event.location %} <span class="history-loc">&middot; {{ event.location }}</span>{% endif %}</div>
       </li>
       {% endfor %}
     </ol>
     {% else %}
-    <div class="history-empty">No tracking history available yet.</div>
+    <div class="history-empty"><svg aria-hidden="true"><use href="#i-clock"/></svg>No tracking history available yet.</div>
     {% endif %}
   </div>
   {% endmacro %}
 
-  <h1>Parcel Tracker</h1>
-  <div class="sub">Automatically detected and manually added parcels.</div>
-
-  <div class="sync-row">
-    <div class="sub">
-      {% if last_sync_at %}Last checked {{ last_sync_at }}{% if last_sync_summary %} &mdash; {{ last_sync_summary }}{% endif %}{% else %}Not checked yet.{% endif %}
-      {% if not tracking_providers_configured %}<br />No tracking provider API key configured &mdash; showing carrier links only, no live status.{% endif %}
-      {% if ha_sync_configured %}<br />Exposed to Home Assistant as sensor entities for dashboards and automations.{% endif %}
-    </div>
-    <form action="sync" method="post" id="sync-form">
-      <button class="primary" type="submit" id="sync-button">
-        <span class="spinner" id="sync-spinner" hidden></span>
-        <span id="sync-button-label">Check mail now</span>
-      </button>
-    </form>
+  {% macro stepper(p) %}
+  {% set is_exc = p.status == 'exception' %}
+  <div class="stepper{% if is_exc %} is-exception{% endif %}"
+       data-status="{{ p.status }}" data-detail="{{ p.status_detail or '' }}" aria-hidden="true">
+    <div class="step"><span class="step-dot"><svg aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-bar"></span></div>
+    <div class="step"><span class="step-dot"><svg aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-bar"></span></div>
+    <div class="step"><span class="step-dot"><svg aria-hidden="true"><use href="#i-check"/></svg></span><span class="step-bar"></span></div>
+    <div class="step"><span class="step-dot"><svg aria-hidden="true"><use href="#i-check"/></svg></span></div>
   </div>
+  <div class="step-labels" aria-hidden="true">
+    <span>Detected</span><span>In transit</span><span>Out for delivery</span><span>Delivered</span>
+  </div>
+  {% endmacro %}
 
-  <details class="data-menu">
-    <summary>Data management</summary>
-    <div class="data-menu-body">
-      <a class="link-btn" href="export">Export data (JSON)</a>
-      <div>
-        <p class="reset-all-hint">Type RESET below to enable wiping every parcel and sync history. This cannot be undone.</p>
-        <form class="reset-all-form" action="admin/reset-all" method="post" id="reset-all-form">
-          <input id="reset-all-confirm" name="confirm_text" placeholder="RESET" autocomplete="off" />
-          <button class="danger" type="submit" id="reset-all-button" disabled>Reset all data</button>
-        </form>
-      </div>
-    </div>
-  </details>
-
-  <form class="add-form" action="add" method="post" id="add-form">
-    <div>
-      <label for="tracking_number">Tracking number</label>
-      <input id="tracking_number" name="tracking_number" required />
-    </div>
-    <div>
-      <label for="carrier_name">Carrier (optional)</label>
-      <input id="carrier_name" name="carrier_name" />
-    </div>
-    <div>
-      <label for="description">Description (optional)</label>
-      <input id="description" name="description" />
-    </div>
-    <button class="primary" type="submit">Add parcel</button>
-  </form>
-
-  {% if pending %}
-  <h2>Needs confirmation ({{ pending|length }})</h2>
-  <div class="list">
-    {% for p in pending %}
-    <div class="card">
-      <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge pending">unconfirmed</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
-        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; confidence {{ (p.confidence * 100) | round | int }}%</div>
-        {% if p.status_detail %}
-        <div class="status-line">{{ p.status_detail }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
-        {% endif %}
-        {% if p.email_body %}
-        <div class="email-snippet">{{ p.email_body | truncate(160) }}</div>
-        <details class="email-full">
-          <summary>View full email</summary>
-          <div class="email-meta">
-            From: {{ p.email_sender or "Unknown sender" }}
-            {% if p.email_subject %}&middot; Subject: {{ p.email_subject }}{% endif %}
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo"><svg aria-hidden="true"><use href="#i-box"/></svg></span>
+        <div class="brand-text">
+          <div class="brand-title">Parcel Tracker</div>
+          <div class="brand-sub">
+            {% if last_sync_at %}Last checked <time data-iso="{{ last_sync_at }}" data-style="rel">{{ last_sync_at }}</time>{% if last_sync_summary %} &middot; {{ last_sync_summary }}{% endif %}{% else %}Not checked yet{% endif %}
           </div>
-          <pre class="email-body">{{ p.email_body }}</pre>
-        </details>
-        {% endif %}
-      </div>
-      {{ history_panel(p) }}
-      <div class="actions">
-        <form action="confirm" method="post">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button class="primary" type="submit">Confirm</button>
-        </form>
-        <form action="dismiss" method="post">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Not a parcel</button>
-        </form>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  <h2>In transit ({{ active|length }})</h2>
-  {% if not active %}
-  <div class="empty">No parcels in transit.</div>
-  {% else %}
-  <div class="list">
-    {% for p in active %}
-    <div class="card">
-      <div class="info">
-        <div class="tracking">
-          {{ p.tracking_number }}
-          <span class="badge {{ 'exception' if p.status == 'exception' else 'active' }}">{{ 'exception' if p.status == 'exception' else 'in transit' }}</span>
-          <span class="chevron" aria-hidden="true">&#9662;</span>
         </div>
-        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
-        <div class="status-line">{{ p.status_detail or "No status yet" }}{% if p.estimated_delivery %} &middot; est. delivery {{ p.estimated_delivery }}{% endif %}</div>
       </div>
-      {{ history_panel(p) }}
-      <div class="actions">
-        <a class="link-btn" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener">Track</a>
-        <form action="reset" method="post" class="reset-form">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Reset</button>
-        </form>
-        <form action="archive" method="post">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Archive</button>
-        </form>
-      </div>
+      <div class="topbar-spacer"></div>
+      <form action="sync" method="post" id="sync-form">
+        <button class="btn-primary" type="submit" id="sync-button">
+          <span class="spinner" id="sync-spinner" hidden></span>
+          <svg id="sync-icon" aria-hidden="true"><use href="#i-refresh"/></svg>
+          <span id="sync-button-label">Check mail now</span>
+        </button>
+      </form>
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+  </header>
 
-  <h2>Delivered ({{ delivered|length }})</h2>
-  {% if not delivered %}
-  <div class="empty">No delivered parcels yet.</div>
-  {% else %}
-  <div class="list">
-    {% for p in delivered %}
-    <div class="card">
-      <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge delivered">delivered</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
-        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }} &middot; delivered {{ p.delivered_at }}</div>
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat is-pending">
+        <div class="stat-num">{{ pending|length }}</div>
+        <div class="stat-label"><span class="stat-dot"></span>Needs confirmation</div>
       </div>
-      {{ history_panel(p) }}
-      <div class="actions">
-        <form action="reset" method="post" class="reset-form">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Reset</button>
-        </form>
-        <form action="archive" method="post">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Archive</button>
-        </form>
+      <div class="stat is-transit">
+        <div class="stat-num">{{ active|length }}</div>
+        <div class="stat-label"><span class="stat-dot"></span>In transit</div>
+      </div>
+      <div class="stat is-delivered">
+        <div class="stat-num">{{ delivered|length }}</div>
+        <div class="stat-label"><span class="stat-dot"></span>Delivered</div>
+      </div>
+      {% set exception_count = active | selectattr('status', 'equalto', 'exception') | list | length %}
+      <div class="stat is-exception">
+        <div class="stat-num">{{ exception_count }}</div>
+        <div class="stat-label"><span class="stat-dot"></span>Needs attention</div>
       </div>
     </div>
-    {% endfor %}
-  </div>
-  {% endif %}
 
-  {% if archived %}
-  <h2>Archived ({{ archived|length }})</h2>
-  <div class="list">
-    {% for p in archived %}
-    <div class="card">
-      <div class="info">
-        <div class="tracking">{{ p.tracking_number }} <span class="badge archived">{{ p.status }}</span><span class="chevron" aria-hidden="true">&#9662;</span></div>
-        <div class="desc">{{ p.description or "" }} &middot; {{ p.carrier_name or "Unknown carrier" }}</div>
-      </div>
-      {{ history_panel(p) }}
-      <div class="actions">
-        <form action="reset" method="post" class="reset-form">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button type="submit">Reset</button>
-        </form>
-        <form action="delete" method="post">
-          <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-          <button class="danger" type="submit">Delete</button>
-        </form>
-      </div>
+    {% if not tracking_providers_configured or ha_sync_configured %}
+    <div class="panel">
+      {% if not tracking_providers_configured %}
+      <div class="notice"><svg aria-hidden="true"><use href="#i-info"/></svg><span>No tracking provider API key configured &mdash; showing carrier links only, no live status.</span></div>
+      {% endif %}
+      {% if ha_sync_configured %}
+      <div class="notice"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Exposed to Home Assistant as sensor entities for dashboards and automations.</span></div>
+      {% endif %}
     </div>
-    {% endfor %}
+    {% endif %}
+
+    <form class="panel panel-add add-form" action="add" method="post" id="add-form">
+      <div class="add-head" style="flex:1 0 100%"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add a parcel manually</div>
+      <div class="field grow">
+        <label for="tracking_number">Tracking number</label>
+        <input id="tracking_number" name="tracking_number" required />
+      </div>
+      <div class="field grow">
+        <label for="carrier_name">Carrier (optional)</label>
+        <input id="carrier_name" name="carrier_name" />
+      </div>
+      <div class="field grow">
+        <label for="description">Description (optional)</label>
+        <input id="description" name="description" />
+      </div>
+      <button class="btn-primary" type="submit"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add parcel</button>
+    </form>
+
+    {% if pending %}
+    <section class="section">
+      <div class="section-head"><h2>Needs confirmation</h2><span class="section-count">{{ pending|length }}</span></div>
+      <div class="list">
+        {% for p in pending %}
+        <div class="card">
+          <div class="card-body">
+            <div class="info" role="button" tabindex="0" aria-expanded="false">
+              <div class="card-top">
+                <span class="tracking">{{ p.tracking_number }}</span>
+                <span class="badge pending">Unconfirmed</span>
+                <span class="chevron"><svg aria-hidden="true"><use href="#i-chevron"/></svg></span>
+              </div>
+              <div class="meta-line">
+                {% if p.carrier_name %}<span class="carrier-chip"><svg aria-hidden="true"><use href="#i-truck"/></svg>{{ p.carrier_name }}</span>{% else %}<span class="carrier-chip"><svg aria-hidden="true"><use href="#i-truck"/></svg>Unknown carrier</span>{% endif %}
+                {% if p.description %}<span class="meta-sep">&middot;</span><span class="desc-text">{{ p.description }}</span>{% endif %}
+                <span class="meta-sep">&middot;</span>
+                <span class="confidence" title="Detection confidence">
+                  <span class="confidence-track"><span class="confidence-fill" style="width: {{ (p.confidence * 100) | round | int }}%"></span></span>
+                  {{ (p.confidence * 100) | round | int }}%
+                </span>
+              </div>
+              {% if p.status_detail %}
+              <div class="status-line">{{ p.status_detail }}{% if p.estimated_delivery %} <span class="eta"><svg aria-hidden="true"><use href="#i-calendar"/></svg><time data-iso="{{ p.estimated_delivery }}" data-style="eta">{{ p.estimated_delivery }}</time></span>{% endif %}</div>
+              {% endif %}
+              {% if p.email_body %}
+              <div class="email-snippet">{{ p.email_body | truncate(160) }}</div>
+              <details class="email-full">
+                <summary><svg aria-hidden="true"><use href="#i-mail"/></svg>View full email</summary>
+                <div class="email-meta">From: {{ p.email_sender or "Unknown sender" }}{% if p.email_subject %} &middot; Subject: {{ p.email_subject }}{% endif %}</div>
+                <pre class="email-body">{{ p.email_body }}</pre>
+              </details>
+              {% endif %}
+            </div>
+            <div class="actions">
+              <form action="confirm" method="post">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-primary btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-check"/></svg>Confirm</button>
+              </form>
+              <form action="dismiss" method="post">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-x"/></svg>Not a parcel</button>
+              </form>
+            </div>
+          </div>
+          {{ history_panel(p) }}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <section class="section">
+      <div class="section-head"><h2>In transit</h2><span class="section-count">{{ active|length }}</span></div>
+      {% if not active %}
+      <div class="empty"><svg aria-hidden="true"><use href="#i-truck"/></svg>No parcels in transit right now.</div>
+      {% else %}
+      <div class="list">
+        {% for p in active %}
+        <div class="card{% if p.status == 'exception' %} is-exception{% endif %}">
+          <div class="card-body">
+            <div class="info" role="button" tabindex="0" aria-expanded="false">
+              <div class="card-top">
+                <span class="tracking">{{ p.tracking_number }}</span>
+                {% if p.status == 'exception' %}<span class="badge exception">Exception</span>{% else %}<span class="badge active">In transit</span>{% endif %}
+                <span class="chevron"><svg aria-hidden="true"><use href="#i-chevron"/></svg></span>
+              </div>
+              <div class="meta-line">
+                <span class="carrier-chip"><svg aria-hidden="true"><use href="#i-truck"/></svg>{{ p.carrier_name or "Unknown carrier" }}</span>
+                {% if p.description %}<span class="meta-sep">&middot;</span><span class="desc-text">{{ p.description }}</span>{% endif %}
+              </div>
+              <div class="status-line">{{ p.status_detail or "No status yet" }}{% if p.estimated_delivery %} <span class="eta"><svg aria-hidden="true"><use href="#i-calendar"/></svg><time data-iso="{{ p.estimated_delivery }}" data-style="eta">{{ p.estimated_delivery }}</time></span>{% endif %}</div>
+              {{ stepper(p) }}
+            </div>
+            <div class="actions">
+              <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
+              <form action="reset" method="post" class="reset-form">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+              </form>
+              <form action="archive" method="post">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+              </form>
+            </div>
+          </div>
+          {{ history_panel(p) }}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>Delivered</h2><span class="section-count">{{ delivered|length }}</span></div>
+      {% if not delivered %}
+      <div class="empty"><svg aria-hidden="true"><use href="#i-check"/></svg>No delivered parcels yet.</div>
+      {% else %}
+      <div class="list">
+        {% for p in delivered %}
+        <div class="card">
+          <div class="card-body">
+            <div class="info" role="button" tabindex="0" aria-expanded="false">
+              <div class="card-top">
+                <span class="tracking">{{ p.tracking_number }}</span>
+                <span class="badge delivered">Delivered</span>
+                <span class="chevron"><svg aria-hidden="true"><use href="#i-chevron"/></svg></span>
+              </div>
+              <div class="meta-line">
+                <span class="carrier-chip"><svg aria-hidden="true"><use href="#i-truck"/></svg>{{ p.carrier_name or "Unknown carrier" }}</span>
+                {% if p.description %}<span class="meta-sep">&middot;</span><span class="desc-text">{{ p.description }}</span>{% endif %}
+                {% if p.delivered_at %}<span class="meta-sep">&middot;</span><span class="history-meta-item"><svg aria-hidden="true" width="13" height="13"><use href="#i-check"/></svg>Delivered <time data-iso="{{ p.delivered_at }}" data-style="rel">{{ p.delivered_at }}</time></span>{% endif %}
+              </div>
+              {{ stepper(p) }}
+            </div>
+            <div class="actions">
+              <form action="reset" method="post" class="reset-form">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+              </form>
+              <form action="archive" method="post">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+              </form>
+            </div>
+          </div>
+          {{ history_panel(p) }}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+
+    {% if archived %}
+    <section class="section">
+      <div class="section-head"><h2>Archived</h2><span class="section-count">{{ archived|length }}</span></div>
+      <div class="list">
+        {% for p in archived %}
+        <div class="card">
+          <div class="card-body">
+            <div class="info" role="button" tabindex="0" aria-expanded="false">
+              <div class="card-top">
+                <span class="tracking">{{ p.tracking_number }}</span>
+                <span class="badge archived">{{ p.status | replace('_', ' ') }}</span>
+                <span class="chevron"><svg aria-hidden="true"><use href="#i-chevron"/></svg></span>
+              </div>
+              <div class="meta-line">
+                <span class="carrier-chip"><svg aria-hidden="true"><use href="#i-truck"/></svg>{{ p.carrier_name or "Unknown carrier" }}</span>
+                {% if p.description %}<span class="meta-sep">&middot;</span><span class="desc-text">{{ p.description }}</span>{% endif %}
+              </div>
+            </div>
+            <div class="actions">
+              <form action="reset" method="post" class="reset-form">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+              </form>
+              <form action="delete" method="post">
+                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                <button class="btn-danger btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+              </form>
+            </div>
+          </div>
+          {{ history_panel(p) }}
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+    {% endif %}
+
+    <details class="panel data-menu">
+      <summary><svg aria-hidden="true"><use href="#i-sliders"/></svg>Data management</summary>
+      <div class="data-menu-body">
+        <a class="btn btn-sm" href="export"><svg aria-hidden="true"><use href="#i-external"/></svg>Export data (JSON)</a>
+        <div>
+          <p class="reset-all-hint">Type RESET below to enable wiping every parcel and sync history. This cannot be undone.</p>
+          <form class="reset-all-form" action="admin/reset-all" method="post" id="reset-all-form">
+            <input id="reset-all-confirm" name="confirm_text" placeholder="RESET" autocomplete="off" />
+            <button class="btn-danger btn-sm" type="submit" id="reset-all-button" disabled><svg aria-hidden="true"><use href="#i-trash"/></svg>Reset all data</button>
+          </form>
+        </div>
+      </div>
+    </details>
   </div>
-  {% endif %}
 
   <script>
-    // A plain form submission navigates the browser away immediately, which
-    // freezes the page's last-rendered frame until the new document is
-    // ready - any DOM updates made to the about-to-be-replaced page (like a
-    // live progress count) never actually get painted on screen even though
-    // they do happen. Submitting via fetch() instead keeps this page in
-    // place for the duration of the sync, so the live count below is
-    // actually visible, and only navigates (via reload) once it's done.
+    // ---- Humanized timestamps ------------------------------------------
+    // The server stores and emits raw ISO strings; showing those verbatim
+    // ("2026-06-26T11:56:10+00:00") is the surest way to look unfinished.
+    // We format them in the browser instead - relative for "ago" times,
+    // a friendly absolute for history events, and Today/Tomorrow/date for
+    // delivery estimates - so the server contract stays untouched.
+    (function () {
+      var rtf = window.Intl && Intl.RelativeTimeFormat
+        ? new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+        : null;
+
+      function parse(iso) {
+        if (!iso) return null;
+        // Bare dates ("2026-06-27") are parsed as local midnight rather than
+        // UTC, so an estimated-delivery date doesn't slip a day in negative
+        // timezones.
+        var d = /^\d{4}-\d{2}-\d{2}$/.test(iso)
+          ? new Date(iso + "T00:00:00")
+          : new Date(iso);
+        return isNaN(d.getTime()) ? null : d;
+      }
+
+      function relative(d) {
+        var secs = Math.round((d.getTime() - Date.now()) / 1000);
+        var abs = Math.abs(secs);
+        if (abs < 45) return "just now";
+        if (!rtf) return d.toLocaleDateString();
+        var units = [
+          ["year", 31536000], ["month", 2592000], ["week", 604800],
+          ["day", 86400], ["hour", 3600], ["minute", 60],
+        ];
+        for (var i = 0; i < units.length; i++) {
+          if (abs >= units[i][1] || units[i][0] === "minute") {
+            return rtf.format(Math.round(secs / units[i][1]), units[i][0]);
+          }
+        }
+        return "just now";
+      }
+
+      function startOfDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+      function etaLabel(d) {
+        var days = Math.round((startOfDay(d) - startOfDay(new Date())) / 86400000);
+        if (days === 0) return "Today";
+        if (days === 1) return "Tomorrow";
+        if (days === -1) return "Yesterday";
+        var opts = { weekday: "short", month: "short", day: "numeric" };
+        return d.toLocaleDateString(undefined, opts);
+      }
+
+      function absLabel(d) {
+        var sameYear = d.getFullYear() === new Date().getFullYear();
+        var opts = sameYear
+          ? { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+          : { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+        return d.toLocaleString(undefined, opts);
+      }
+
+      document.querySelectorAll("time[data-iso]").forEach(function (el) {
+        var d = parse(el.getAttribute("data-iso"));
+        if (!d) return;
+        var style = el.getAttribute("data-style");
+        var text =
+          style === "eta" ? etaLabel(d) :
+          style === "abs" ? absLabel(d) : relative(d);
+        el.textContent = text;
+        el.title = d.toLocaleString();
+      });
+    })();
+
+    // ---- Progress stepper ----------------------------------------------
+    // Light up the courier journey from the parcel's status + status_detail.
+    // Kept in JS (not the template) so the keyword matching can stay loose
+    // without cluttering the markup.
+    (function () {
+      function stepFor(status, detail) {
+        detail = (detail || "").toLowerCase();
+        // 4 = past the last node, so every step (incl. "Delivered") renders
+        // as done with a check rather than the in-progress "current" ring.
+        if (status === "delivered") return 4;
+        if (/out for delivery|on vehicle|with (the )?courier|loaded for delivery|delivery today/.test(detail)) return 2;
+        return 1; // detected -> in transit
+      }
+      document.querySelectorAll(".stepper").forEach(function (st) {
+        var idx = stepFor(st.dataset.status, st.dataset.detail);
+        var steps = st.querySelectorAll(".step");
+        steps.forEach(function (step, i) {
+          if (i < idx) step.classList.add("done");
+          else if (i === idx) step.classList.add("current");
+        });
+      });
+    })();
+
+    // ---- Sync (live progress) ------------------------------------------
+    // A plain form submission navigates away immediately, freezing the
+    // last-rendered frame so live progress never paints. Submitting via
+    // fetch() keeps the page in place for the sync, then reloads once done.
     var syncButton = document.getElementById("sync-button");
     var syncSpinner = document.getElementById("sync-spinner");
+    var syncIcon = document.getElementById("sync-icon");
     var syncLabel = document.getElementById("sync-button-label");
     var reloaded = false;
 
     function showRunning() {
       syncButton.disabled = true;
       syncSpinner.hidden = false;
+      if (syncIcon) syncIcon.style.display = "none";
     }
 
     function reloadOnce() {
-      if (!reloaded) {
-        reloaded = true;
-        window.location.reload();
-      }
+      if (!reloaded) { reloaded = true; window.location.reload(); }
     }
 
     // run_sync_cycle() runs in a background thread once a sync is kicked
-    // off (POST /sync), independent of whatever HTTP request started it -
-    // so a sync the user triggered can still be running on the server long
-    // after the page (and its fetch()) that started it is gone, e.g.
-    // navigating away and back, or just reloading. Polling /sync/status -
-    // rather than only reacting to this page's own POST finishing - means
-    // this page always reflects the server's real state instead of
-    // defaulting to "Check mail now" while a sync is still in flight.
+    // off (POST /sync), independent of the request that started it - so a
+    // sync can outlive the page that started it. Polling /sync/status means
+    // this page always reflects the server's real state.
     function pollUntilFinished() {
       var poll = setInterval(function () {
         fetch("sync/status")
@@ -421,10 +985,6 @@
               return;
             }
             showRunning();
-            // "mail" and "providers" are run_sync_cycle's two slow phases, in
-            // order - without branching on stage here, the label would keep
-            // saying "Checking mail…" (with a stale count) all through the
-            // provider-refresh phase, which can easily outlast the mail scan.
             var stageLabel = progress.stage === "providers" ? "Checking carrier status…" : "Checking mail…";
             syncLabel.textContent = progress.total > 0
               ? stageLabel + " (" + progress.checked + "/" + progress.total + ")"
@@ -440,33 +1000,19 @@
       showRunning();
       syncLabel.textContent = "Checking mail…";
       var poll = pollUntilFinished();
-      // The POST's own completion is a faster signal than waiting for the
-      // next 1-second poll tick, so it gets its own direct reload too -
-      // reloadOnce() makes the two paths racing here harmless.
       fetch("sync", { method: "POST" })
         .catch(function () {})
-        .finally(function () {
-          clearInterval(poll);
-          reloadOnce();
-        });
+        .finally(function () { clearInterval(poll); reloadOnce(); });
     });
 
-    // Covers exactly the navigate-away-and-back case above: on load, ask the
-    // server whether a sync is already running rather than assuming "Check
-    // mail now" (the page's default markup) is accurate.
     fetch("sync/status")
       .then(function (r) { return r.json(); })
-      .then(function (progress) {
-        if (progress.running) {
-          pollUntilFinished();
-        }
-      })
+      .then(function (progress) { if (progress.running) pollUntilFinished(); })
       .catch(function () {});
 
-    // The tracking_number column is globally unique, so re-adding a number
-    // that's already tracked (in any state, including archived/dismissed)
-    // would otherwise silently overwrite its carrier/description with
-    // whatever's in the form, with no indication that happened.
+    // ---- Add-parcel overwrite guard ------------------------------------
+    // tracking_number is globally unique, so re-adding an existing number
+    // would silently overwrite its carrier/description; warn first.
     var EXISTING_PARCELS = {{ existing_parcels_json | safe }};
     document.getElementById("add-form").addEventListener("submit", function (e) {
       var number = document.getElementById("tracking_number").value.trim();
@@ -481,10 +1027,7 @@
       if (!ok) e.preventDefault();
     });
 
-    // Resetting discards the parcel's tracking history and carrier/status
-    // data (it goes back to needs-confirmation, to be re-detected from
-    // scratch), so it gets a confirmation prompt just like the other
-    // state-losing actions below.
+    // ---- Reset confirmation --------------------------------------------
     document.querySelectorAll(".reset-form").forEach(function (form) {
       form.addEventListener("submit", function (e) {
         if (!confirm("Reset this parcel? It will go back to needs-confirmation and lose its current tracking status.")) {
@@ -493,26 +1036,31 @@
       });
     });
 
-    // Clicking a card's info area toggles its history panel - excluded here
-    // are clicks on anything already interactive inside .info (the "View
-    // full email" details/summary today, tracking links or buttons in the
-    // future), so those keep their own behavior instead of also flipping
-    // the history panel open/closed underneath them.
+    // ---- History expand / collapse -------------------------------------
+    // Clicking a card's info area toggles its history panel; clicks on
+    // anything already interactive inside (links, buttons, the email
+    // details/summary) keep their own behaviour. Keyboard-operable too,
+    // since .info is a role="button".
+    function toggleHistory(info) {
+      var card = info.closest(".card");
+      var history = card.querySelector(".history");
+      if (!history) return;
+      var open = history.hidden;
+      history.hidden = !open;
+      info.setAttribute("aria-expanded", String(open));
+    }
     document.querySelectorAll(".card .info").forEach(function (info) {
       info.addEventListener("click", function (e) {
         if (e.target.closest("a, button, form, summary, details")) return;
-        var card = info.closest(".card");
-        var history = card.querySelector(".history");
-        if (!history) return;
-        history.hidden = !history.hidden;
-        var chevron = info.querySelector(".chevron");
-        if (chevron) chevron.classList.toggle("open", !history.hidden);
+        toggleHistory(info);
+      });
+      info.addEventListener("keydown", function (e) {
+        if (e.target.closest("a, button, summary, input, details")) return;
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHistory(info); }
       });
     });
 
-    // Wiping all data is irreversible, so the button stays disabled until
-    // the exact word RESET is typed - a stray click or Enter keypress alone
-    // can't trigger it. The server enforces the same check independently.
+    // ---- Reset-all gating ----------------------------------------------
     var resetAllConfirm = document.getElementById("reset-all-confirm");
     var resetAllButton = document.getElementById("reset-all-button");
     resetAllConfirm.addEventListener("input", function () {

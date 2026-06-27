@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.0
+
+- Reworked the dashboard from the ground up. It now follows the device's
+  light/dark setting, uses a consistent design system (typography,
+  spacing, elevation, one accent colour) instead of ad-hoc styling, and
+  leads with a summary row (needs confirmation / in transit / delivered /
+  needs attention) for an at-a-glance read.
+- Parcel cards now show a courier-style progress stepper (Detected → In
+  transit → Out for delivery → Delivered) derived from each parcel's
+  status, a carrier chip, a confidence meter on unconfirmed candidates,
+  and clearer status badges and action buttons with icons.
+- Timestamps are now humanized in the browser ("2h ago", "Today",
+  "Tomorrow", "Jun 27, 07:05") rather than shown as raw ISO strings, and
+  the expanded tracking history is rendered as a proper vertical timeline.
+- The whole page stays self-contained (inline icon set, no external font
+  or CDN request) so it still renders identically offline, is responsive
+  down to phone widths, is keyboard-operable, and respects reduced-motion
+  preferences.
+
 ## 0.6.18
 
 - Fixed a regression from 0.6.17 that broke the Lovelace card entirely: it
