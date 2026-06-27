@@ -41,10 +41,17 @@
       margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
       font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased;
     }
+    /* Smooth cross-document crossfade when navigating gallery <-> settings
+       (supported browsers only - a no-op elsewhere). The topbar is named so
+       it stays put while only the content below it transitions. */
+    @view-transition { navigation: auto; }
+    @media (prefers-reduced-motion: reduce) {
+      ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+    }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
     /* Topbar */
-    .topbar { position: sticky; top: 0; z-index: 20;
+    .topbar { position: sticky; top: 0; z-index: 20; view-transition-name: topbar;
       background: color-mix(in srgb, var(--bg) 88%, transparent);
       backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
     .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
@@ -70,15 +77,20 @@
     .btn-icon svg { width: 17px; height: 17px; }
 
     /* Stat tiles */
-    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3);
       margin: var(--space-5) 0; }
     .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
       padding: var(--space-4); box-shadow: var(--shadow-sm); }
     .stat-num { font-size: 1.55rem; font-weight: 680; letter-spacing: -0.02em;
       font-variant-numeric: tabular-nums; line-height: 1.1; }
     .stat-label { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem;
-      font-size: 0.78rem; color: var(--text-muted); }
+      font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; }
     .stat-label svg { width: 14px; height: 14px; color: var(--text-faint); }
+    .stat-sub { color: var(--text-faint); }
+    /* "Capturing now" state for the recent-capture tile. */
+    .stat.is-live .stat-num { color: var(--accent-soft-text); display: inline-flex; align-items: center; gap: 0.5rem; }
+    .stat.is-live .stat-num::before { content: ""; width: 9px; height: 9px; border-radius: 50%;
+      background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
 
     /* Section headers */
     .section-head { display: flex; align-items: center; gap: 0.5rem; margin: var(--space-6) 0 var(--space-3); }
@@ -92,9 +104,12 @@
     .job { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
       box-shadow: var(--shadow-sm); padding: var(--space-4); margin-bottom: var(--space-3);
       display: flex; align-items: center; gap: var(--space-4); }
-    .job-spin { width: 28px; height: 28px; flex: none; border-radius: 8px; display: grid; place-items: center;
-      background: var(--accent-soft); color: var(--accent-soft-text); }
-    .job-spin svg { width: 16px; height: 16px; animation: pulse 1.6s ease-in-out infinite; }
+    .job-thumb { position: relative; width: 56px; height: 42px; flex: none; border-radius: 8px;
+      overflow: hidden; background: #000; border: 1px solid var(--border); }
+    .job-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .job-thumb .live-dot { position: absolute; top: 4px; right: 4px; width: 8px; height: 8px;
+      border-radius: 50%; background: #ef4444; box-shadow: 0 0 0 2px rgba(0,0,0,0.35);
+      animation: pulse 1.6s ease-in-out infinite; }
     .job-main { flex: 1; min-width: 0; }
     .job-title { font-family: var(--mono); font-weight: 600; font-size: 0.9rem;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -200,15 +215,11 @@
     <div class="stats">
       <div class="stat">
         <div class="stat-num">{{ gifs|length }}</div>
-        <div class="stat-label"><svg aria-hidden="true"><use href="#i-film"/></svg>Timelapses</div>
+        <div class="stat-label"><svg aria-hidden="true"><use href="#i-film"/></svg>Timelapses<span class="stat-sub">&middot; <span data-bytes="{{ total_bytes }}">{{ total_bytes }}</span> stored</span></div>
       </div>
-      <div class="stat">
-        <div class="stat-num" data-bytes="{{ total_bytes }}">{{ total_bytes }}</div>
-        <div class="stat-label"><svg aria-hidden="true"><use href="#i-database"/></svg>Storage used</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">{% if latest %}<time data-iso="{{ latest }}">{{ latest }}</time>{% else %}&mdash;{% endif %}</div>
-        <div class="stat-label"><svg aria-hidden="true"><use href="#i-clock"/></svg>Most recent capture</div>
+      <div class="stat" id="recent-stat">
+        <div class="stat-num" id="recent-value">{% if latest %}<time data-iso="{{ latest }}">{{ latest }}</time>{% else %}&mdash;{% endif %}</div>
+        <div class="stat-label" id="recent-label"><svg aria-hidden="true"><use href="#i-clock"/></svg>Most recent capture</div>
       </div>
     </div>
 
@@ -216,7 +227,7 @@
     <div id="jobs">
       {% for job in jobs %}
       <div class="job">
-        <span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>
+        <span class="job-thumb"><img src="jobs/{{ job.job_id }}/frame?f={{ job.latest_frame }}" alt="" /><span class="live-dot"></span></span>
         <div class="job-main">
           <div class="job-title">{{ job.job_id }}</div>
           <div class="job-meta">{{ job.frames }} frame{{ '' if job.frames == 1 else 's' }} &middot; updated <time data-iso="{{ job.updated }}">{{ job.updated }}</time></div>
@@ -366,7 +377,8 @@
 
     function jobRowHtml(j) {
       return '<div class="job">' +
-        '<span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>' +
+        '<span class="job-thumb"><img src="jobs/' + encodeURIComponent(j.job_id) +
+          '/frame?f=' + encodeURIComponent(j.latest_frame || '') + '" alt=""><span class="live-dot"></span></span>' +
         '<div class="job-main">' +
           '<div class="job-title">' + esc(j.job_id) + '</div>' +
           '<div class="job-meta">' + j.frames + ' frame' + (j.frames === 1 ? '' : 's') +
@@ -383,9 +395,45 @@
       '</div>';
     }
 
+    // The recent-capture tile becomes a live "Capturing now" indicator while a
+    // job is running, and reverts to the last archived capture's time when
+    // idle (its server-rendered markup, cached here on load).
+    var recentStat = document.getElementById("recent-stat");
+    var recentValue = document.getElementById("recent-value");
+    var recentLabel = document.getElementById("recent-label");
+    var recentIdleValue = recentValue.innerHTML;
+    var recentIdleLabel = recentLabel.innerHTML;
+    var prevJobCount = {{ jobs|length }};
+    var suppressReload = false;
+
+    function updateRecentStat(count) {
+      if (count > 0) {
+        recentStat.classList.add("is-live");
+        recentValue.textContent = "Capturing now";
+        recentLabel.innerHTML = '<svg aria-hidden="true"><use href="#i-camera"/></svg>' +
+          count + ' print' + (count === 1 ? '' : 's') + ' in progress';
+      } else {
+        recentStat.classList.remove("is-live");
+        recentValue.innerHTML = recentIdleValue;
+        recentLabel.innerHTML = recentIdleLabel;
+        formatAll(recentValue);
+      }
+    }
+
+    updateRecentStat(prevJobCount);  // reflect server-rendered job state at once
+
     function renderJobs(jobs) {
       jobsCount.textContent = jobs.length;
       jobsHead.hidden = jobs.length === 0;
+      updateRecentStat(jobs.length);
+      // A capture just finished (count fell to zero): reload so the new GIF and
+      // a fresh "most recent" time show. Skipped right after a manual delete.
+      if (prevJobCount > 0 && jobs.length === 0 && !suppressReload) {
+        window.location.reload();
+        return;
+      }
+      suppressReload = false;
+      prevJobCount = jobs.length;
       // Skip the DOM rebuild when nothing changed, so an open kebab menu isn't
       // wiped out by a poll tick (stale jobs don't change between polls).
       var key = JSON.stringify(jobs);
@@ -419,6 +467,8 @@
         if (!confirm('Delete capture job "' + id + '"? This removes its captured frames.')) return;
         var body = new URLSearchParams();
         body.set("job_id", id);
+        // Deleting the last job shouldn't trigger the "capture finished" reload.
+        suppressReload = true;
         fetch("jobs/delete", { method: "POST", body: body })
           .then(function () { lastJobsKey = null; pollJobs(); })
           .catch(function () {});

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.2
+
+- Smoother crossfade when moving between the dashboard and the settings page
+  (on browsers that support view transitions; no change elsewhere).
+
 ## 0.9.1
 
 - Fixed source emails showing raw HTML entities (e.g. `&zwnj;`, `&#39;`) and

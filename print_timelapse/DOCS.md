@@ -167,10 +167,12 @@ automation:
 | GET    | `/gifs`   | —                                           |
 
 The ingress panel (this app, in your sidebar) shows a gallery of every
-archived GIF, with summary tiles (count, storage used, most recent
-capture), a live **Capturing now** section for any print currently being
-captured (frame count + progress), and humanized timestamps/sizes. It
-follows your device's light/dark setting.
+archived GIF, with a summary tile (count + storage used) and humanized
+timestamps/sizes, and follows your device's light/dark setting. While a
+print is being captured, a live **Capturing now** section shows each job's
+latest captured frame as a thumbnail alongside its progress, and the second
+summary tile reads **Capturing now** (reverting to the most-recent-capture
+time, and refreshing the gallery, once the capture finishes).
 
 Each archived GIF shows a still preview and only animates when you press
 **play** (press again to pause), so the gallery isn't a wall of looping

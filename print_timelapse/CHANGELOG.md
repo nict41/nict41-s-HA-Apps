@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.2
+
+- **Capturing now** cards now show a live thumbnail of the print's most
+  recent captured frame instead of a generic icon.
+- The **Most recent capture** tile now reads **Capturing now** while a print
+  is being captured, and refreshes itself automatically when the capture
+  finishes.
+- Merged the **Timelapses** and **Storage used** tiles into one to save
+  space.
+- Smoother crossfade when moving between the gallery and the settings page
+  (on browsers that support view transitions; no change elsewhere).
+
 ## 0.4.1
 
 - Fixed `401: Unauthorized` when clicking a GIF in the gallery. The redesign

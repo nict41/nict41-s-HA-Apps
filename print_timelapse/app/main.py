@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -109,6 +109,7 @@ def _job_records():
                 "job_id": job_dir.name,
                 "frames": len(frames),
                 "percent": percent,
+                "latest_frame": frames[-1].name,
                 "updated": datetime.fromtimestamp(job_dir.stat().st_mtime).isoformat(timespec="seconds"),
             }
         )
@@ -221,6 +222,20 @@ async def delete_job(job_id: str = Form(...)):
         raise HTTPException(400, "invalid job_id")
     shutil.rmtree(job_dir, ignore_errors=True)
     return {"status": "ok", "job_id": job_id}
+
+
+@app.get("/jobs/{job_id}/frame")
+async def latest_job_frame(job_id: str):
+    # Serves the most recent frame of an in-progress job, so the gallery's
+    # "Capturing now" card can show a live preview of the print. Always the
+    # newest frame for that job - no caller-supplied filename - and confined
+    # to current/<job_id> by the job_id charset check.
+    job_id = _validate_job_id(job_id)
+    job_dir = CURRENT_DIR / job_id
+    frames = sorted(job_dir.glob("frame_*.jpg")) if job_dir.is_dir() else []
+    if not frames:
+        raise HTTPException(404, f"no frames for job_id '{job_id}'")
+    return FileResponse(frames[-1], media_type="image/jpeg")
 
 
 @app.get("/", response_class=HTMLResponse)

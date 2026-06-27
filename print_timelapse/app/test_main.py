@@ -289,6 +289,40 @@ def test_delete_nonexistent_job_is_a_noop_ok():
     assert resp.status_code == 200
 
 
+def test_job_records_include_latest_frame():
+    client.post("/start", data={"job_id": "framejob"})
+    client.post("/frame", data={"job_id": "framejob", "percent": "30", "image_url": IMAGE_URL})
+    client.post("/frame", data={"job_id": "framejob", "percent": "80", "image_url": IMAGE_URL})
+    jobs = client.get("/jobs").json()["jobs"]
+    assert jobs[0]["latest_frame"] == "frame_080.jpg"
+
+
+def test_latest_frame_route_serves_newest_frame():
+    client.post("/start", data={"job_id": "framejob"})
+    client.post("/frame", data={"job_id": "framejob", "percent": "10", "image_url": IMAGE_URL})
+    resp = client.get("/jobs/framejob/frame")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
+    # It's the actual stored frame file's bytes.
+    assert resp.content == (main.CURRENT_DIR / "framejob" / "frame_010.jpg").read_bytes()
+
+    # Add a newer frame -> the route follows it.
+    client.post("/frame", data={"job_id": "framejob", "percent": "90", "image_url": IMAGE_URL})
+    resp2 = client.get("/jobs/framejob/frame")
+    assert resp2.content == (main.CURRENT_DIR / "framejob" / "frame_090.jpg").read_bytes()
+
+
+def test_latest_frame_route_404_when_no_frames():
+    client.post("/start", data={"job_id": "framejob"})  # started, no frames
+    assert client.get("/jobs/framejob/frame").status_code == 404
+    assert client.get("/jobs/missingjob/frame").status_code == 404
+
+
+@pytest.mark.parametrize("bad_job_id", ["has space", "semi;colon", "dot.dot"])
+def test_latest_frame_route_rejects_unsafe_job_id(bad_job_id):
+    assert client.get(f"/jobs/{bad_job_id}/frame").status_code == 400
+
+
 # ---- /finish honours runtime settings ----------------------------------
 
 def test_finish_uses_settings_fps_and_width(monkeypatch):
