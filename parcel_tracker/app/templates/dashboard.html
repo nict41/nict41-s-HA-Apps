@@ -126,18 +126,24 @@
       text-rendering: optimizeLegibility;
     }
 
-    @view-transition { navigation: auto; }
+    /* Smooth, deterministic reveal when navigating dashboard <-> settings.
+       Cross-document View Transitions were tried here but their iframe
+       support (Home Assistant ingress always renders in an iframe) is
+       still rough across browsers/WebViews, causing an intermittent flash
+       instead of a reliable crossfade - this plain fade-in works the same
+       everywhere and never races against page load. */
+    @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6);
+      animation: page-fade-in 160ms ease-out; }
     @media (prefers-reduced-motion: reduce) {
-      ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+      .wrap { animation: none; }
     }
-    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
     /* ---- Top bar ------------------------------------------------------- */
     .topbar {
       position: sticky;
       top: 0;
       z-index: 20;
-      view-transition-name: topbar;
       background: color-mix(in srgb, var(--bg) 88%, transparent);
       backdrop-filter: saturate(1.4) blur(10px);
       border-bottom: 1px solid var(--border);
@@ -617,6 +623,58 @@
       .brand-sub { display: none; }
     }
   </style>
+  <script>
+    // Client-side swap for the gear <-> back navigation. Home Assistant
+    // always renders this add-on inside an iframe (ingress), and Chromium's
+    // paint-holding for cross-document view transitions doesn't cover
+    // sub-frame navigations - a real document unload/load briefly shows
+    // nothing here, bleeding through to whatever sits behind the iframe.
+    // Fetching the destination and swapping it into the current document
+    // (instead of navigating) avoids that gap entirely, since the document
+    // never unloads; document.startViewTransition() (same-document, not
+    // the flaky cross-document kind) gives it a smooth crossfade too.
+    (function () {
+      function swap(href, push) {
+        fetch(href).then(function (r) {
+          if (!r.ok) throw new Error("bad response");
+          return r.text();
+        }).then(function (html) {
+          var next = new DOMParser().parseFromString(html, "text/html");
+          function apply() {
+            if (window.__pageTeardown) { window.__pageTeardown(); window.__pageTeardown = null; }
+            document.title = next.title;
+            var oldStyle = document.head.querySelector("style");
+            var newStyle = next.head.querySelector("style");
+            if (oldStyle && newStyle) oldStyle.textContent = newStyle.textContent;
+            document.body.innerHTML = next.body.innerHTML;
+            document.querySelectorAll("body script").forEach(function (old) {
+              var fresh = document.createElement("script");
+              fresh.textContent = old.textContent;
+              old.replaceWith(fresh);
+            });
+          }
+          var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (!reduceMotion && document.startViewTransition) document.startViewTransition(apply);
+          else apply();
+          if (push) history.pushState(null, next.title, href);
+        }).catch(function () { location.href = href; });
+      }
+
+      document.addEventListener("click", function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest("a");
+        if (!a) return;
+        var href = a.getAttribute("href");
+        if (href !== "settings" && href !== ".") return;
+        e.preventDefault();
+        swap(href, true);
+      });
+
+      window.addEventListener("popstate", function () {
+        swap(/\/settings\/?$/.test(location.pathname) ? "settings" : ".", false);
+      });
+    })();
+  </script>
 </head>
 <body>
   <!-- Inline icon sprite: keeps the panel fully self-contained (no CDN /
@@ -1114,6 +1172,12 @@
     var syncIcon = document.getElementById("sync-icon");
     var syncLabel = document.getElementById("sync-button-label");
     var reloaded = false;
+    // Tracked at module scope (rather than a local in pollUntilFinished) so
+    // the swap router's teardown can always clear whichever poll is active
+    // before navigating away to settings - otherwise it'd keep polling
+    // against a detached button/label and could reload the page out from
+    // under the settings view once the sync finishes.
+    var activePoll = null;
 
     function showRunning() {
       syncButton.disabled = true;
@@ -1130,12 +1194,13 @@
     // sync can outlive the page that started it. Polling /sync/status means
     // this page always reflects the server's real state.
     function pollUntilFinished() {
-      var poll = setInterval(function () {
+      activePoll = setInterval(function () {
         fetch("sync/status")
           .then(function (r) { return r.json(); })
           .then(function (progress) {
             if (!progress.running) {
-              clearInterval(poll);
+              clearInterval(activePoll);
+              activePoll = null;
               reloadOnce();
               return;
             }
@@ -1147,17 +1212,16 @@
           })
           .catch(function () {});
       }, 1000);
-      return poll;
     }
 
     document.getElementById("sync-form").addEventListener("submit", function (e) {
       e.preventDefault();
       showRunning();
       syncLabel.textContent = "Checking mail…";
-      var poll = pollUntilFinished();
+      pollUntilFinished();
       fetch("sync", { method: "POST" })
         .catch(function () {})
-        .finally(function () { clearInterval(poll); reloadOnce(); });
+        .finally(function () { clearInterval(activePoll); activePoll = null; reloadOnce(); });
     });
 
     fetch("sync/status")
@@ -1234,11 +1298,14 @@
         toggle.setAttribute("aria-expanded", String(willOpen));
       });
     });
-    // A click anywhere else, or Escape, dismisses any open menu.
-    document.addEventListener("click", function () { closeAllKebabs(null); });
-    document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape") closeAllKebabs(null);
-    });
+    // A click anywhere else, or Escape, dismisses any open menu. Named so
+    // the swap router's teardown can remove them (they're bound to
+    // `document`, which persists across a swap, unlike everything bound to
+    // elements inside .wrap).
+    function onDocClick() { closeAllKebabs(null); }
+    function onDocKeydown(e) { if (e.key === "Escape") closeAllKebabs(null); }
+    document.addEventListener("click", onDocClick);
+    document.addEventListener("keydown", onDocKeydown);
 
     // ---- Email viewer --------------------------------------------------
     var emailDialog = document.getElementById("email-dialog");
@@ -1339,6 +1406,16 @@
         e.preventDefault();
       }
     });
+
+    // Torn down by the swap router (in <head>) right before this page's
+    // content is replaced, so the sync-status poll and the document-level
+    // kebab/Escape listeners don't keep running (and potentially reload the
+    // page out from under settings) after navigating away.
+    window.__pageTeardown = function () {
+      if (activePoll) { clearInterval(activePoll); activePoll = null; }
+      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("keydown", onDocKeydown);
+    };
   </script>
 </body>
 </html>

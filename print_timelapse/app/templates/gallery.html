@@ -46,17 +46,21 @@
       margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
       font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased;
     }
-    /* Smooth cross-document crossfade when navigating gallery <-> settings
-       (supported browsers only - a no-op elsewhere). The topbar is named so
-       it stays put while only the content below it transitions. */
-    @view-transition { navigation: auto; }
+    /* Smooth, deterministic reveal when navigating gallery <-> settings.
+       Cross-document View Transitions were tried here but their iframe
+       support (Home Assistant ingress always renders in an iframe) is
+       still rough across browsers/WebViews, causing an intermittent flash
+       instead of a reliable crossfade - this plain fade-in works the same
+       everywhere and never races against page load. */
+    @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6);
+      animation: page-fade-in 160ms ease-out; }
     @media (prefers-reduced-motion: reduce) {
-      ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+      .wrap { animation: none; }
     }
-    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
     /* Topbar */
-    .topbar { position: sticky; top: 0; z-index: 20; view-transition-name: topbar;
+    .topbar { position: sticky; top: 0; z-index: 20;
       background: color-mix(in srgb, var(--bg) 88%, transparent);
       backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
     .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
@@ -187,6 +191,58 @@
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.001ms !important; } }
     @media (max-width: 640px) { .stats { grid-template-columns: 1fr; } .wrap, .topbar-inner { padding-left: var(--space-4); padding-right: var(--space-4); } }
   </style>
+  <script>
+    // Client-side swap for the gear <-> back navigation. Home Assistant
+    // always renders this add-on inside an iframe (ingress), and Chromium's
+    // paint-holding for cross-document view transitions doesn't cover
+    // sub-frame navigations - a real document unload/load briefly shows
+    // nothing here, bleeding through to whatever sits behind the iframe.
+    // Fetching the destination and swapping it into the current document
+    // (instead of navigating) avoids that gap entirely, since the document
+    // never unloads; document.startViewTransition() (same-document, not
+    // the flaky cross-document kind) gives it a smooth crossfade too.
+    (function () {
+      function swap(href, push) {
+        fetch(href).then(function (r) {
+          if (!r.ok) throw new Error("bad response");
+          return r.text();
+        }).then(function (html) {
+          var next = new DOMParser().parseFromString(html, "text/html");
+          function apply() {
+            if (window.__pageTeardown) { window.__pageTeardown(); window.__pageTeardown = null; }
+            document.title = next.title;
+            var oldStyle = document.head.querySelector("style");
+            var newStyle = next.head.querySelector("style");
+            if (oldStyle && newStyle) oldStyle.textContent = newStyle.textContent;
+            document.body.innerHTML = next.body.innerHTML;
+            document.querySelectorAll("body script").forEach(function (old) {
+              var fresh = document.createElement("script");
+              fresh.textContent = old.textContent;
+              old.replaceWith(fresh);
+            });
+          }
+          var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (!reduceMotion && document.startViewTransition) document.startViewTransition(apply);
+          else apply();
+          if (push) history.pushState(null, next.title, href);
+        }).catch(function () { location.href = href; });
+      }
+
+      document.addEventListener("click", function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest("a");
+        if (!a) return;
+        var href = a.getAttribute("href");
+        if (href !== "settings" && href !== ".") return;
+        e.preventDefault();
+        swap(href, true);
+      });
+
+      window.addEventListener("popstate", function () {
+        swap(/\/settings\/?$/.test(location.pathname) ? "settings" : ".", false);
+      });
+    })();
+  </script>
 </head>
 <body>
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
@@ -487,7 +543,15 @@
         .then(function (data) { renderJobs(data.jobs || []); })
         .catch(function () {});
     }
-    setInterval(pollJobs, 4000);
+    var pollTimer = setInterval(pollJobs, 4000);
+
+    // Torn down by the swap router (in <head>) right before this page's
+    // content is replaced, so the polling loop and delegated listener don't
+    // keep running against a detached DOM after navigating to settings.
+    window.__pageTeardown = function () {
+      clearInterval(pollTimer);
+      document.removeEventListener("click", closeJobMenus);
+    };
   </script>
 </body>
 </html>

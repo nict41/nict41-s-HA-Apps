@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.4
+
+- The gallery ↔ settings flash from 0.4.3 could still appear intermittently,
+  because Home Assistant always loads this add-on inside an iframe, and
+  Chromium's smooth-transition handling doesn't fully cover navigations
+  inside an iframe. Navigation now swaps the page content in place (instead
+  of loading a new document), which removes the flash entirely since the
+  page never reloads.
+
 ## 0.4.3
 
 - Removed the brief blank flash that appeared just before the gallery ↔
