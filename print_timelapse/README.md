@@ -167,9 +167,18 @@ automation:
 | GET    | `/gifs`   | —                                           |
 
 The ingress panel (this app, in your sidebar) shows a gallery of every
-archived GIF.
+archived GIF, with summary tiles (count, storage used, most recent
+capture), a live **Capturing now** section for any print currently being
+captured (frame count + progress), and humanized timestamps/sizes. It
+follows your device's light/dark setting.
 
 ## Options
+
+These can be set either in the add-on **Configuration** tab (the values
+below are the defaults) or, more conveniently, from the **Settings** page
+inside the app itself (the gear icon in the gallery header). In-app changes
+take effect on the next finished timelapse with no add-on restart, and
+override the matching option below while set.
 
 | Option | Default | Description |
 |---|---|---|

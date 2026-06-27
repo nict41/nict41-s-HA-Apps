@@ -8,9 +8,11 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+import settings
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 CURRENT_DIR = DATA_DIR / "current"
@@ -18,19 +20,20 @@ ARCHIVE_DIR = DATA_DIR / "archive"
 CURRENT_DIR.mkdir(parents=True, exist_ok=True)
 ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
-GIF_FPS = int(os.environ.get("GIF_FPS", "8"))
-GIF_WIDTH = int(os.environ.get("GIF_WIDTH", "480"))
-CLEANUP_AFTER_FINISH = os.environ.get("CLEANUP_AFTER_FINISH", "true").lower() == "true"
+# GIF build options (fps, width, cleanup, export path) are read live from
+# `settings` at finish time, so they can be changed on the in-app settings
+# page and take effect on the next timelapse without an add-on restart.
 
 # Optional copy of every finished GIF out to mapped network storage, e.g.
 # /media/NAS1/Photos and Videos/3D Print Timelapses. Disabled (no copy) when
-# unset, since add-ons only see /media if config.yaml requests that map.
+# the export path is unset, since add-ons only see /media if config.yaml
+# requests that map.
 MEDIA_DIR = Path(os.environ.get("MEDIA_DIR", "/media"))
-GIF_EXPORT_PATH = os.environ.get("GIF_EXPORT_PATH", "").strip().strip("/")
 
 # Job ids are used directly as directory/file name components, so they're
 # restricted to a safe charset to rule out path traversal.
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+_FRAME_RE = re.compile(r"frame_(\d+)\.jpg$")
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -59,9 +62,10 @@ def _fetch_image(url: str) -> bytes:
 
 
 def _export_gif(gif_path: Path, gif_name: str) -> str | None:
-    if not GIF_EXPORT_PATH:
+    export_rel = settings.get_str("gif_export_path")
+    if not export_rel:
         return None
-    export_dir = MEDIA_DIR / GIF_EXPORT_PATH
+    export_dir = MEDIA_DIR / export_rel
     try:
         export_dir.mkdir(parents=True, exist_ok=True)
         export_path = export_dir / gif_name
@@ -82,6 +86,30 @@ def _gif_records():
                 "url": f"/archive/{path.name}",
                 "size_bytes": stat.st_size,
                 "created": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            }
+        )
+    return records
+
+
+def _job_records():
+    """Capture jobs currently in progress - one per directory under
+    `current/` that has at least one frame. `percent` is the highest frame
+    number seen so far (frames are named by zero-padded percent)."""
+    records = []
+    for job_dir in sorted(CURRENT_DIR.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not job_dir.is_dir():
+            continue
+        frames = sorted(job_dir.glob("frame_*.jpg"))
+        if not frames:
+            continue
+        match = _FRAME_RE.search(frames[-1].name)
+        percent = int(match.group(1)) if match else 0
+        records.append(
+            {
+                "job_id": job_dir.name,
+                "frames": len(frames),
+                "percent": percent,
+                "updated": datetime.fromtimestamp(job_dir.stat().st_mtime).isoformat(timespec="seconds"),
             }
         )
     return records
@@ -139,7 +167,7 @@ async def finish_job(job_id: str = Form(...)):
         "ffmpeg",
         "-y",
         "-framerate",
-        str(GIF_FPS),
+        str(settings.get_int("gif_fps")),
         # glob (not a numbered %03d pattern) because percent steps can skip
         # values; glob still sorts the zero-padded names into the right order.
         "-pattern_type",
@@ -147,7 +175,7 @@ async def finish_job(job_id: str = Form(...)):
         "-i",
         str(job_dir / "frame_*.jpg"),
         "-vf",
-        f"scale={GIF_WIDTH}:-1:flags=lanczos",
+        f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
         str(gif_path),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -156,7 +184,7 @@ async def finish_job(job_id: str = Form(...)):
 
     exported_to = _export_gif(gif_path, gif_name)
 
-    if CLEANUP_AFTER_FINISH:
+    if settings.get_bool("cleanup_after_finish"):
         shutil.rmtree(job_dir, ignore_errors=True)
 
     return {
@@ -174,8 +202,48 @@ async def list_gifs():
     return {"gifs": _gif_records()}
 
 
+@app.get("/jobs")
+async def list_jobs():
+    # Polled by the gallery to show capture jobs in progress live.
+    return {"jobs": _job_records()}
+
+
 @app.get("/", response_class=HTMLResponse)
 async def gallery(request: Request):
-    return templates.TemplateResponse(
-        request, "gallery.html", {"gifs": _gif_records()}
+    gifs = _gif_records()
+    context = {
+        "gifs": gifs,
+        "jobs": _job_records(),
+        "total_bytes": sum(g["size_bytes"] for g in gifs),
+        "latest": gifs[0]["created"] if gifs else None,
+    }
+    response = templates.TemplateResponse(request, "gallery.html", context)
+    # Without this, a browser tab left open across an add-on rebuild can keep
+    # serving its cached copy of the page (and its JS) indefinitely.
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, saved: int = 0):
+    response = templates.TemplateResponse(
+        request, "settings.html", {"settings": settings.all_settings(), "saved": bool(saved)}
     )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/settings")
+async def save_settings(
+    gif_fps: int = Form(...),
+    gif_width: int = Form(...),
+    cleanup_after_finish: bool = Form(False),
+    gif_export_path: str = Form(""),
+):
+    settings.set_many({
+        "gif_fps": gif_fps,
+        "gif_width": gif_width,
+        "cleanup_after_finish": cleanup_after_finish,
+        "gif_export_path": gif_export_path,
+    })
+    return RedirectResponse("settings?saved=1", status_code=303)

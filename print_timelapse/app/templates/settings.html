@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings &middot; Print Timelapse</title>
+  <style>
+    /* Design tokens mirror gallery.html so the two pages stay in lockstep. */
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
+      --border: #e4e7ec; --border-strong: #d4d9e0;
+      --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
+      --accent: #4f46e5; --accent-hover: #4338ca; --accent-contrast: #ffffff;
+      --accent-soft: #eef2ff; --accent-soft-text: #4338ca; --focus-ring: rgba(79,70,229,0.35);
+      --ok-bg: #d8f3e0; --ok-fg: #1c8a4e;
+      --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
+      --shadow-md: 0 4px 14px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+      --radius-sm: 7px; --radius: 12px; --radius-pill: 999px;
+      --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+      --maxw: 760px;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1014; --surface: #181b21; --surface-2: #12151b; --surface-hover: #1e222a;
+        --border: #272c36; --border-strong: #343b48;
+        --text: #e7e9ee; --text-muted: #9aa2b1; --text-faint: #6b7482;
+        --accent: #818cf8; --accent-hover: #a5b4fc; --accent-contrast: #0e1014;
+        --accent-soft: rgba(99,102,241,0.16); --accent-soft-text: #b4bcff; --focus-ring: rgba(129,140,248,0.45);
+        --ok-bg: rgba(52,211,153,0.15); --ok-fg: #6ee7a7;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+        --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
+      }
+    }
+    * { box-sizing: border-box; }
+    svg:not([width]) { width: 15px; height: 15px; flex: none; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
+      font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
+
+    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
+      display: flex; align-items: center; gap: var(--space-3); }
+    .brand { display: flex; align-items: center; gap: var(--space-3); }
+    .brand-logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent-soft-text); }
+    .brand-logo svg { width: 22px; height: 22px; }
+    .brand-title { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; }
+    .topbar-spacer { flex: 1; }
+
+    button, .btn { font-family: inherit; font-size: 0.82rem; font-weight: 550; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.5rem 0.8rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      cursor: pointer; text-decoration: none; white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease; }
+    button:hover, .btn:hover { background: var(--surface-hover); border-color: var(--text-faint); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    button:focus-visible, .btn:focus-visible, input:focus-visible {
+      outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    button svg, .btn svg { width: 15px; height: 15px; }
+
+    h1 { font-size: 1.3rem; font-weight: 680; letter-spacing: -0.02em; margin: var(--space-6) 0 0.25rem; }
+    .lede { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 var(--space-5); }
+
+    .saved { display: flex; align-items: center; gap: 0.5rem; margin: var(--space-4) 0 0;
+      padding: 0.6rem 0.9rem; border-radius: var(--radius-sm);
+      background: var(--ok-bg); color: var(--ok-fg); font-size: 0.85rem; font-weight: 550; }
+    .saved svg { width: 16px; height: 16px; }
+
+    .group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-sm); padding: var(--space-5); margin-top: var(--space-4); }
+    .group-title { font-size: 0.78rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--text-muted); margin: 0 0 var(--space-4); display: flex; align-items: center; gap: 0.5rem; }
+    .group-title svg { width: 16px; height: 16px; color: var(--text-faint); }
+
+    .field { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 0.4rem var(--space-4);
+      padding: var(--space-4) 0; border-top: 1px solid var(--border); }
+    .group .field:first-of-type { border-top: 0; padding-top: 0; }
+    .group .field:last-of-type { padding-bottom: 0; }
+    .field-label { font-size: 0.9rem; font-weight: 550; }
+    .field-help { grid-column: 1; font-size: 0.8rem; color: var(--text-muted); }
+    .field-control { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 0.4rem; }
+    .field-control input[type="number"] { width: 6.5rem; text-align: right; }
+    .field-unit { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+    .field.field-wide { grid-template-columns: 1fr; }
+    .field.field-wide .field-control { grid-column: 1; grid-row: auto; }
+    .field.field-wide .field-control input { width: 100%; text-align: left; }
+
+    /* Checkbox row */
+    .field-check { display: block; }
+    .check-row { display: flex; align-items: flex-start; gap: 0.7rem; cursor: pointer; }
+    .check-row input { width: 18px; height: 18px; margin: 0; flex: none; margin-top: 2px; accent-color: var(--accent); }
+    .check-row .field-help { margin-top: 0.15rem; }
+
+    input[type="number"], input[type="text"] { font-family: inherit; font-size: 0.88rem;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.5rem 0.65rem; }
+    input::placeholder { color: var(--text-faint); }
+
+    .actions { display: flex; gap: var(--space-3); align-items: center; margin-top: var(--space-5); }
+    .note { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: var(--space-5);
+      font-size: 0.8rem; color: var(--text-muted); }
+    .note svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--text-faint); }
+    @media (max-width: 560px) { .field { grid-template-columns: 1fr; }
+      .field-control { grid-column: 1; grid-row: auto; } }
+  </style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo"><svg aria-hidden="true"><use href="#i-film"/></svg></span>
+        <div class="brand-title">Settings</div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a class="btn" href="."><svg aria-hidden="true"><use href="#i-back"/></svg>Back to gallery</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <h1>Settings</h1>
+    <p class="lede">These take effect on the next timelapse you finish &mdash; no add-on restart needed.
+      They override the matching add-on configuration options while set.</p>
+
+    {% if saved %}
+    <div class="saved"><svg aria-hidden="true"><use href="#i-check"/></svg>Settings saved.</div>
+    {% endif %}
+
+    <form action="settings" method="post">
+      <div class="group">
+        <div class="group-title"><svg aria-hidden="true"><use href="#i-film"/></svg>GIF output</div>
+
+        <div class="field">
+          <div class="field-label">Frame rate</div>
+          <div class="field-help">Playback speed of the timelapse GIF. Higher is faster/smoother but a larger file.</div>
+          <div class="field-control">
+            <input type="number" name="gif_fps" min="1" max="30" required value="{{ settings.gif_fps }}" />
+            <span class="field-unit">fps</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <div class="field-label">Width</div>
+          <div class="field-help">Output width in pixels; height scales automatically to keep the aspect ratio.</div>
+          <div class="field-control">
+            <input type="number" name="gif_width" min="160" max="1920" required value="{{ settings.gif_width }}" />
+            <span class="field-unit">px</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-title"><svg aria-hidden="true"><use href="#i-database"/></svg>Storage</div>
+
+        <div class="field field-check">
+          <label class="check-row">
+            <input type="checkbox" name="cleanup_after_finish" value="true" {% if settings.cleanup_after_finish %}checked{% endif %} />
+            <span>
+              <span class="field-label">Delete captured frames after building the GIF</span>
+              <span class="field-help" style="display:block">Frees space by removing the per-frame JPEGs once the GIF is built. Turn off to keep the raw frames.</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="field field-wide">
+          <div class="field-label">Also copy finished GIFs to</div>
+          <div class="field-help">A path under <code>/media</code> (the share is mapped read-write). Leave blank to keep GIFs only inside the add-on. Example: <code>timelapses</code> or <code>NAS1/3D Prints</code>.</div>
+          <div class="field-control">
+            <input type="text" name="gif_export_path" placeholder="timelapses" value="{{ settings.gif_export_path }}" />
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn-primary" type="submit"><svg aria-hidden="true"><use href="#i-check"/></svg>Save settings</button>
+        <a class="btn" href=".">Cancel</a>
+      </div>
+    </form>
+
+    <div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg>
+      <span>Capture cadence (when frames are taken) is driven by your Home Assistant automation, not here.
+        This page only controls how the finished GIF is built and stored.</span>
+    </div>
+  </div>
+</body>
+</html>

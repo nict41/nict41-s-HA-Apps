@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+- Redesigned the gallery onto a proper design system that follows your
+  device's light/dark setting: a header bar, summary tiles (timelapse count,
+  storage used, most recent capture), polished cards, and humanized
+  timestamps and file sizes instead of raw ISO strings and KB counts.
+- Added a live **Capturing now** section that shows any print currently
+  being captured (frame count + progress), updating on its own while the
+  page is open.
+- Added an in-app **Settings** page (gear icon) for `gif_fps`, `gif_width`,
+  `cleanup_after_finish`, and `gif_export_path`. Changes are saved to the
+  add-on's data and take effect on the next finished timelapse with no
+  restart, overriding the matching add-on configuration options while set.
+
 ## 0.3.1
 
 - Fixed `401: Unauthorized` when clicking a GIF thumbnail in the gallery

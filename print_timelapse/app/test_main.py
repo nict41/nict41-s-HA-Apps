@@ -4,6 +4,7 @@ import shutil
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 # DATA_DIR must be set before `main` is imported, since main.py creates its
 # data directories at import time.
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import main
+import settings
 
 client = TestClient(main.app)
 
@@ -60,6 +62,8 @@ def _clean_data_dir():
     shutil.rmtree(main.ARCHIVE_DIR, ignore_errors=True)
     main.CURRENT_DIR.mkdir(parents=True, exist_ok=True)
     main.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    # Reset any in-app settings overrides so each test starts from defaults.
+    settings._SETTINGS_PATH.unlink(missing_ok=True)
 
 
 def test_start_creates_empty_job_dir():
@@ -169,7 +173,7 @@ def test_finish_builds_gif_and_appears_in_gifs_and_gallery():
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_finish_exports_gif_when_export_path_configured(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "MEDIA_DIR", tmp_path)
-    monkeypatch.setattr(main, "GIF_EXPORT_PATH", "nas/timelapses")
+    settings.set_many({"gif_export_path": "nas/timelapses"})
 
     client.post("/start", data={"job_id": "job3"})
     client.post(
@@ -184,3 +188,99 @@ def test_finish_exports_gif_when_export_path_configured(monkeypatch, tmp_path):
     exported_path = tmp_path / "nas" / "timelapses" / body["filename"]
     assert body["exported_to"] == str(exported_path)
     assert exported_path.exists()
+
+
+# ---- Settings ----------------------------------------------------------
+
+def test_settings_defaults_then_override_roundtrips():
+    assert settings.get_int("gif_fps") == settings._DEFAULTS["gif_fps"]
+    settings.set_many({"gif_fps": 15})
+    assert settings.get_int("gif_fps") == 15
+
+
+def test_settings_clamps_integers_into_range():
+    settings.set_many({"gif_width": 99999})
+    assert settings.get_int("gif_width") == 1920
+    settings.set_many({"gif_width": 1})
+    assert settings.get_int("gif_width") == 160
+
+
+def test_settings_bool_and_export_path_traversal_is_stripped():
+    settings.set_many({"cleanup_after_finish": False, "gif_export_path": "/../etc/passwd/"})
+    assert settings.get_bool("cleanup_after_finish") is False
+    # ".." and leading/trailing slashes removed - can't escape /media.
+    assert settings.get_str("gif_export_path") == "etc/passwd"
+
+
+def test_settings_page_renders_current_values():
+    settings.set_many({"gif_fps": 9, "gif_export_path": "myvideos"})
+    html = client.get("/settings").text
+    assert 'value="9"' in html
+    assert "myvideos" in html
+
+
+def test_post_settings_saves_and_redirects():
+    resp = client.post(
+        "/settings",
+        data={"gif_fps": "20", "gif_width": "720", "cleanup_after_finish": "true", "gif_export_path": "vids"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert settings.get_int("gif_fps") == 20
+    assert settings.get_int("gif_width") == 720
+    assert settings.get_bool("cleanup_after_finish") is True
+    assert settings.get_str("gif_export_path") == "vids"
+
+
+def test_post_settings_unchecked_checkbox_means_false():
+    resp = client.post(
+        "/settings",
+        data={"gif_fps": "8", "gif_width": "480", "gif_export_path": ""},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert settings.get_bool("cleanup_after_finish") is False
+
+
+# ---- Live in-progress jobs --------------------------------------------
+
+def test_jobs_endpoint_reports_in_progress_capture():
+    client.post("/start", data={"job_id": "jobX"})
+    client.post("/frame", data={"job_id": "jobX", "percent": "40", "image_url": IMAGE_URL})
+    jobs = client.get("/jobs").json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["job_id"] == "jobX"
+    assert jobs[0]["frames"] == 1
+    assert jobs[0]["percent"] == 40
+
+
+def test_jobs_endpoint_ignores_empty_job_dirs():
+    client.post("/start", data={"job_id": "emptyJob"})  # started, no frames yet
+    assert client.get("/jobs").json()["jobs"] == []
+
+
+# ---- /finish honours runtime settings ----------------------------------
+
+def test_finish_uses_settings_fps_and_width(monkeypatch):
+    settings.set_many({"gif_fps": 12, "gif_width": 320})
+    recorded = {}
+
+    def fake_run(cmd, capture_output, text):
+        recorded["cmd"] = cmd
+        Path(cmd[-1]).write_bytes(b"GIF89a")  # produce the output so /finish proceeds
+
+        class _Result:
+            returncode = 0
+            stderr = ""
+
+        return _Result()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    client.post("/start", data={"job_id": "jobcfg"})
+    client.post("/frame", data={"job_id": "jobcfg", "percent": "0", "image_url": IMAGE_URL})
+
+    resp = client.post("/finish", data={"job_id": "jobcfg"})
+    assert resp.status_code == 200
+    cmd = recorded["cmd"]
+    assert "12" in cmd  # the configured framerate was passed to ffmpeg
+    assert any("scale=320:" in part for part in cmd)  # the configured width

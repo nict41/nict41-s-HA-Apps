@@ -3,72 +3,294 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Print Timelapse Archive</title>
+  <title>Print Timelapse</title>
   <style>
-    :root { color-scheme: dark; }
+    /* Design tokens mirror the parcel_tracker add-on so the two feel like one
+       family; light/dark follows the device. */
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
+      --border: #e4e7ec; --border-strong: #d4d9e0;
+      --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
+      --accent: #4f46e5; --accent-hover: #4338ca; --accent-contrast: #ffffff;
+      --accent-soft: #eef2ff; --accent-soft-text: #4338ca; --focus-ring: rgba(79,70,229,0.35);
+      --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
+      --shadow-md: 0 4px 14px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+      --radius-sm: 7px; --radius: 12px; --radius-pill: 999px;
+      --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+      --maxw: 1040px;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1014; --surface: #181b21; --surface-2: #12151b; --surface-hover: #1e222a;
+        --border: #272c36; --border-strong: #343b48;
+        --text: #e7e9ee; --text-muted: #9aa2b1; --text-faint: #6b7482;
+        --accent: #818cf8; --accent-hover: #a5b4fc; --accent-contrast: #0e1014;
+        --accent-soft: rgba(99,102,241,0.16); --accent-soft-text: #b4bcff; --focus-ring: rgba(129,140,248,0.45);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+        --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
+      }
+    }
+    * { box-sizing: border-box; }
+    svg:not([width]) { width: 15px; height: 15px; flex: none; }
     body {
-      margin: 0;
-      padding: 1.5rem;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #111318;
-      color: #e3e3e3;
+      margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
+      font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased;
     }
-    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
-    .sub { color: #9aa0a6; margin-bottom: 1.5rem; font-size: 0.9rem; }
-    .empty { color: #9aa0a6; padding: 3rem 0; text-align: center; }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 1rem;
-    }
-    .card {
-      background: #1b1f27;
-      border-radius: 10px;
-      overflow: hidden;
-      border: 1px solid #2a2f3a;
-    }
-    .card img {
-      width: 100%;
-      display: block;
-      background: #000;
-    }
-    .card .meta {
-      padding: 0.6rem 0.75rem;
-      font-size: 0.78rem;
-      color: #9aa0a6;
-    }
-    .card .meta a { color: #7db4ff; text-decoration: none; }
-    .card .filename {
-      color: #e3e3e3;
-      font-weight: 600;
-      font-size: 0.85rem;
-      display: block;
-      margin-bottom: 0.15rem;
-      word-break: break-all;
-    }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
+
+    /* Topbar */
+    .topbar { position: sticky; top: 0; z-index: 20;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--border); }
+    .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
+      display: flex; align-items: center; gap: var(--space-3); }
+    .brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+    .brand-logo { width: 38px; height: 38px; flex: none; border-radius: 10px; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent-soft-text); }
+    .brand-logo svg { width: 22px; height: 22px; }
+    .brand-title { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; }
+    .brand-sub { font-size: 0.78rem; color: var(--text-muted); }
+    .topbar-spacer { flex: 1; }
+
+    .btn { font-family: inherit; font-size: 0.82rem; font-weight: 550; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.5rem 0.8rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      cursor: pointer; text-decoration: none; white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease; }
+    .btn:hover { background: var(--surface-hover); border-color: var(--text-faint); }
+    .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    .btn svg { width: 15px; height: 15px; }
+    .btn-icon { padding: 0.45rem; }
+    .btn-icon svg { width: 17px; height: 17px; }
+
+    /* Stat tiles */
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3);
+      margin: var(--space-5) 0; }
+    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: var(--space-4); box-shadow: var(--shadow-sm); }
+    .stat-num { font-size: 1.55rem; font-weight: 680; letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .stat-label { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem;
+      font-size: 0.78rem; color: var(--text-muted); }
+    .stat-label svg { width: 14px; height: 14px; color: var(--text-faint); }
+
+    /* Section headers */
+    .section-head { display: flex; align-items: center; gap: 0.5rem; margin: var(--space-6) 0 var(--space-3); }
+    .section-head h2 { font-size: 0.82rem; font-weight: 650; letter-spacing: 0.04em;
+      text-transform: uppercase; color: var(--text-muted); margin: 0; }
+    .section-count { font-size: 0.72rem; font-weight: 600; color: var(--text-faint);
+      font-variant-numeric: tabular-nums; background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-pill); padding: 0.05rem 0.5rem; }
+
+    /* In-progress jobs */
+    .job { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-sm); padding: var(--space-4); margin-bottom: var(--space-3);
+      display: flex; align-items: center; gap: var(--space-4); }
+    .job-spin { width: 28px; height: 28px; flex: none; border-radius: 8px; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent-soft-text); }
+    .job-spin svg { width: 16px; height: 16px; animation: pulse 1.6s ease-in-out infinite; }
+    .job-main { flex: 1; min-width: 0; }
+    .job-title { font-family: var(--mono); font-weight: 600; font-size: 0.9rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .job-meta { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.1rem; }
+    .job-bar { margin-top: 0.5rem; height: 6px; border-radius: var(--radius-pill);
+      background: var(--surface-2); overflow: hidden; }
+    .job-fill { height: 100%; border-radius: inherit; background: var(--accent);
+      transition: width 0.4s ease; }
+    .job-pct { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 0.9rem;
+      color: var(--accent-soft-text); flex: none; }
+
+    /* Gallery grid */
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-4); }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-sm); overflow: hidden;
+      transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+    .card:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+    .card-img { display: block; background: #000; aspect-ratio: 4 / 3; }
+    .card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .card-body { padding: var(--space-3) var(--space-4) var(--space-4); }
+    .card-name { font-family: var(--mono); font-size: 0.84rem; font-weight: 600; color: var(--text);
+      word-break: break-all; line-height: 1.35; }
+    .card-meta { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+      margin-top: 0.5rem; font-size: 0.76rem; color: var(--text-muted); }
+    .card-meta .dot { color: var(--text-faint); }
+    .card-dl { display: inline-flex; align-items: center; gap: 0.3rem; margin-top: 0.7rem;
+      font-size: 0.78rem; font-weight: 550; color: var(--accent-soft-text); text-decoration: none; }
+    .card-dl svg { width: 14px; height: 14px; }
+    .card-dl:hover { text-decoration: underline; }
+
+    /* Empty state */
+    .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.6rem;
+      padding: var(--space-6) var(--space-4); color: var(--text-muted); font-size: 0.9rem;
+      background: var(--surface); border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+    .empty svg { width: 30px; height: 30px; color: var(--text-faint); }
+
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+    @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.001ms !important; } }
+    @media (max-width: 640px) { .stats { grid-template-columns: 1fr; } .wrap, .topbar-inner { padding-left: var(--space-4); padding-right: var(--space-4); } }
   </style>
 </head>
 <body>
-  <h1>3D Print Timelapse Archive</h1>
-  <div class="sub">{{ gifs|length }} timelapse{{ '' if gifs|length == 1 else 's' }} stored</div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+  </svg>
 
-  {% if not gifs %}
-  <div class="empty">No timelapses archived yet. Finish a print job and it'll show up here.</div>
-  {% else %}
-  <div class="grid">
-    {% for gif in gifs %}
-    <div class="card">
-      <a href="archive/{{ gif.filename }}">
-        <img src="archive/{{ gif.filename }}" alt="{{ gif.filename }}" loading="lazy" />
-      </a>
-      <div class="meta">
-        <span class="filename">{{ gif.filename }}</span>
-        {{ gif.created }} &middot; {{ (gif.size_bytes / 1024) | round(1) }} KB
-        &middot; <a href="archive/{{ gif.filename }}" download>download</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo"><svg aria-hidden="true"><use href="#i-film"/></svg></span>
+        <div class="brand-text">
+          <div class="brand-title">Print Timelapse</div>
+          <div class="brand-sub">3D print capture archive</div>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a class="btn btn-icon" href="settings" aria-label="Settings" title="Settings"><svg aria-hidden="true"><use href="#i-gear"/></svg></a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-num">{{ gifs|length }}</div>
+        <div class="stat-label"><svg aria-hidden="true"><use href="#i-film"/></svg>Timelapses</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num" data-bytes="{{ total_bytes }}">{{ total_bytes }}</div>
+        <div class="stat-label"><svg aria-hidden="true"><use href="#i-database"/></svg>Storage used</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">{% if latest %}<time data-iso="{{ latest }}">{{ latest }}</time>{% else %}&mdash;{% endif %}</div>
+        <div class="stat-label"><svg aria-hidden="true"><use href="#i-clock"/></svg>Most recent capture</div>
       </div>
     </div>
-    {% endfor %}
+
+    <div class="section-head" id="jobs-head"{% if not jobs %} hidden{% endif %}><h2>Capturing now</h2><span class="section-count" id="jobs-count">{{ jobs|length }}</span></div>
+    <div id="jobs">
+      {% for job in jobs %}
+      <div class="job">
+        <span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>
+        <div class="job-main">
+          <div class="job-title">{{ job.job_id }}</div>
+          <div class="job-meta">{{ job.frames }} frame{{ '' if job.frames == 1 else 's' }} &middot; updated <time data-iso="{{ job.updated }}">{{ job.updated }}</time></div>
+          <div class="job-bar"><div class="job-fill" style="width: {{ job.percent }}%"></div></div>
+        </div>
+        <div class="job-pct">{{ job.percent }}%</div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="section-head"><h2>Archive</h2><span class="section-count">{{ gifs|length }}</span></div>
+    {% if not gifs %}
+    <div class="empty"><svg aria-hidden="true"><use href="#i-film"/></svg>No timelapses archived yet. Finish a print job and it'll show up here.</div>
+    {% else %}
+    <div class="grid">
+      {% for gif in gifs %}
+      <div class="card">
+        <a class="card-img" href="archive/{{ gif.filename }}" target="_blank" rel="noopener">
+          <img src="archive/{{ gif.filename }}" alt="{{ gif.filename }}" loading="lazy" />
+        </a>
+        <div class="card-body">
+          <div class="card-name">{{ gif.filename }}</div>
+          <div class="card-meta">
+            <time data-iso="{{ gif.created }}">{{ gif.created }}</time>
+            <span class="dot">&middot;</span>
+            <span data-bytes="{{ gif.size_bytes }}">{{ gif.size_bytes }}</span>
+          </div>
+          <a class="card-dl" href="archive/{{ gif.filename }}" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
-  {% endif %}
+
+  <script>
+    // ---- Humanized timestamps & sizes ----------------------------------
+    // The server emits raw ISO strings and raw byte counts; format them in
+    // the browser so the UI reads naturally instead of like a debug dump.
+    var rtf = window.Intl && Intl.RelativeTimeFormat
+      ? new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }) : null;
+
+    function relative(iso) {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      var secs = Math.round((d.getTime() - Date.now()) / 1000), abs = Math.abs(secs);
+      if (abs < 45) return "just now";
+      if (!rtf) return d.toLocaleString();
+      var units = [["year",31536000],["month",2592000],["week",604800],["day",86400],["hour",3600],["minute",60]];
+      for (var i = 0; i < units.length; i++) {
+        if (abs >= units[i][1] || units[i][0] === "minute") return rtf.format(Math.round(secs/units[i][1]), units[i][0]);
+      }
+      return "just now";
+    }
+
+    function humanBytes(n) {
+      n = Number(n) || 0;
+      if (n < 1024) return n + " B";
+      var units = ["KB","MB","GB","TB"], i = -1;
+      do { n /= 1024; i++; } while (n >= 1024 && i < units.length - 1);
+      return (n < 10 ? n.toFixed(1) : Math.round(n)) + " " + units[i];
+    }
+
+    function formatAll(root) {
+      (root || document).querySelectorAll("time[data-iso]").forEach(function (el) {
+        var d = new Date(el.getAttribute("data-iso"));
+        el.textContent = relative(el.getAttribute("data-iso"));
+        if (!isNaN(d.getTime())) el.title = d.toLocaleString();
+      });
+      (root || document).querySelectorAll("[data-bytes]").forEach(function (el) {
+        el.textContent = humanBytes(el.getAttribute("data-bytes"));
+      });
+    }
+    formatAll();
+
+    // ---- Live in-progress jobs -----------------------------------------
+    // Poll while the page is open so a running capture updates without a
+    // manual refresh. Cheap (a small JSON list) and idempotent.
+    var jobsEl = document.getElementById("jobs");
+    var jobsHead = document.getElementById("jobs-head");
+    var jobsCount = document.getElementById("jobs-count");
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+      });
+    }
+
+    function renderJobs(jobs) {
+      jobsCount.textContent = jobs.length;
+      jobsHead.hidden = jobs.length === 0;
+      jobsEl.innerHTML = jobs.map(function (j) {
+        return '<div class="job">' +
+          '<span class="job-spin"><svg aria-hidden="true"><use href="#i-camera"/></svg></span>' +
+          '<div class="job-main">' +
+            '<div class="job-title">' + esc(j.job_id) + '</div>' +
+            '<div class="job-meta">' + j.frames + ' frame' + (j.frames === 1 ? '' : 's') +
+              ' &middot; updated <time data-iso="' + esc(j.updated) + '">' + esc(j.updated) + '</time></div>' +
+            '<div class="job-bar"><div class="job-fill" style="width:' + j.percent + '%"></div></div>' +
+          '</div>' +
+          '<div class="job-pct">' + j.percent + '%</div>' +
+        '</div>';
+      }).join("");
+      formatAll(jobsEl);
+    }
+
+    function pollJobs() {
+      fetch("jobs").then(function (r) { return r.json(); })
+        .then(function (data) { renderJobs(data.jobs || []); })
+        .catch(function () {});
+    }
+    setInterval(pollJobs, 4000);
+  </script>
 </body>
 </html>
