@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Removed the brief blank flash that appeared just before the gallery ↔
+  settings page transition, by holding the first paint until the page is
+  laid out and theming the page background from the start.
+
 ## 0.4.2
 
 - **Capturing now** cards now show a live thumbnail of the print's most

@@ -3,11 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Render-block first paint until content is parsed, so the cross-document
+       view transition doesn't flash a blank frame first (see #vt-ready). -->
+  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Settings &middot; Print Timelapse</title>
   <style>
     /* Design tokens mirror gallery.html so the two pages stay in lockstep. */
     :root {
-      color-scheme: light dark;
+      color-scheme: light dark; background: var(--bg);
       --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
       --border: #e4e7ec; --border-strong: #d4d9e0;
       --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
@@ -196,6 +199,7 @@
       <span>Capture cadence (when frames are taken) is driven by your Home Assistant automation, not here.
         This page only controls how the finished GIF is built and stored.</span>
     </div>
+    <div id="vt-ready"></div>
   </div>
 </body>
 </html>

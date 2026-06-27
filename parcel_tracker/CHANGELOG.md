@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.3
+
+- Removed the brief blank flash that appeared just before the dashboard ↔
+  settings page transition, by holding the first paint until the page is
+  laid out and theming the page background from the start.
+
 ## 0.9.2
 
 - Smoother crossfade when moving between the dashboard and the settings page

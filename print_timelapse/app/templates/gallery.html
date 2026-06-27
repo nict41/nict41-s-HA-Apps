@@ -3,12 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Render-block the first paint until the page content is parsed, so a
+       cross-document view transition crossfades from a fully-rendered page
+       instead of flashing a blank frame first. Points at the #vt-ready
+       sentinel at the end of the content. -->
+  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Print Timelapse</title>
   <style>
     /* Design tokens mirror the parcel_tracker add-on so the two feel like one
        family; light/dark follows the device. */
     :root {
-      color-scheme: light dark;
+      color-scheme: light dark; background: var(--bg);
       --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
       --border: #e4e7ec; --border-strong: #d4d9e0;
       --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
@@ -268,6 +273,7 @@
       {% endfor %}
     </div>
     {% endif %}
+    <div id="vt-ready"></div>
   </div>
 
   <script>
