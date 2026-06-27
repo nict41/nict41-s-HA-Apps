@@ -228,11 +228,21 @@ def render_document(body_html: str) -> str:
     )
 
 
+# Zero-width characters used as invisible "preheader" padding in marketing
+# mail - meaningless in a plain-text view and they just leave odd gaps.
+_ZERO_WIDTH = dict.fromkeys((0x200B, 0x200C, 0x200D, 0xFEFF), None)
+
+
 def text_fallback_html(text: str) -> str:
-    """Body HTML for a parcel whose source email was plain-text only."""
+    """Body HTML for a parcel whose source email was plain-text only (or was
+    stored before HTML capture existed). Any HTML entities still present in
+    the stored text - e.g. a literal "&zwnj;" or "&#39;" from an email whose
+    text was derived from HTML - are decoded first so they don't show up
+    verbatim, and zero-width padding is dropped."""
+    cleaned = _html.unescape(text or "").translate(_ZERO_WIDTH)
     return (
         "<pre style=\"white-space:pre-wrap;word-break:break-word;margin:0;"
         "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px\">"
-        + _html.escape(text or "")
+        + _html.escape(cleaned)
         + "</pre>"
     )

@@ -510,14 +510,23 @@
       border-radius: var(--radius); box-shadow: var(--shadow-sm);
       padding: var(--space-4); margin-bottom: var(--space-3);
     }
-    .panel-add { padding: var(--space-4) var(--space-5); }
+    .panel-add { padding: 0; }
     .add-head {
-      display: flex; align-items: center; gap: 0.5rem;
+      display: flex; align-items: center; gap: 0.5rem; cursor: pointer; list-style: none;
+      padding: var(--space-4) var(--space-5);
       font-size: 0.82rem; font-weight: 600; color: var(--text);
-      margin-bottom: var(--space-4);
     }
+    .add-head::-webkit-details-marker { display: none; }
     .add-head svg { width: 16px; height: 16px; color: var(--text-muted); }
-    .add-form { display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end; }
+    .add-head:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); border-radius: var(--radius); }
+    .add-chevron { margin-left: auto; color: var(--text-faint); transition: transform 0.18s ease; }
+    .add-chevron svg { width: 16px; height: 16px; display: block; }
+    .panel-add[open] > .add-head { padding-bottom: 0; }
+    .panel-add[open] > .add-head .add-chevron { transform: rotate(180deg); }
+    .add-form {
+      display: flex; gap: var(--space-3); flex-wrap: wrap; align-items: flex-end;
+      padding: var(--space-4) var(--space-5) var(--space-5);
+    }
     .field { display: flex; flex-direction: column; gap: 0.3rem; }
     .field.grow { flex: 1; min-width: 160px; }
     .field label {
@@ -564,6 +573,15 @@
       border-radius: var(--radius);
     }
     .empty svg { width: 28px; height: 28px; color: var(--text-faint); }
+
+    /* ---- Page footer (compact, low-priority notices) ------------------- */
+    .page-footer {
+      display: flex; align-items: center; justify-content: center; gap: 0.4rem;
+      margin-top: var(--space-6); padding-top: var(--space-4);
+      border-top: 1px solid var(--border);
+      font-size: 0.76rem; color: var(--text-faint); text-align: center;
+    }
+    .page-footer svg { width: 14px; height: 14px; }
 
     /* ---- Spinner ------------------------------------------------------- */
     .spinner {
@@ -747,33 +765,30 @@
       </div>
     </div>
 
-    {% if not tracking_providers_configured or ha_sync_configured %}
+    {% if not tracking_providers_configured %}
     <div class="panel">
-      {% if not tracking_providers_configured %}
       <div class="notice"><svg aria-hidden="true"><use href="#i-info"/></svg><span>No tracking provider API key configured &mdash; showing carrier links only, no live status.</span></div>
-      {% endif %}
-      {% if ha_sync_configured %}
-      <div class="notice"><svg aria-hidden="true"><use href="#i-home"/></svg><span>Exposed to Home Assistant as sensor entities for dashboards and automations.</span></div>
-      {% endif %}
     </div>
     {% endif %}
 
-    <form class="panel panel-add add-form" action="add" method="post" id="add-form">
-      <div class="add-head" style="flex:1 0 100%"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add a parcel manually</div>
-      <div class="field grow">
-        <label for="tracking_number">Tracking number</label>
-        <input id="tracking_number" name="tracking_number" required />
-      </div>
-      <div class="field grow">
-        <label for="carrier_name">Carrier (optional)</label>
-        <input id="carrier_name" name="carrier_name" />
-      </div>
-      <div class="field grow">
-        <label for="description">Description (optional)</label>
-        <input id="description" name="description" />
-      </div>
-      <button class="btn-primary" type="submit"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add parcel</button>
-    </form>
+    <details class="panel panel-add">
+      <summary class="add-head"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add a parcel manually<span class="add-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span></summary>
+      <form class="add-form" action="add" method="post" id="add-form">
+        <div class="field grow">
+          <label for="tracking_number">Tracking number</label>
+          <input id="tracking_number" name="tracking_number" required />
+        </div>
+        <div class="field grow">
+          <label for="carrier_name">Carrier (optional)</label>
+          <input id="carrier_name" name="carrier_name" />
+        </div>
+        <div class="field grow">
+          <label for="description">Description (optional)</label>
+          <input id="description" name="description" />
+        </div>
+        <button class="btn-primary" type="submit"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add parcel</button>
+      </form>
+    </details>
 
     {% if pending %}
     <section class="section" id="section-pending">
@@ -963,6 +978,10 @@
         </div>
       </div>
     </details>
+
+    {% if ha_sync_configured %}
+    <div class="page-footer"><svg aria-hidden="true"><use href="#i-home"/></svg>Exposed to Home Assistant as sensor entities for dashboards and automations.</div>
+    {% endif %}
   </div>
 
   <!-- Shared email viewer. The message is loaded into a fully sandboxed

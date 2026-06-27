@@ -19,6 +19,11 @@ approximately right (e.g. cross-border Cainiao/AliExpress numbers).
 
 import re
 from dataclasses import dataclass
+from html import unescape
+
+# Zero-width characters retailers pad invisible "preheader" text with - they
+# carry no meaning once the tags are gone and just leave odd gaps in the text.
+_ZERO_WIDTH = dict.fromkeys((0x200B, 0x200C, 0x200D, 0xFEFF), None)
 
 RETAILER_DOMAINS = {
     "aliexpress.com": "AliExpress",
@@ -140,7 +145,10 @@ class Candidate:
 def strip_html(html: str) -> str:
     text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", html)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&")
+    # Decode every HTML entity (not just &nbsp;/&amp;) so things like &zwnj;,
+    # &#39; or &mdash; don't survive as literal "&...;" text, then drop the
+    # zero-width padding before collapsing whitespace.
+    text = unescape(text).translate(_ZERO_WIDTH)
     return re.sub(r"\s+", " ", text).strip()
 
 

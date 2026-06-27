@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.1
+
+- Fixed source emails showing raw HTML entities (e.g. `&zwnj;`, `&#39;`) and
+  zero-width "preheader" padding as literal text in the email viewer. All
+  entities are now decoded and that invisible padding stripped, including
+  for parcels detected before HTML capture existed.
+- The "Add a parcel manually" form is now collapsed behind a header by
+  default, so it no longer takes up space until you need it.
+- Moved the "Exposed to Home Assistant" notice from a full-width panel near
+  the top to a compact line in the page footer.
+
 ## 0.9.0
 
 - Added an in-app **Settings** page (gear icon in the header) for the

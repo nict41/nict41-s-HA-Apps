@@ -110,3 +110,12 @@ def test_text_fallback_escapes_and_preserves_whitespace():
     out = email_render.text_fallback_html("line1\n<tag> & stuff")
     assert "&lt;tag&gt;" in out
     assert "white-space:pre-wrap" in out
+
+
+def test_text_fallback_decodes_leftover_entities_and_zero_width():
+    # A body stored before HTML capture can still carry literal entities.
+    out = email_render.text_fallback_html("We&#39;re getting your order ready &zwnj; &zwnj;")
+    assert "&zwnj;" not in out
+    assert "&#39;" not in out
+    assert "‌" not in out  # zero-width non-joiner removed
+    assert "We&#x27;re getting your order ready" in out or "We're getting your order ready" in out

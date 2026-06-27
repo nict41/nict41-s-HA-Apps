@@ -88,6 +88,17 @@ def test_strip_html_removes_tags_and_decodes_entities():
     assert "LP123456789CN" in text
 
 
+def test_strip_html_decodes_all_entities_and_drops_zero_width_padding():
+    # The marketing-preheader case: a hidden line padded with &zwnj; / &#39;
+    # must not leave literal "&...;" tokens or stray zero-width characters.
+    html = "<span>We&#39;re getting your order ready &zwnj; &zwnj; &zwnj;</span>"
+    text = carriers.strip_html(html)
+    assert "&zwnj;" not in text
+    assert "&#39;" not in text
+    assert "‌" not in text
+    assert "We're getting your order ready" in text
+
+
 def test_get_tracking_url_points_at_track123():
     url = carriers.get_tracking_url("1Z999AA10123456784")
     assert "1Z999AA10123456784" in url
