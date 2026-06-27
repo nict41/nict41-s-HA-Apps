@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0
+
+- Added an in-app **Settings** page (gear icon in the header) for the
+  operational options that previously required editing the add-on
+  configuration and restarting. Changes apply live on the next sync, with
+  no restart - the email-check interval reschedules the poller immediately.
+  Mailbox accounts and tracking-provider API keys deliberately stay in the
+  add-on's managed configuration.
+- Settings include a new **tracking-refresh throttle**: you can now check
+  email frequently while capping how often each parcel is re-queried from
+  the tracking provider, to conserve provider API quota. A manual "Check
+  mail now" still does a full refresh. Other settings: email-check
+  interval, mail lookback window, the trusted/ignored/only-scan sender
+  lists, and the auto-archive / auto-dismiss timings.
+- The count cards at the top of the dashboard are now clickable to collapse
+  or expand each section (the section headers toggle too), with the choice
+  remembered per browser. The fourth card now reflects the Archived section,
+  and any exceptions are surfaced as a "needs attention" line on the In
+  transit card.
+
 ## 0.8.0
 
 - The source email can now be viewed as it was actually sent, rendered

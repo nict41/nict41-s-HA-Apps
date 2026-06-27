@@ -56,7 +56,8 @@ def init_db() -> None:
                 delivered_at TEXT,
                 archived_at TEXT,
                 provider_confirmed INTEGER NOT NULL DEFAULT 0,
-                first_checked_at TEXT
+                first_checked_at TEXT,
+                last_checked_at TEXT
             )
             """
         )
@@ -98,6 +99,12 @@ def init_db() -> None:
             conn.execute("ALTER TABLE parcels ADD COLUMN first_checked_at TEXT")
         if "tracking_history" not in existing_columns:
             conn.execute("ALTER TABLE parcels ADD COLUMN tracking_history TEXT")
+        if "last_checked_at" not in existing_columns:
+            # When a tracking provider last returned a result for this parcel,
+            # so the provider-refresh phase can throttle how often each parcel
+            # is re-queried independently of how often mail is checked. Left
+            # NULL on existing rows so a never-checked parcel is always due.
+            conn.execute("ALTER TABLE parcels ADD COLUMN last_checked_at TEXT")
 
 
 def is_processed(message_id: str) -> bool:
@@ -344,8 +351,12 @@ def update_tracking_status(
         "estimated_delivery = COALESCE(?, estimated_delivery)",
         "updated_at = ?",
         "first_checked_at = COALESCE(first_checked_at, ?)",
+        # Always stamped: this function is only called once a provider has
+        # actually returned a result for the number, so it marks the most
+        # recent provider check (used to throttle re-checks).
+        "last_checked_at = ?",
     ]
-    params = [status_detail, last_event_time, estimated_delivery, now, now]
+    params = [status_detail, last_event_time, estimated_delivery, now, now, now]
     if status is not None:
         assignments += ["status = ?", "delivered_at = COALESCE(delivered_at, ?)"]
         params += [status, now if status == STATUS_DELIVERED else None]

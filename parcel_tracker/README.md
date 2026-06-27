@@ -174,7 +174,31 @@ on the next mail check rather than being skipped as already processed.
 
 "**Check mail now**" runs a sync immediately instead of waiting for the
 next scheduled check, showing a live "checked X/Y" count for however long
-it takes.
+it takes. (A manual check always does a full tracking refresh, ignoring the
+refresh throttle described under Settings below.)
+
+The count cards at the top double as section toggles - click one (or a
+section's header) to collapse or expand that section's cards. The choice is
+remembered per browser.
+
+The **gear icon** in the header opens a **Settings** page for the
+operational knobs you'd otherwise have to change in the add-on
+configuration (and restart for):
+
+- **Check email every** - how often mailboxes are scanned and tracking is
+  refreshed. Applied immediately, without an add-on restart.
+- **Refresh tracking status no more than every** - caps how often each
+  parcel is re-queried from the tracking provider, to conserve API quota,
+  independently of how often mail is checked. `0` means refresh on every
+  check.
+- **Scan emails from the last** - how far back each mail check looks.
+- **Only scan / Trusted / Ignored sender domains** - the same sender-list
+  controls as the add-on options.
+- **Auto-archive** and **auto-dismiss** timings.
+
+These override the matching add-on options while set. Mailbox accounts and
+tracking-provider API keys stay in the add-on configuration (the managed,
+secret store) and are not editable from here.
 
 A **Data management** menu near the top of the dashboard lets you export
 every tracked parcel as a JSON file, or wipe all parcels and sync history

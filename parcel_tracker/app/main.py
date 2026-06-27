@@ -1,11 +1,11 @@
 import html
 import json
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.jobstores.base import JobLookupError
 from fastapi import FastAPI, Form, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -18,12 +18,13 @@ import db
 import email_render
 import ha_sync
 import mail_worker
+import settings
 import sync_progress
 from providers import seventeentrack, track123
 
-POLL_INTERVAL_MINUTES = int(os.environ.get("POLL_INTERVAL_MINUTES", "30"))
-AUTO_ARCHIVE_AFTER_DAYS = int(os.environ.get("AUTO_ARCHIVE_AFTER_DAYS", "14"))
-DISMISS_UNCONFIRMED_AFTER_DAYS = int(os.environ.get("DISMISS_UNCONFIRMED_AFTER_DAYS", "3"))
+# The scheduled job's id, so its interval can be live-rescheduled when the
+# email-check frequency is changed on the settings page.
+_SYNC_JOB_ID = "sync_cycle"
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -44,10 +45,29 @@ def tracking_providers_configured() -> bool:
     return any(mod.configured() for _, mod in _TRACKING_PROVIDERS)
 
 
-def run_sync_cycle() -> None:
+def _due_for_refresh(parcel: dict, throttle_minutes: int) -> bool:
+    """Whether a parcel's tracking status is due to be re-queried from its
+    provider. Parcels never checked are always due; otherwise they're skipped
+    until `throttle_minutes` have passed since the last check, so the provider
+    refresh cadence is decoupled from how often mail is scanned (which keeps
+    API quota use down). A zero throttle means "every cycle", as before."""
+    if throttle_minutes <= 0 or not parcel["last_checked_at"]:
+        return True
+    last = datetime.fromisoformat(parcel["last_checked_at"])
+    return datetime.now(timezone.utc) - last >= timedelta(minutes=throttle_minutes)
+
+
+def run_sync_cycle(force_refresh: bool = False) -> None:
     sync_result = mail_worker.sync_mailbox()
 
+    dismiss_after_days = settings.get_int("dismiss_unconfirmed_after_days")
     refresh_candidates = db.parcels_needing_refresh()
+    # A manual "Check mail now" always does a full refresh; scheduled runs
+    # honour the provider-refresh throttle so frequent mail checks don't burn
+    # provider quota re-querying parcels that were just checked.
+    if not force_refresh:
+        throttle = settings.get_int("provider_refresh_minutes")
+        refresh_candidates = [p for p in refresh_candidates if _due_for_refresh(p, throttle)]
     active_providers = [(name, mod) for name, mod in _TRACKING_PROVIDERS if mod.configured()]
     if refresh_candidates and active_providers:
         sync_progress.start_stage("providers")
@@ -88,9 +108,9 @@ def run_sync_cycle() -> None:
                     not info["confirmed"]
                     and not parcel["provider_confirmed"]
                     and parcel["first_checked_at"]
-                    and DISMISS_UNCONFIRMED_AFTER_DAYS > 0
+                    and dismiss_after_days > 0
                     and datetime.now(timezone.utc) - datetime.fromisoformat(parcel["first_checked_at"])
-                    >= timedelta(days=DISMISS_UNCONFIRMED_AFTER_DAYS)
+                    >= timedelta(days=dismiss_after_days)
                 ):
                     db.dismiss_parcel(parcel["id"])
                     continue
@@ -118,7 +138,7 @@ def run_sync_cycle() -> None:
 
         sync_progress.finish()
 
-    archived = db.auto_archive_delivered(AUTO_ARCHIVE_AFTER_DAYS)
+    archived = db.auto_archive_delivered(settings.get_int("auto_archive_after_days"))
 
     ha_sync.sync(db.list_parcels())
 
@@ -134,10 +154,31 @@ def run_sync_cycle() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    scheduler.add_job(run_sync_cycle, "interval", minutes=POLL_INTERVAL_MINUTES, next_run_time=datetime.now())
+    scheduler.add_job(
+        run_sync_cycle,
+        "interval",
+        minutes=settings.get_int("poll_interval_minutes"),
+        next_run_time=datetime.now(),
+        id=_SYNC_JOB_ID,
+    )
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
+
+
+def _reschedule_sync_job() -> None:
+    """Apply the current email-check interval to the running scheduler, so a
+    change on the settings page takes effect without an add-on restart. A
+    no-op when the scheduler isn't running / the job isn't scheduled (e.g.
+    under the test client, which doesn't run the lifespan)."""
+    if not scheduler.running:
+        return
+    try:
+        scheduler.reschedule_job(
+            _SYNC_JOB_ID, trigger="interval", minutes=settings.get_int("poll_interval_minutes")
+        )
+    except JobLookupError:
+        pass
 
 
 class _CardCORSMiddleware(BaseHTTPMiddleware):
@@ -209,12 +250,49 @@ async def dashboard(request: Request):
     return response
 
 
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request, saved: int = 0):
+    response = templates.TemplateResponse(
+        request, "settings.html", {"settings": settings.all_settings(), "saved": bool(saved)}
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/settings")
+async def save_settings(
+    poll_interval_minutes: int = Form(...),
+    provider_refresh_minutes: int = Form(...),
+    lookback_days: int = Form(...),
+    auto_archive_after_days: int = Form(...),
+    dismiss_unconfirmed_after_days: int = Form(...),
+    trusted_senders: str = Form(""),
+    ignore_senders: str = Form(""),
+    allowed_senders: str = Form(""),
+):
+    settings.set_many({
+        "poll_interval_minutes": poll_interval_minutes,
+        "provider_refresh_minutes": provider_refresh_minutes,
+        "lookback_days": lookback_days,
+        "auto_archive_after_days": auto_archive_after_days,
+        "dismiss_unconfirmed_after_days": dismiss_unconfirmed_after_days,
+        "trusted_senders": trusted_senders,
+        "ignore_senders": ignore_senders,
+        "allowed_senders": allowed_senders,
+    })
+    # The email-check interval drives the scheduler, so apply it immediately
+    # rather than waiting for the next add-on restart.
+    _reschedule_sync_job()
+    return RedirectResponse("settings?saved=1", status_code=303)
+
+
 @app.post("/sync")
 async def trigger_sync():
     # run_sync_cycle() does blocking IMAP/HTTP I/O - calling it directly here
     # would freeze the single-threaded event loop (and the whole dashboard,
-    # not just this request) for as long as the sync takes.
-    await run_in_threadpool(run_sync_cycle)
+    # not just this request) for as long as the sync takes. A manual check
+    # forces a full provider refresh, bypassing the scheduled throttle.
+    await run_in_threadpool(run_sync_cycle, True)
     return RedirectResponse("./", status_code=303)
 
 

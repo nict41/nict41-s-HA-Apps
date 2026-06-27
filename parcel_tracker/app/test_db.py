@@ -85,6 +85,14 @@ def test_get_parcel_email_returns_none_for_missing_parcel():
     assert db.get_parcel_email(9999) is None
 
 
+def test_update_tracking_status_stamps_last_checked_at():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "x", 0.9, None, db.STATUS_ACTIVE)
+    assert db.get_parcel(parcel_id)["last_checked_at"] is None
+    db.update_tracking_status(parcel_id, status=db.STATUS_ACTIVE, status_detail="In transit",
+                              last_event_time=None, estimated_delivery=None, confirmed=True)
+    assert db.get_parcel(parcel_id)["last_checked_at"] is not None
+
+
 def test_upsert_parcel_updates_email_fields_only_on_higher_confidence():
     db.upsert_parcel(
         "ABC123", "Unknown", "first guess", 0.3, "msg-1", db.STATUS_PENDING,

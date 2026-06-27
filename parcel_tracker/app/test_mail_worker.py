@@ -5,6 +5,7 @@ import pytest
 
 import db
 import mail_worker
+import settings
 import sync_progress
 
 
@@ -410,7 +411,7 @@ def test_sync_account_respects_ignore_senders(monkeypatch):
     fake_conn = _FakeConn({1: raw})
     monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
     monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
-    monkeypatch.setattr(mail_worker, "IGNORE_SENDERS", frozenset({"noisyretailer.com"}))
+    settings.set_many({"ignore_senders": "noisyretailer.com"})
 
     result = mail_worker.sync_mailbox()
 
@@ -449,7 +450,7 @@ def test_sync_account_skips_full_body_fetch_for_ignored_sender(monkeypatch):
     fake_conn = _FakeConn({1: raw})
     monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
     monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
-    monkeypatch.setattr(mail_worker, "IGNORE_SENDERS", frozenset({"noisyretailer.com"}))
+    settings.set_many({"ignore_senders": "noisyretailer.com"})
 
     mail_worker.sync_mailbox()
 
@@ -503,12 +504,12 @@ def test_from_search_terms_three_domains_nests_or():
 
 
 def test_search_criteria_without_allowed_senders_is_just_since(monkeypatch):
-    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset())
+    settings.set_many({"allowed_senders": ""})
     assert mail_worker._search_criteria("01-Jan-2024") == ["SINCE", "01-Jan-2024"]
 
 
 def test_search_criteria_with_allowed_senders_adds_from_terms(monkeypatch):
-    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset({"b.com", "a.com"}))
+    settings.set_many({"allowed_senders": "b.com, a.com"})
     assert mail_worker._search_criteria("01-Jan-2024") == [
         "SINCE",
         "01-Jan-2024",
@@ -524,7 +525,7 @@ def test_sync_folder_passes_allowed_senders_into_imap_search(monkeypatch):
     fake_conn = _FakeConn({})
     monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
     monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
-    monkeypatch.setattr(mail_worker, "ALLOWED_SENDERS", frozenset({"aliexpress.com"}))
+    settings.set_many({"allowed_senders": "aliexpress.com"})
 
     mail_worker.sync_mailbox()
 

@@ -1,5 +1,5 @@
 name: "Parcel Tracker"
-version: "0.8.0"
+version: "0.9.0"
 slug: "parcel_tracker"
 description: "Automatically detects tracking numbers from your email and tracks deliveries"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/parcel_tracker"
@@ -21,6 +21,7 @@ options:
   mailboxes: []
   lookback_days: 14
   poll_interval_minutes: 30
+  provider_refresh_minutes: 0
   auto_archive_after_days: 14
   dismiss_unconfirmed_after_days: 3
   trusted_senders: ""
@@ -39,6 +40,7 @@ schema:
         - str
   lookback_days: int(1,90)
   poll_interval_minutes: int(5,1440)
+  provider_refresh_minutes: int(0,10080)
   auto_archive_after_days: int(0,365)
   dismiss_unconfirmed_after_days: int(0,90)
   trusted_senders: str

@@ -206,12 +206,18 @@
       margin: var(--space-5) 0 var(--space-5);
     }
     .stat {
+      position: relative;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: var(--space-4);
       box-shadow: var(--shadow-sm);
+      transition: box-shadow 0.12s ease, border-color 0.12s ease;
     }
+    /* Interactive only when JS has wired the tile to an on-page section. */
+    .stat.is-clickable { cursor: pointer; }
+    .stat.is-clickable:hover { box-shadow: var(--shadow-md); border-color: var(--border-strong); }
+    .stat:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
     .stat-num {
       font-size: 1.7rem; font-weight: 680; letter-spacing: -0.02em;
       font-variant-numeric: tabular-nums; line-height: 1;
@@ -224,15 +230,38 @@
     .stat.is-pending .stat-dot { background: var(--st-pending-fg); }
     .stat.is-transit .stat-dot { background: var(--st-transit-fg); }
     .stat.is-delivered .stat-dot { background: var(--st-delivered-fg); }
-    .stat.is-exception .stat-dot { background: var(--st-exception-fg); }
-    .stat.is-exception .stat-num { color: var(--st-exception-fg); }
+    .stat.is-archived .stat-dot { background: var(--st-archived-fg); }
+    .stat-sub {
+      margin-top: 0.4rem; font-size: 0.72rem; font-weight: 600;
+      color: var(--st-exception-fg);
+      display: inline-flex; align-items: center; gap: 0.3rem;
+    }
+    .stat-sub::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .stat-toggle {
+      position: absolute; top: 0.7rem; right: 0.7rem;
+      color: var(--text-faint); opacity: 0; transition: transform 0.18s ease, opacity 0.12s ease;
+    }
+    .stat-toggle svg { width: 15px; height: 15px; display: block; }
+    .stat.is-clickable .stat-toggle { opacity: 1; }
+    /* Collapsed = section hidden: point the chevron sideways and dim the tile. */
+    .stat.is-collapsed .stat-toggle { transform: rotate(-90deg); }
+    .stat.is-collapsed { background: var(--surface-2); }
+    .stat.is-collapsed .stat-num { color: var(--text-muted); }
 
     /* ---- Section headers ----------------------------------------------- */
     .section { margin-top: var(--space-6); }
     .section-head {
-      display: flex; align-items: baseline; gap: 0.5rem;
+      display: flex; align-items: center; gap: 0.5rem;
       margin-bottom: var(--space-3);
     }
+    .section-head[role="button"] { cursor: pointer; border-radius: var(--radius-sm); }
+    .section-head[role="button"]:hover h2 { color: var(--text); }
+    .section-head:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    .section-chevron { color: var(--text-faint); transition: transform 0.18s ease; display: inline-flex; }
+    .section-chevron svg { width: 15px; height: 15px; display: block; }
+    .section.is-collapsed .section-chevron { transform: rotate(-90deg); }
+    .section.is-collapsed .list,
+    .section.is-collapsed .empty { display: none; }
     .section-head h2 {
       font-size: 0.82rem; font-weight: 650; letter-spacing: 0.04em;
       text-transform: uppercase; color: var(--text-muted); margin: 0;
@@ -591,6 +620,7 @@
     <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
     <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></symbol>
   </svg>
 
   {% macro history_panel(p) %}
@@ -678,6 +708,7 @@
         </div>
       </div>
       <div class="topbar-spacer"></div>
+      <a class="btn btn-icon" href="settings" aria-label="Settings" title="Settings"><svg aria-hidden="true"><use href="#i-gear"/></svg></a>
       <form action="sync" method="post" id="sync-form">
         <button class="btn-primary" type="submit" id="sync-button">
           <span class="spinner" id="sync-spinner" hidden></span>
@@ -689,23 +720,30 @@
   </header>
 
   <div class="wrap">
+    {% set exception_count = active | selectattr('status', 'equalto', 'exception') | list | length %}
+    {# Each tile toggles its matching section's visibility (JS only wires up
+       the toggle when that section is actually on the page). #}
     <div class="stats">
-      <div class="stat is-pending">
+      <div class="stat is-pending" data-target="section-pending" role="button" tabindex="0">
         <div class="stat-num">{{ pending|length }}</div>
         <div class="stat-label"><span class="stat-dot"></span>Needs confirmation</div>
+        <span class="stat-toggle" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span>
       </div>
-      <div class="stat is-transit">
+      <div class="stat is-transit" data-target="section-active" role="button" tabindex="0">
         <div class="stat-num">{{ active|length }}</div>
         <div class="stat-label"><span class="stat-dot"></span>In transit</div>
+        {% if exception_count %}<div class="stat-sub">{{ exception_count }} need{{ 's' if exception_count == 1 else '' }} attention</div>{% endif %}
+        <span class="stat-toggle" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span>
       </div>
-      <div class="stat is-delivered">
+      <div class="stat is-delivered" data-target="section-delivered" role="button" tabindex="0">
         <div class="stat-num">{{ delivered|length }}</div>
         <div class="stat-label"><span class="stat-dot"></span>Delivered</div>
+        <span class="stat-toggle" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span>
       </div>
-      {% set exception_count = active | selectattr('status', 'equalto', 'exception') | list | length %}
-      <div class="stat is-exception">
-        <div class="stat-num">{{ exception_count }}</div>
-        <div class="stat-label"><span class="stat-dot"></span>Needs attention</div>
+      <div class="stat is-archived" data-target="section-archived" role="button" tabindex="0">
+        <div class="stat-num">{{ archived|length }}</div>
+        <div class="stat-label"><span class="stat-dot"></span>Archived</div>
+        <span class="stat-toggle" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span>
       </div>
     </div>
 
@@ -738,8 +776,8 @@
     </form>
 
     {% if pending %}
-    <section class="section">
-      <div class="section-head"><h2>Needs confirmation</h2><span class="section-count">{{ pending|length }}</span></div>
+    <section class="section" id="section-pending">
+      <div class="section-head" role="button" tabindex="0"><span class="section-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span><h2>Needs confirmation</h2><span class="section-count">{{ pending|length }}</span></div>
       <div class="list">
         {% for p in pending %}
         <div class="card">
@@ -784,8 +822,8 @@
     </section>
     {% endif %}
 
-    <section class="section">
-      <div class="section-head"><h2>In transit</h2><span class="section-count">{{ active|length }}</span></div>
+    <section class="section" id="section-active">
+      <div class="section-head" role="button" tabindex="0"><span class="section-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span><h2>In transit</h2><span class="section-count">{{ active|length }}</span></div>
       {% if not active %}
       <div class="empty"><svg aria-hidden="true"><use href="#i-truck"/></svg>No parcels in transit right now.</div>
       {% else %}
@@ -828,8 +866,8 @@
       {% endif %}
     </section>
 
-    <section class="section">
-      <div class="section-head"><h2>Delivered</h2><span class="section-count">{{ delivered|length }}</span></div>
+    <section class="section" id="section-delivered">
+      <div class="section-head" role="button" tabindex="0"><span class="section-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span><h2>Delivered</h2><span class="section-count">{{ delivered|length }}</span></div>
       {% if not delivered %}
       <div class="empty"><svg aria-hidden="true"><use href="#i-check"/></svg>No delivered parcels yet.</div>
       {% else %}
@@ -873,8 +911,8 @@
     </section>
 
     {% if archived %}
-    <section class="section">
-      <div class="section-head"><h2>Archived</h2><span class="section-count">{{ archived|length }}</span></div>
+    <section class="section" id="section-archived">
+      <div class="section-head" role="button" tabindex="0"><span class="section-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span><h2>Archived</h2><span class="section-count">{{ archived|length }}</span></div>
       <div class="list">
         {% for p in archived %}
         <div class="card">
@@ -1210,6 +1248,55 @@
       emailFrame.src = "about:blank";
       currentEmailId = null;
     });
+
+    // ---- Collapsible sections ------------------------------------------
+    // Each count card (and each section header) hides/shows its section's
+    // list. State persists per-browser so a collapsed section stays collapsed
+    // across reloads. A card whose section isn't on the page stays inert.
+    (function () {
+      var STORAGE_KEY = "ptc-collapsed-sections";
+      var collapsed;
+      try { collapsed = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+      catch (e) { collapsed = {}; }
+
+      function apply(id) {
+        var section = document.getElementById(id);
+        var tile = document.querySelector('.stat[data-target="' + id + '"]');
+        var isCollapsed = !!collapsed[id];
+        if (section) section.classList.toggle("is-collapsed", isCollapsed);
+        if (tile) {
+          tile.classList.toggle("is-collapsed", isCollapsed);
+          tile.setAttribute("aria-expanded", String(!isCollapsed));
+        }
+      }
+
+      function toggle(id) {
+        collapsed[id] = !collapsed[id];
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch (e) {}
+        apply(id);
+      }
+
+      document.querySelectorAll(".stat[data-target]").forEach(function (tile) {
+        var id = tile.dataset.target;
+        if (!document.getElementById(id)) return; // no such section -> inert
+        tile.classList.add("is-clickable");
+        tile.setAttribute("aria-controls", id);
+        tile.addEventListener("click", function () { toggle(id); });
+        tile.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(id); }
+        });
+        apply(id);
+      });
+
+      document.querySelectorAll(".section .section-head[role='button']").forEach(function (head) {
+        var section = head.closest(".section");
+        if (!section || !section.id) return;
+        head.addEventListener("click", function () { toggle(section.id); });
+        head.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(section.id); }
+        });
+      });
+    })();
 
     // ---- Reset-all gating ----------------------------------------------
     var resetAllConfirm = document.getElementById("reset-all-confirm");

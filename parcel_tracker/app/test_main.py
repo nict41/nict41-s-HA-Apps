@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 import db
 import main
+import settings
 import sync_progress
 from providers import track123
 
@@ -500,8 +501,111 @@ def test_sync_dismiss_disabled_when_days_is_zero(monkeypatch):
     parcel_id = db.upsert_parcel("BOGUS3", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
     _backdate_first_checked_at(parcel_id, days=999)
     _stub_provider(monkeypatch, {"BOGUS3": _UNCONFIRMED_INFO})
-    monkeypatch.setattr(main, "DISMISS_UNCONFIRMED_AFTER_DAYS", 0)
+    settings.set_many({"dismiss_unconfirmed_after_days": 0})
 
     main.run_sync_cycle()
 
     assert db.get_parcel(parcel_id)["status"] == db.STATUS_PENDING
+
+
+def _recording_provider(monkeypatch, track_info):
+    """Like _stub_provider, but records which tracking numbers the provider
+    was actually asked about - so a test can assert a parcel was (or wasn't)
+    re-queried."""
+    queried = []
+
+    def get_track_info(numbers):
+        queried.extend(numbers)
+        return track_info
+
+    monkeypatch.setattr(track123, "configured", lambda: True)
+    monkeypatch.setattr(track123, "register", lambda parcels: None)
+    monkeypatch.setattr(track123, "get_track_info", get_track_info)
+    return queried
+
+
+def test_scheduled_refresh_skips_recently_checked_parcel_when_throttled(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    # update_tracking_status stamps last_checked_at = now, marking it freshly checked.
+    db.update_tracking_status(parcel_id, status=db.STATUS_ACTIVE, status_detail="old status",
+                              last_event_time=None, estimated_delivery=None, confirmed=True)
+    settings.set_many({"provider_refresh_minutes": 60})
+    queried = _recording_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True, status_detail="new status")})
+
+    main.run_sync_cycle()  # scheduled run honours the throttle
+
+    assert "ACT1" not in queried
+    assert db.get_parcel(parcel_id)["status_detail"] == "old status"
+
+
+def test_manual_sync_forces_refresh_even_when_throttled(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(parcel_id, status=db.STATUS_ACTIVE, status_detail="old status",
+                              last_event_time=None, estimated_delivery=None, confirmed=True)
+    settings.set_many({"provider_refresh_minutes": 60})
+    queried = _recording_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True, status_detail="new status")})
+
+    main.run_sync_cycle(force_refresh=True)
+
+    assert "ACT1" in queried
+    assert db.get_parcel(parcel_id)["status_detail"] == "new status"
+
+
+def test_zero_throttle_refreshes_every_cycle(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.update_tracking_status(parcel_id, status=db.STATUS_ACTIVE, status_detail="old status",
+                              last_event_time=None, estimated_delivery=None, confirmed=True)
+    settings.set_many({"provider_refresh_minutes": 0})  # default: no throttle
+    queried = _recording_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True, status_detail="new status")})
+
+    main.run_sync_cycle()
+
+    assert "ACT1" in queried
+    assert db.get_parcel(parcel_id)["status_detail"] == "new status"
+
+
+def test_settings_page_renders_current_values():
+    settings.set_many({"poll_interval_minutes": 45, "ignore_senders": "spam.example"})
+    html = client.get("/settings").text
+    assert 'name="poll_interval_minutes"' in html
+    assert 'value="45"' in html
+    assert "spam.example" in html
+
+
+def test_post_settings_saves_reschedules_and_redirects():
+    resp = client.post(
+        "/settings",
+        data={
+            "poll_interval_minutes": 20,
+            "provider_refresh_minutes": 120,
+            "lookback_days": 7,
+            "auto_archive_after_days": 30,
+            "dismiss_unconfirmed_after_days": 5,
+            "trusted_senders": "shop.example",
+            "ignore_senders": "",
+            "allowed_senders": "amazon.com",
+        },
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert settings.get_int("poll_interval_minutes") == 20
+    assert settings.get_int("provider_refresh_minutes") == 120
+    assert settings.get_domains("allowed_senders") == frozenset({"amazon.com"})
+
+
+def test_post_settings_clamps_out_of_range_values():
+    client.post(
+        "/settings",
+        data={
+            "poll_interval_minutes": 99999,
+            "provider_refresh_minutes": 0,
+            "lookback_days": 14,
+            "auto_archive_after_days": 14,
+            "dismiss_unconfirmed_after_days": 3,
+            "trusted_senders": "",
+            "ignore_senders": "",
+            "allowed_senders": "",
+        },
+        follow_redirects=False,
+    )
+    assert settings.get_int("poll_interval_minutes") == 1440

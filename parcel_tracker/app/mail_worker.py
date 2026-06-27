@@ -29,6 +29,7 @@ from email.message import Message
 
 import carriers
 import db
+import settings
 import sync_progress
 
 
@@ -56,8 +57,12 @@ def _parse_mailboxes(raw_json: str) -> list[dict]:
     return values
 
 
+# Mailbox credentials stay in the add-on configuration (the managed secret
+# store), so this is still read once from the environment at startup. The
+# non-secret knobs below (lookback window, sender lists, intervals) are read
+# live from `settings` instead, so they can be changed in-app without a
+# restart.
 MAILBOXES: list[dict] = _parse_mailboxes(os.environ.get("MAILBOXES_JSON", "[]"))
-LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "14"))
 
 # Without an explicit timeout, a stalled/unresponsive IMAP server blocks the
 # underlying socket forever - and since the manual "Check mail now" button
@@ -76,25 +81,13 @@ MAX_EMAIL_BODY_CHARS = 8000
 # retailer email but still bounded.
 MAX_EMAIL_HTML_CHARS = 200_000
 
-# Comma-separated extra sender domains to treat as trusted retailers (their
-# tracking numbers get the high-confidence label parser instead of the
-# generic regex fallback). Lets users add e.g. a niche retailer without a
-# code change. Applies across every configured mailbox.
-TRUSTED_SENDERS = frozenset(
-    d.strip().lower() for d in os.environ.get("TRUSTED_SENDERS", "").split(",") if d.strip()
-)
-IGNORE_SENDERS = frozenset(
-    d.strip().lower() for d in os.environ.get("IGNORE_SENDERS", "").split(",") if d.strip()
-)
-
-# Comma-separated sender domains to scan exclusively - everything else is
-# excluded straight out of the IMAP SEARCH itself, before any FETCH happens,
-# rather than fetched and then discarded. Left blank (the default), every
-# sender is scanned as before. Most useful on a general-purpose inbox where
-# shipping notifications only ever come from a known handful of senders.
-ALLOWED_SENDERS = frozenset(
-    d.strip().lower() for d in os.environ.get("ALLOWED_SENDERS", "").split(",") if d.strip()
-)
+# Sender-domain lists are read live from settings.get_domains() at use:
+#   - trusted_senders: extra domains treated as trusted retailers, so their
+#     tracking numbers get the high-confidence label parser instead of the
+#     generic regex fallback.
+#   - ignore_senders: domains skipped entirely (and marked processed).
+#   - allowed_senders: when set, the *only* domains scanned - excluded right
+#     in the IMAP SEARCH, before any FETCH, rather than fetched and discarded.
 
 
 def _from_search_terms(domains: list[str]) -> list[str]:
@@ -117,8 +110,9 @@ def _from_search_terms(domains: list[str]) -> list[str]:
 
 def _search_criteria(since: str) -> list[str]:
     criteria = ["SINCE", since]
-    if ALLOWED_SENDERS:
-        criteria.extend(_from_search_terms(sorted(ALLOWED_SENDERS)))
+    allowed = settings.get_domains("allowed_senders")
+    if allowed:
+        criteria.extend(_from_search_terms(sorted(allowed)))
     return criteria
 
 
@@ -258,7 +252,7 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
                 continue
 
             sender = _decode(header_msg.get("From", ""))
-            if carriers.sender_domain(sender) in IGNORE_SENDERS:
+            if carriers.sender_domain(sender) in settings.get_domains("ignore_senders"):
                 db.mark_processed(message_id)
                 continue
 
@@ -271,7 +265,8 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
             body_text, body_html = _extract_bodies(msg)
 
             candidates = carriers.detect_candidates(
-                sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
+                sender, subject, body_text,
+                extra_trusted_domains=settings.get_domains("trusted_senders"),
             )
             for candidate in candidates:
                 initial_status = (
@@ -312,7 +307,8 @@ def _sync_account(account: dict) -> dict:
     new_candidates = 0
     errors = []
     try:
-        since = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).strftime("%d-%b-%Y")
+        lookback_days = settings.get_int("lookback_days")
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%d-%b-%Y")
         for folder in _account_folders(account):
             try:
                 result = _sync_folder(conn, label, folder, since)
