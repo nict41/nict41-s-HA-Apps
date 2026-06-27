@@ -251,7 +251,9 @@
       border: 1px solid var(--border);
       border-radius: var(--radius);
       box-shadow: var(--shadow-sm);
-      overflow: hidden;
+      /* No overflow:hidden here - the kebab menu drops below its button and
+         must be free to render past the card edge. The history panel rounds
+         its own bottom corners instead so it still tucks neatly inside. */
       transition: box-shadow 0.15s ease, border-color 0.15s ease;
     }
     .card:hover { box-shadow: var(--shadow-md); }
@@ -366,38 +368,74 @@
     .step-labels span:nth-child(2) { text-align: center; }
     .step-labels span:nth-child(3) { text-align: center; }
 
-    /* ---- Email snippet (pending) --------------------------------------- */
-    .email-snippet {
-      margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-muted);
-      font-style: italic;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-      overflow: hidden;
-    }
-    .email-full { margin-top: 0.5rem; }
-    .email-full summary {
-      cursor: pointer; font-size: 0.78rem; color: var(--accent-soft-text);
-      font-weight: 550; display: inline-flex; align-items: center; gap: 0.3rem;
-      list-style: none;
-    }
-    .email-full summary::-webkit-details-marker { display: none; }
-    .email-meta { color: var(--text-muted); font-size: 0.78rem; margin: 0.5rem 0 0.35rem; }
-    .email-body {
-      white-space: pre-wrap; word-break: break-word;
-      background: var(--surface-2); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); padding: 0.7rem;
-      font-size: 0.78rem; color: var(--text-muted);
-      max-height: 260px; overflow-y: auto; margin: 0;
-    }
-
     /* ---- Actions ------------------------------------------------------- */
     .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; flex: none; align-items: flex-start; }
     .actions form { margin: 0; }
+    .btn-icon { padding: 0.38rem; }
+    .btn-icon svg { width: 16px; height: 16px; }
+
+    /* ---- Kebab overflow menu ------------------------------------------- */
+    .kebab { position: relative; }
+    .kebab-menu {
+      position: absolute; top: calc(100% + 4px); right: 0; z-index: 30;
+      min-width: 168px; padding: 0.3rem;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); box-shadow: var(--shadow-pop);
+      display: flex; flex-direction: column; gap: 0.1rem;
+    }
+    .kebab-menu[hidden] { display: none; }
+    .kebab-menu form { margin: 0; }
+    .kebab-item {
+      width: 100%; justify-content: flex-start;
+      background: transparent; border: none; border-radius: 6px;
+      padding: 0.5rem 0.6rem; font-size: 0.82rem; color: var(--text);
+      gap: 0.55rem;
+    }
+    .kebab-item:hover { background: var(--surface-hover); border-color: transparent; }
+    .kebab-item svg { width: 15px; height: 15px; color: var(--text-muted); }
+    .kebab-item-danger { color: var(--st-exception-fg); }
+    .kebab-item-danger:hover { background: var(--st-exception-bg); }
+    .kebab-item-danger svg { color: var(--st-exception-fg); }
+
+    /* ---- Email viewer dialog ------------------------------------------- */
+    .email-dialog {
+      width: min(720px, 94vw); max-width: 94vw; height: min(80vh, 760px);
+      padding: 0; border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--surface); color: var(--text);
+      box-shadow: var(--shadow-pop); overflow: hidden;
+    }
+    .email-dialog::backdrop { background: rgba(8, 10, 14, 0.55); }
+    .email-dialog[open] { display: flex; flex-direction: column; }
+    .email-dialog-head {
+      display: flex; align-items: center; gap: var(--space-3);
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--border); background: var(--surface);
+    }
+    .email-dialog-meta { flex: 1; min-width: 0; }
+    .email-dialog-subject {
+      font-weight: 600; font-size: 0.9rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .email-dialog-sender {
+      font-size: 0.78rem; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .email-img-toggle {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-size: 0.76rem; color: var(--text-muted); cursor: pointer; white-space: nowrap;
+    }
+    .email-frame { flex: 1; width: 100%; border: 0; background: #ffffff; }
+    @media (max-width: 520px) {
+      .email-img-toggle { font-size: 0; gap: 0; }
+      .email-img-toggle input { width: 16px; height: 16px; }
+    }
 
     /* ---- History panel ------------------------------------------------- */
     .history {
       border-top: 1px solid var(--border);
       padding: var(--space-4);
       background: var(--surface-2);
+      border-radius: 0 0 var(--radius) var(--radius);
     }
     .history-meta {
       display: flex; gap: 0.5rem 1rem; flex-wrap: wrap; align-items: center;
@@ -551,6 +589,8 @@
     <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></symbol>
     <symbol id="i-mail" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></symbol>
     <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
   </svg>
 
   {% macro history_panel(p) %}
@@ -599,6 +639,31 @@
   <div class="step-labels" aria-hidden="true">
     <span>Detected</span><span>In transit</span><span>Out for delivery</span><span>Delivered</span>
   </div>
+  {% endmacro %}
+
+  {# Per-card overflow menu: keeps each card's secondary actions (and "View
+     email") tucked behind a single ⋮ button so the card stays uncluttered.
+     The caller supplies the menu items. #}
+  {% macro kebab() %}
+  <div class="kebab" data-kebab>
+    <button type="button" class="btn btn-sm btn-icon kebab-toggle" aria-haspopup="true" aria-expanded="false" aria-label="More actions">
+      <svg aria-hidden="true"><use href="#i-dots"/></svg>
+    </button>
+    <div class="kebab-menu" role="menu" hidden>
+      {{ caller() }}
+    </div>
+  </div>
+  {% endmacro %}
+
+  {% macro view_email_item(p) %}
+  {% if p.has_email %}
+  <button type="button" class="kebab-item view-email" role="menuitem"
+          data-parcel-id="{{ p.id }}"
+          data-sender="{{ p.email_sender or '' }}"
+          data-subject="{{ p.email_subject or '' }}">
+    <svg aria-hidden="true"><use href="#i-eye"/></svg>View email
+  </button>
+  {% endif %}
   {% endmacro %}
 
   <header class="topbar">
@@ -697,24 +762,19 @@
               {% if p.status_detail %}
               <div class="status-line">{{ p.status_detail }}{% if p.estimated_delivery %} <span class="eta"><svg aria-hidden="true"><use href="#i-calendar"/></svg><time data-iso="{{ p.estimated_delivery }}" data-style="eta">{{ p.estimated_delivery }}</time></span>{% endif %}</div>
               {% endif %}
-              {% if p.email_body %}
-              <div class="email-snippet">{{ p.email_body | truncate(160) }}</div>
-              <details class="email-full">
-                <summary><svg aria-hidden="true"><use href="#i-mail"/></svg>View full email</summary>
-                <div class="email-meta">From: {{ p.email_sender or "Unknown sender" }}{% if p.email_subject %} &middot; Subject: {{ p.email_subject }}{% endif %}</div>
-                <pre class="email-body">{{ p.email_body }}</pre>
-              </details>
-              {% endif %}
             </div>
             <div class="actions">
               <form action="confirm" method="post">
                 <input type="hidden" name="parcel_id" value="{{ p.id }}" />
                 <button class="btn-primary btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-check"/></svg>Confirm</button>
               </form>
-              <form action="dismiss" method="post">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-x"/></svg>Not a parcel</button>
-              </form>
+              {% call kebab() %}
+                {{ view_email_item(p) }}
+                <form action="dismiss" method="post" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-x"/></svg>Not a parcel</button>
+                </form>
+              {% endcall %}
             </div>
           </div>
           {{ history_panel(p) }}
@@ -748,14 +808,17 @@
             </div>
             <div class="actions">
               <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
-              <form action="reset" method="post" class="reset-form">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
-              </form>
-              <form action="archive" method="post">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
-              </form>
+              {% call kebab() %}
+                {{ view_email_item(p) }}
+                <form action="reset" method="post" class="reset-form" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+                </form>
+                <form action="archive" method="post" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+                </form>
+              {% endcall %}
             </div>
           </div>
           {{ history_panel(p) }}
@@ -788,14 +851,18 @@
               {{ stepper(p) }}
             </div>
             <div class="actions">
-              <form action="reset" method="post" class="reset-form">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
-              </form>
-              <form action="archive" method="post">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
-              </form>
+              <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
+              {% call kebab() %}
+                {{ view_email_item(p) }}
+                <form action="reset" method="post" class="reset-form" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+                </form>
+                <form action="archive" method="post" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-archive"/></svg>Archive</button>
+                </form>
+              {% endcall %}
             </div>
           </div>
           {{ history_panel(p) }}
@@ -824,14 +891,18 @@
               </div>
             </div>
             <div class="actions">
-              <form action="reset" method="post" class="reset-form">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
-              </form>
-              <form action="delete" method="post">
-                <input type="hidden" name="parcel_id" value="{{ p.id }}" />
-                <button class="btn-danger btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
-              </form>
+              <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
+              {% call kebab() %}
+                {{ view_email_item(p) }}
+                <form action="reset" method="post" class="reset-form" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
+                </form>
+                <form action="delete" method="post" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item kebab-item-danger" type="submit"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
+                </form>
+              {% endcall %}
             </div>
           </div>
           {{ history_panel(p) }}
@@ -855,6 +926,22 @@
       </div>
     </details>
   </div>
+
+  <!-- Shared email viewer. The message is loaded into a fully sandboxed
+       iframe (no allow-scripts, no allow-same-origin) pointed at /email/{id},
+       which serves the sanitised body under a strict no-remote-content CSP -
+       so tracking pixels stay dormant until "Load remote images" is ticked. -->
+  <dialog id="email-dialog" class="email-dialog" aria-label="Source email">
+    <div class="email-dialog-head">
+      <div class="email-dialog-meta">
+        <div class="email-dialog-subject" id="email-dialog-subject"></div>
+        <div class="email-dialog-sender" id="email-dialog-sender"></div>
+      </div>
+      <label class="email-img-toggle"><input type="checkbox" id="email-images-toggle" />Load remote images</label>
+      <button type="button" class="btn btn-sm btn-icon" id="email-dialog-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <iframe id="email-frame" class="email-frame" sandbox referrerpolicy="no-referrer" title="Source email"></iframe>
+  </dialog>
 
   <script>
     // ---- Humanized timestamps ------------------------------------------
@@ -1058,6 +1145,70 @@
         if (e.target.closest("a, button, summary, input, details")) return;
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleHistory(info); }
       });
+    });
+
+    // ---- Kebab overflow menus ------------------------------------------
+    function closeAllKebabs(except) {
+      document.querySelectorAll("[data-kebab]").forEach(function (k) {
+        if (k === except) return;
+        k.querySelector(".kebab-menu").hidden = true;
+        k.querySelector(".kebab-toggle").setAttribute("aria-expanded", "false");
+      });
+    }
+    document.querySelectorAll("[data-kebab]").forEach(function (kebab) {
+      var toggle = kebab.querySelector(".kebab-toggle");
+      var menu = kebab.querySelector(".kebab-menu");
+      toggle.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var willOpen = menu.hidden;
+        closeAllKebabs(kebab);
+        menu.hidden = !willOpen;
+        toggle.setAttribute("aria-expanded", String(willOpen));
+      });
+    });
+    // A click anywhere else, or Escape, dismisses any open menu.
+    document.addEventListener("click", function () { closeAllKebabs(null); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") closeAllKebabs(null);
+    });
+
+    // ---- Email viewer --------------------------------------------------
+    var emailDialog = document.getElementById("email-dialog");
+    var emailFrame = document.getElementById("email-frame");
+    var emailSubject = document.getElementById("email-dialog-subject");
+    var emailSender = document.getElementById("email-dialog-sender");
+    var emailImagesToggle = document.getElementById("email-images-toggle");
+    var currentEmailId = null;
+
+    function loadEmailFrame() {
+      if (currentEmailId === null) return;
+      // The server blocks remote content by default; ?images=1 is the only
+      // thing that relaxes it, and only for images.
+      var src = "email/" + encodeURIComponent(currentEmailId);
+      if (emailImagesToggle.checked) src += "?images=1";
+      emailFrame.src = src;
+    }
+
+    document.querySelectorAll(".view-email").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        closeAllKebabs(null);
+        currentEmailId = btn.dataset.parcelId;
+        emailSubject.textContent = btn.dataset.subject || "(no subject)";
+        emailSender.textContent = btn.dataset.sender || "";
+        emailImagesToggle.checked = false;
+        loadEmailFrame();
+        if (typeof emailDialog.showModal === "function") emailDialog.showModal();
+        else emailDialog.setAttribute("open", "");
+      });
+    });
+    emailImagesToggle.addEventListener("change", loadEmailFrame);
+    document.getElementById("email-dialog-close").addEventListener("click", function () {
+      emailDialog.close();
+    });
+    // Drop the frame on close so reopening never flashes the previous email.
+    emailDialog.addEventListener("close", function () {
+      emailFrame.src = "about:blank";
+      currentEmailId = null;
     });
 
     // ---- Reset-all gating ----------------------------------------------

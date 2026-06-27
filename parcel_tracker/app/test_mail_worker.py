@@ -163,6 +163,76 @@ def test_sync_account_truncates_long_email_body(monkeypatch):
     assert len(parcel["email_body"]) == mail_worker.MAX_EMAIL_BODY_CHARS
 
 
+def _raw_multipart_email(sender, subject, text, html, message_id):
+    boundary = "BOUND42"
+    return (
+        f"From: {sender}\r\n"
+        f"Subject: {subject}\r\n"
+        f"Message-ID: {message_id}\r\n"
+        f'Content-Type: multipart/alternative; boundary="{boundary}"\r\n'
+        f"\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: text/plain; charset=utf-8\r\n\r\n{text}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: text/html; charset=utf-8\r\n\r\n{html}\r\n"
+        f"--{boundary}--\r\n"
+    ).encode("utf-8")
+
+
+def test_sync_account_captures_html_body_for_rendering(monkeypatch):
+    html = "<html><body><h1>Shipped</h1><p>Tracking Number: LP00123456789CN</p></body></html>"
+    raw = _raw_multipart_email(
+        "noreply@aliexpress.com", "Shipped!",
+        "Tracking Number: LP00123456789CN", html, "<msg-html@aliexpress.com>",
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    parcel = db.list_parcels()[0]
+    # The plain-text body still drives detection...
+    assert "LP00123456789CN" in parcel["email_body"]
+    assert parcel["has_email"] is True
+    # ...and the original HTML is retained for the viewer.
+    stored = db.get_parcel_email(parcel["id"])
+    assert "<h1>Shipped</h1>" in stored["email_html"]
+
+
+def test_sync_account_truncates_long_email_html(monkeypatch):
+    big_html = "<p>Tracking Number: LP00123456789CN</p>" + ("<span>x</span>" * 40000)
+    raw = _raw_multipart_email(
+        "noreply@aliexpress.com", "Shipped!",
+        "Tracking Number: LP00123456789CN", big_html, "<msg-bightml@aliexpress.com>",
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    parcel = db.list_parcels()[0]
+    stored = db.get_parcel_email(parcel["id"])
+    assert len(stored["email_html"]) == mail_worker.MAX_EMAIL_HTML_CHARS
+
+
+def test_plain_text_only_email_stores_no_html(monkeypatch):
+    raw = _raw_email(
+        "noreply@aliexpress.com", "Shipped!",
+        "Tracking Number: LP00123456789CN", "<msg-plain@aliexpress.com>",
+    )
+    fake_conn = _FakeConn({1: raw})
+    monkeypatch.setattr(mail_worker, "_connect", lambda account: fake_conn)
+    monkeypatch.setattr(mail_worker, "MAILBOXES", [{"host": "imap.example.com", "username": "a@example.com"}])
+
+    mail_worker.sync_mailbox()
+
+    parcel = db.list_parcels()[0]
+    stored = db.get_parcel_email(parcel["id"])
+    assert stored["email_html"] is None
+
+
 def test_sync_mailbox_scans_every_configured_account(monkeypatch):
     raw_a = _raw_email(
         "noreply@aliexpress.com", "Shipped!", "Tracking Number: LP00123456789CN", "<msg-a@aliexpress.com>"

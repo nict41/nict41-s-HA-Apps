@@ -228,8 +228,8 @@ def test_dashboard_lists_pending_and_active_parcels():
     assert "ACT123" in html
 
 
-def test_dashboard_shows_email_preview_for_pending_parcel_with_source_email():
-    db.upsert_parcel(
+def test_dashboard_offers_view_email_for_parcel_with_source_email():
+    parcel_id = db.upsert_parcel(
         "PEND123",
         "Unknown",
         "maybe a parcel",
@@ -241,15 +241,77 @@ def test_dashboard_shows_email_preview_for_pending_parcel_with_source_email():
         email_body="Hello, your tracking number is PEND123 and it ships soon.",
     )
     html = client.get("/").text
-    assert "View full email" in html
+    assert "View email" in html
+    # The "View email" control carries the metadata used to open the viewer.
+    assert f'data-parcel-id="{parcel_id}"' in html
     assert "newsletter@example.com" in html
     assert "Your order update" in html
 
 
-def test_dashboard_omits_email_preview_when_no_source_email():
+def test_dashboard_omits_view_email_when_no_source_email():
     db.upsert_parcel("PEND123", "Unknown", "manual add", 0.5, None, db.STATUS_PENDING)
     html = client.get("/").text
-    assert "View full email" not in html
+    assert "View email" not in html
+
+
+def test_email_route_renders_sanitized_html_with_strict_csp():
+    parcel_id = db.upsert_parcel(
+        "ACT123", "UPS", "x", 1.0, None, db.STATUS_ACTIVE,
+        email_body="text",
+        email_html='<p>Hello <b>world</b></p><script>alert(1)</script>'
+                   '<img src="https://cdn/x.png">',
+    )
+    resp = client.get(f"/email/{parcel_id}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert "Hello" in body and "<b>world</b>" in body
+    # Script stripped by the sanitiser.
+    assert "alert(1)" not in body and "<script" not in body
+    # Strict CSP, remote images blocked by default.
+    csp = resp.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "script-src" not in csp
+    assert "https:" not in csp
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+def test_email_route_opts_into_remote_images():
+    parcel_id = db.upsert_parcel(
+        "ACT123", "UPS", "x", 1.0, None, db.STATUS_ACTIVE,
+        email_html='<img src="https://cdn/x.png">',
+    )
+    resp = client.get(f"/email/{parcel_id}?images=1")
+    assert "img-src data: https:" in resp.headers["content-security-policy"]
+
+
+def test_email_route_falls_back_to_text_only_body():
+    parcel_id = db.upsert_parcel(
+        "ACT123", "UPS", "x", 1.0, None, db.STATUS_ACTIVE,
+        email_body="Tracking number ACT123 <not html>",
+    )
+    resp = client.get(f"/email/{parcel_id}")
+    assert resp.status_code == 200
+    # Escaped and shown as preformatted text, not interpreted as markup.
+    assert "&lt;not html&gt;" in resp.text
+
+
+def test_email_route_handles_parcel_without_email():
+    parcel_id = db.upsert_parcel("ACT123", "UPS", "manual", 1.0, None, db.STATUS_ACTIVE)
+    resp = client.get(f"/email/{parcel_id}")
+    assert resp.status_code == 200
+    assert "No source email" in resp.text
+
+
+def test_api_and_export_do_not_leak_raw_email_html():
+    db.upsert_parcel(
+        "ACT123", "UPS", "x", 1.0, None, db.STATUS_ACTIVE,
+        email_html="<p>secret newsletter markup</p>",
+    )
+    api = client.get("/api/parcels").json()
+    assert "email_html" not in api["parcels"][0]
+    assert api["parcels"][0]["has_email"] is True
+    assert "secret newsletter markup" not in client.get("/export").text
 
 
 def test_dashboard_renders_tracking_history_timeline_for_parcel_with_events():

@@ -59,6 +59,32 @@ def test_upsert_parcel_stores_email_fields():
     assert parcel["email_body"] == "Tracking: ABC123"
 
 
+def test_email_html_is_stored_but_kept_out_of_the_general_parcel_dict():
+    parcel_id = db.upsert_parcel(
+        "ABC123", "UPS", "Widget", 0.9, "msg-1", db.STATUS_ACTIVE,
+        email_sender="ups@ups.com", email_subject="Shipped",
+        email_body="Tracking: ABC123", email_html="<p>Tracking: ABC123</p>",
+    )
+    # The raw HTML never rides along with the normal dict (it could be huge),
+    # but a cheap has_email flag does.
+    parcel = db.get_parcel(parcel_id)
+    assert "email_html" not in parcel
+    assert parcel["has_email"] is True
+    # It's reachable on demand via the dedicated accessor.
+    stored = db.get_parcel_email(parcel_id)
+    assert stored["email_html"] == "<p>Tracking: ABC123</p>"
+    assert stored["email_sender"] == "ups@ups.com"
+
+
+def test_has_email_is_false_without_a_source_email():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "manual", 1.0, None, db.STATUS_ACTIVE)
+    assert db.get_parcel(parcel_id)["has_email"] is False
+
+
+def test_get_parcel_email_returns_none_for_missing_parcel():
+    assert db.get_parcel_email(9999) is None
+
+
 def test_upsert_parcel_updates_email_fields_only_on_higher_confidence():
     db.upsert_parcel(
         "ABC123", "Unknown", "first guess", 0.3, "msg-1", db.STATUS_PENDING,

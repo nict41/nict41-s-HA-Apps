@@ -138,12 +138,10 @@ Open the app's ingress panel from your sidebar:
 
 - **Needs confirmation** - lower-confidence detections a tracking provider
   couldn't yet recognise (ones it can recognise are auto-confirmed straight
-  into **In transit**). Each card shows a short preview of the source email,
-  with a "View full email" section to expand the sender, subject, and full
-  body, plus a live carrier/status preview if a tracking provider key is
-  configured - useful for judging whether it's a real tracking number before
-  you decide. Confirm to start tracking, or dismiss if it isn't actually a
-  parcel.
+  into **In transit**). Each card shows a live carrier/status preview if a
+  tracking provider key is configured - useful for judging whether it's a
+  real tracking number before you decide. Confirm to start tracking, or
+  dismiss if it isn't actually a parcel.
 - **In transit** - actively tracked parcels with their latest status.
 - **Delivered** - parcels marked delivered, until they're auto-archived.
 - **Archived** - dismissed or archived parcels, with an option to delete.
@@ -160,6 +158,13 @@ shown on the card itself - along with a carrier tracking link, which
 provider confirmed it, and when it was first detected vs. last checked.
 Parcels with no recorded history yet (e.g. no tracking provider
 configured) show a simple "no history available" message instead.
+
+For any parcel that was detected from an email - in any section, not just
+**Needs confirmation** - the card's **⋮** menu has a **View email** action
+that opens the original message rendered as it was sent. Remote images
+(including tracking pixels) stay blocked until you tick **Load remote
+images**, and the message is shown in a locked-down sandbox with scripts
+disabled, so opening one is safe.
 
 Every tracked parcel also has a **Reset** action, which puts it back into
 **Needs confirmation** and clears its tracking status - useful if a parcel

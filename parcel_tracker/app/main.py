@@ -1,3 +1,4 @@
+import html
 import json
 import os
 from contextlib import asynccontextmanager
@@ -14,6 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 import carriers
 import db
+import email_render
 import ha_sync
 import mail_worker
 import sync_progress
@@ -282,6 +284,36 @@ async def admin_reset_all(confirm_text: str = Form("")):
     if confirm_text.strip() == "RESET":
         db.reset_all_data()
     return RedirectResponse("./", status_code=303)
+
+
+@app.get("/email/{parcel_id}")
+async def email_view(parcel_id: int, images: int = 0):
+    # Renders a parcel's source email for the dashboard's email viewer. The
+    # stored HTML is fully untrusted, so it's sanitised, served under a strict
+    # no-scripts / no-remote-content CSP, and (on the dashboard) shown inside a
+    # fully sandboxed iframe - see email_render.py for the full defence model.
+    # Remote images stay blocked until the viewer opts in with ?images=1, so
+    # tracking pixels don't fire on open.
+    record = db.get_parcel_email(parcel_id)
+    if record and record["email_html"]:
+        body = email_render.sanitize_email_html(record["email_html"])
+    elif record and record["email_body"]:
+        body = email_render.text_fallback_html(record["email_body"])
+    else:
+        body = (
+            "<p style=\"color:#888;font-family:sans-serif\">"
+            "No source email is stored for this parcel.</p>"
+        )
+    return Response(
+        content=email_render.render_document(body),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Security-Policy": email_render.content_security_policy(bool(images)),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.get("/api/parcels")

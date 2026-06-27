@@ -70,6 +70,12 @@ _IMAP_TIMEOUT_SECONDS = 30
 # just a backstop against storing an unbounded amount of text per parcel.
 MAX_EMAIL_BODY_CHARS = 8000
 
+# The HTML body is kept separately so the dashboard can render the email as
+# it looked. HTML (with inline styles and data: images) is far bulkier than
+# the text, so it gets its own, larger backstop - generous enough for a real
+# retailer email but still bounded.
+MAX_EMAIL_HTML_CHARS = 200_000
+
 # Comma-separated extra sender domains to treat as trusted retailers (their
 # tracking numbers get the high-confidence label parser instead of the
 # generic regex fallback). Lets users add e.g. a niche retailer without a
@@ -129,34 +135,41 @@ def _decode(value: str | None) -> str:
     return "".join(decoded)
 
 
-def _extract_body(msg: Message) -> str:
-    """Prefer a plain-text part; fall back to stripping tags from HTML."""
-    html_fallback = ""
+def _extract_bodies(msg: Message) -> tuple[str, str]:
+    """Return `(text, html)` for a message.
+
+    `text` is the plain-text body (a text/plain part if present, else the
+    HTML with its tags stripped) and is what tracking-number detection runs
+    against. `html` is the original HTML part, kept so the dashboard can
+    render the email as it actually looked (sanitised at display time, see
+    email_render.py) rather than as a wall of stripped text - it's "" when
+    the message was plain-text only."""
+    plain = ""
+    html = ""
     if msg.is_multipart():
         for part in msg.walk():
-            content_type = part.get_content_type()
             if part.get_content_disposition() == "attachment":
                 continue
-            if content_type == "text/plain":
+            content_type = part.get_content_type()
+            if content_type == "text/plain" and not plain:
                 payload = part.get_payload(decode=True)
                 if payload:
-                    return payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-            elif content_type == "text/html" and not html_fallback:
+                    plain = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+            elif content_type == "text/html" and not html:
                 payload = part.get_payload(decode=True)
                 if payload:
-                    html_fallback = payload.decode(
-                        part.get_content_charset() or "utf-8", errors="replace"
-                    )
+                    html = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
     else:
         payload = msg.get_payload(decode=True)
         if payload:
             text = payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
             if msg.get_content_type() == "text/html":
-                html_fallback = text
+                html = text
             else:
-                return text
+                plain = text
 
-    return carriers.strip_html(html_fallback) if html_fallback else ""
+    text_out = plain or (carriers.strip_html(html) if html else "")
+    return text_out, html
 
 
 def _message_bytes(fetch_part) -> bytes | None:
@@ -255,7 +268,7 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
             msg = email.message_from_bytes(raw)
 
             subject = _decode(header_msg.get("Subject", ""))
-            body_text = _extract_body(msg)
+            body_text, body_html = _extract_bodies(msg)
 
             candidates = carriers.detect_candidates(
                 sender, subject, body_text, extra_trusted_domains=TRUSTED_SENDERS
@@ -276,6 +289,7 @@ def _sync_folder(conn: imaplib.IMAP4, label: str, folder: str, since: str) -> di
                     email_sender=sender,
                     email_subject=subject,
                     email_body=body_text[:MAX_EMAIL_BODY_CHARS],
+                    email_html=(body_html[:MAX_EMAIL_HTML_CHARS] or None),
                 )
                 new_candidates += 1
 

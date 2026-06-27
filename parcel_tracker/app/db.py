@@ -50,6 +50,7 @@ def init_db() -> None:
                 email_sender TEXT,
                 email_subject TEXT,
                 email_body TEXT,
+                email_html TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 delivered_at TEXT,
@@ -73,7 +74,7 @@ def init_db() -> None:
         # columns added rather than created, since CREATE TABLE IF NOT
         # EXISTS is a no-op once the table already exists.
         existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(parcels)")}
-        for column in ("email_sender", "email_subject", "email_body"):
+        for column in ("email_sender", "email_subject", "email_body", "email_html"):
             if column not in existing_columns:
                 conn.execute(f"ALTER TABLE parcels ADD COLUMN {column} TEXT")
         if "tracking_provider" not in existing_columns:
@@ -125,6 +126,7 @@ def upsert_parcel(
     email_sender: str | None = None,
     email_subject: str | None = None,
     email_body: str | None = None,
+    email_html: str | None = None,
 ) -> int:
     now = now_iso()
     with _connect() as conn:
@@ -135,7 +137,8 @@ def upsert_parcel(
             if confidence > existing["confidence"]:
                 conn.execute(
                     "UPDATE parcels SET carrier_name = ?, description = ?, confidence = ?, "
-                    "email_sender = ?, email_subject = ?, email_body = ?, updated_at = ? WHERE id = ?",
+                    "email_sender = ?, email_subject = ?, email_body = ?, email_html = ?, "
+                    "updated_at = ? WHERE id = ?",
                     (
                         carrier_name,
                         description,
@@ -143,6 +146,7 @@ def upsert_parcel(
                         email_sender,
                         email_subject,
                         email_body,
+                        email_html,
                         now,
                         existing["id"],
                     ),
@@ -153,8 +157,8 @@ def upsert_parcel(
 
         cur = conn.execute(
             "INSERT INTO parcels (tracking_number, carrier_name, description, status, "
-            "confidence, source_message_id, email_sender, email_subject, email_body, "
-            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "confidence, source_message_id, email_sender, email_subject, email_body, email_html, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 tracking_number,
                 carrier_name,
@@ -165,6 +169,7 @@ def upsert_parcel(
                 email_sender,
                 email_subject,
                 email_body,
+                email_html,
                 now,
                 now,
             ),
@@ -175,10 +180,20 @@ def upsert_parcel(
 def _row_to_parcel(row: sqlite3.Row) -> dict:
     """tracking_history is stored as a JSON string (see update_tracking_status)
     so it round-trips through SQLite like any other TEXT column - callers
-    want it back as the list it actually represents."""
+    want it back as the list it actually represents.
+
+    The raw `email_html` is deliberately dropped here so it never rides along
+    with the general parcel dict: it can be hundreds of KB per parcel and
+    would needlessly bloat `/api/parcels` (which the Lovelace card fetches
+    cross-origin) and `/export`. The email viewer reads it on demand via
+    get_parcel_email() instead."""
     parcel = dict(row)
     raw_history = parcel.get("tracking_history")
     parcel["tracking_history"] = json.loads(raw_history) if raw_history else []
+    # A cheap boolean so the dashboard knows whether to offer "View email"
+    # without carrying the (potentially large) html/body along for the ride.
+    parcel["has_email"] = bool(parcel.get("email_html") or parcel.get("email_body"))
+    parcel.pop("email_html", None)
     return parcel
 
 
@@ -199,6 +214,18 @@ def get_parcel(parcel_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM parcels WHERE id = ?", (parcel_id,)).fetchone()
         return _row_to_parcel(row) if row else None
+
+
+def get_parcel_email(parcel_id: int) -> dict | None:
+    """The source email for one parcel, including the raw `email_html` that
+    _row_to_parcel strips from the general dict - read on demand by the
+    email viewer route. Returns None if the parcel doesn't exist."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT email_sender, email_subject, email_body, email_html FROM parcels WHERE id = ?",
+            (parcel_id,),
+        ).fetchone()
+        return dict(row) if row else None
 
 
 def _set_fields(parcel_id: int, **fields) -> None:

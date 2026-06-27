@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0
+
+- The source email can now be viewed as it was actually sent, rendered
+  HTML and all, instead of as a wall of stripped-out text. The original
+  HTML is captured at sync time and shown through a new **View email**
+  action.
+- **View email** is now available for every parcel that came from an email,
+  in any section (in transit, delivered, archived) - not just while it's
+  awaiting confirmation. To keep cards uncluttered, it and the other
+  secondary actions (Reset, Archive, Delete) now live behind a per-card
+  **⋮** menu, leaving one primary action on the card face.
+- The email viewer is sandboxed and privacy-preserving: it runs with no
+  scripts, blocks all remote content by default so tracking pixels don't
+  fire when you open a message, and only loads remote images if you
+  explicitly tick **Load remote images**. The raw HTML is also kept out of
+  the `/api/parcels` and `/export` payloads so it doesn't bloat them.
+
 ## 0.7.0
 
 - Reworked the dashboard from the ground up. It now follows the device's
