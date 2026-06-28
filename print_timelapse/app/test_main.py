@@ -64,6 +64,10 @@ def _clean_data_dir():
     main.ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
     # Reset any in-app settings overrides so each test starts from defaults.
     settings._SETTINGS_PATH.unlink(missing_ok=True)
+    # Reset the in-memory "is it working?" call tracker - module-level state
+    # the rest of this fixture's filesystem cleanup doesn't touch.
+    for route in main._last_call_at:
+        main._last_call_at[route] = None
 
 
 def test_start_creates_empty_job_dir():
@@ -348,3 +352,78 @@ def test_finish_uses_settings_fps_and_width(monkeypatch):
     cmd = recorded["cmd"]
     assert "12" in cmd  # the configured framerate was passed to ffmpeg
     assert any("scale=320:" in part for part in cmd)  # the configured width
+
+
+# ---- Help page ----------------------------------------------------------
+
+def test_help_page_renders():
+    html = client.get("/help").text
+    assert "rest_command" in html
+
+
+def test_help_status_starts_empty_and_updates_after_calls():
+    assert client.get("/help/status").json()["last_call_at"] == {
+        "start": None,
+        "frame": None,
+        "finish": None,
+    }
+    client.post("/start", data={"job_id": "statusjob"})
+    last_call_at = client.get("/help/status").json()["last_call_at"]
+    assert last_call_at["start"] is not None
+    assert last_call_at["frame"] is None
+    assert last_call_at["finish"] is None
+
+
+def test_help_hostname_reports_static_default_when_unconfigured(monkeypatch):
+    monkeypatch.setattr(main.ha_automations, "SUPERVISOR_TOKEN", "")
+    body = client.get("/help/hostname").json()
+    assert body == {"detected": False, "hostname": main.ha_automations._DEFAULT_HOSTNAME}
+
+
+def test_create_automations_rejects_blank_field():
+    # A whitespace-only value passes FastAPI's own required-field check (the
+    # field is present) but fails the route's own post-.strip() blank check.
+    resp = client.post(
+        "/help/create-automations",
+        data={
+            "print_status_entity": "sensor.status",
+            "print_progress_entity": "   ",
+            "snapshot_camera_entity": "camera.printer",
+            "snapshot_image_url": "http://homeassistant:8123/local/snap.jpg",
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_create_automations_persists_entities_even_when_unconfigured(monkeypatch):
+    monkeypatch.setattr(main.ha_automations, "SUPERVISOR_TOKEN", "")
+    resp = client.post(
+        "/help/create-automations",
+        data={
+            "print_status_entity": "sensor.status",
+            "print_progress_entity": "sensor.progress",
+            "snapshot_camera_entity": "camera.printer",
+            "snapshot_image_url": "http://homeassistant:8123/local/snap.jpg",
+        },
+    )
+    assert resp.status_code == 503
+    assert settings.get_str("print_status_entity") == "sensor.status"
+    assert settings.get_str("snapshot_image_url") == "http://homeassistant:8123/local/snap.jpg"
+
+
+def test_create_automations_succeeds_when_configured(monkeypatch):
+    monkeypatch.setattr(main.ha_automations, "SUPERVISOR_TOKEN", "test-token")
+    monkeypatch.setattr(main.ha_automations, "_request", lambda *a, **k: {})
+    resp = client.post(
+        "/help/create-automations",
+        data={
+            "print_status_entity": "sensor.status",
+            "print_progress_entity": "sensor.progress",
+            "snapshot_camera_entity": "camera.printer",
+            "snapshot_image_url": "http://homeassistant:8123/local/snap.jpg",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["configured"] is True
+    assert all(body["results"].values())

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0
+
+- Added a **Help** page (the **?** icon in the gallery header) that walks
+  through setup interactively: the `rest_command:` YAML to paste (still a
+  one-time manual step — Home Assistant has no API for creating those),
+  a form for your printer's entity IDs that live-updates the YAML previews
+  as you type, and a button that creates the 3 required automations
+  directly in your Home Assistant via its own Supervisor-granted API
+  access. Re-running it after changing an entity ID updates the existing
+  automations in place rather than duplicating them. A status panel shows
+  whether `/start`, `/frame`, and `/finish` have actually been called since
+  the add-on started, to help confirm the wiring is working end to end.
+- This needs two new permissions (`homeassistant_api`, `hassio_api` for
+  optional hostname self-detection) — restart the add-on once after
+  upgrading for them to take effect.
+- The automations generated (in-app or by hand, see DOCS.md) no longer need
+  an `input_text` helper to pass `job_id` between them; they now derive it
+  from the print-status sensor's own `last_changed` timestamp instead.
+
 ## 0.4.6
 
 - Fixed the merged stats bar from 0.4.5 dropping back to two stacked rows on

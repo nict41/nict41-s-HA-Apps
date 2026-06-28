@@ -1,5 +1,5 @@
 name: "3D Print Timelapse"
-version: "0.4.6"
+version: "0.5.0"
 slug: "print_timelapse"
 description: "Captures frame-by-frame 3D print timelapses and archives them as GIFs"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/print_timelapse"
@@ -10,6 +10,8 @@ init: false
 startup: services
 ingress: true
 ingress_port: 8099
+homeassistant_api: true
+hassio_api: true
 panel_icon: mdi:camera-burst
 panel_title: "Print Timelapse"
 ports:

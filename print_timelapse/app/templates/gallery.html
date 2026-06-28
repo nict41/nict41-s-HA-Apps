@@ -244,13 +244,14 @@
         var a = e.target.closest("a");
         if (!a) return;
         var href = a.getAttribute("href");
-        if (href !== "settings" && href !== ".") return;
+        if (href !== "settings" && href !== "help" && href !== ".") return;
         e.preventDefault();
         swap(href, true);
       });
 
       window.addEventListener("popstate", function () {
-        swap(/\/settings\/?$/.test(location.pathname) ? "settings" : ".", false);
+        var path = location.pathname;
+        swap(/\/settings\/?$/.test(path) ? "settings" : /\/help\/?$/.test(path) ? "help" : ".", false);
       });
     })();
   </script>
@@ -268,6 +269,7 @@
     <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a2.9 2.9 0 1 1 4.4 2.5c-.7.5-1.5 1-1.5 2.3"/><path d="M12 17h.01"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -280,6 +282,7 @@
         </div>
       </div>
       <div class="topbar-spacer"></div>
+      <a class="btn btn-icon" href="help" aria-label="Help" title="Setup help"><svg aria-hidden="true"><use href="#i-help"/></svg></a>
       <a class="btn btn-icon" href="settings" aria-label="Settings" title="Settings"><svg aria-hidden="true"><use href="#i-gear"/></svg></a>
     </div>
   </header>

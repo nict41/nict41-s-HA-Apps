@@ -157,13 +157,14 @@
         var a = e.target.closest("a");
         if (!a) return;
         var href = a.getAttribute("href");
-        if (href !== "settings" && href !== ".") return;
+        if (href !== "settings" && href !== "help" && href !== ".") return;
         e.preventDefault();
         swap(href, true);
       });
 
       window.addEventListener("popstate", function () {
-        swap(/\/settings\/?$/.test(location.pathname) ? "settings" : ".", false);
+        var path = location.pathname;
+        swap(/\/settings\/?$/.test(path) ? "settings" : /\/help\/?$/.test(path) ? "help" : ".", false);
       });
     })();
   </script>

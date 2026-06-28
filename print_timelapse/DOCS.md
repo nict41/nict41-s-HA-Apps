@@ -23,6 +23,15 @@ finished GIFs.
 
 ## Setup
 
+The in-app **Help** page (the **?** icon in the gallery header) walks
+through all of this interactively, pre-filled with your own entity IDs, and
+can create the 3 automations in step 4 directly — using the add-on's own
+Supervisor-granted Home Assistant API access, no extra credentials or
+integrations needed. Restart the add-on once after upgrading to this
+version for that access to take effect. The steps below are the manual
+fallback (and step 3, the `rest_command:` block, is always a manual paste
+either way — Home Assistant has no API for creating those, only YAML).
+
 ### 1. Find the app's internal hostname
 
 Home Assistant gives every app a hostname of the form `{REPO}_{SLUG}` (with
@@ -106,9 +115,11 @@ printing begins, snapshot + capture a frame on every progress change, and
 finish when the print completes.
 
 `job_id` needs to be generated once per print and reused across all three
-calls, so a small `input_text` helper (**Settings → Devices & services →
-Helpers → Create helper → Text**) works well to hold it for the
-automations below. Adjust the trigger entity IDs to match your printer:
+calls. Rather than a separate `input_text` helper, each automation below
+derives it from the print-status sensor's own `last_changed` timestamp —
+that only moves when the sensor's *value* changes, so it stays stable for
+the whole "printing" episode and needs no helper to hold it. Adjust the
+trigger entity IDs to match your printer:
 
 ```yaml
 automation:
@@ -118,14 +129,9 @@ automation:
         entity_id: sensor.printer_print_status
         to: "printing"
     action:
-      - action: input_text.set_value
-        target:
-          entity_id: input_text.current_timelapse_job_id
-        data:
-          value: "{{ now().strftime('%Y%m%d_%H%M%S') }}"
       - action: rest_command.timelapse_start
         data:
-          job_id: "{{ states('input_text.current_timelapse_job_id') }}"
+          job_id: "{{ trigger.to_state.last_changed.strftime('%Y%m%d_%H%M%S') }}"
 
   - alias: "Timelapse: capture frame"
     trigger:
@@ -143,7 +149,7 @@ automation:
           filename: "/config/www/print_progress.jpg"
       - action: rest_command.timelapse_frame
         data:
-          job_id: "{{ states('input_text.current_timelapse_job_id') }}"
+          job_id: "{{ states.sensor.printer_print_status.last_changed.strftime('%Y%m%d_%H%M%S') }}"
           percent: "{{ trigger.to_state.state | int }}"
 
   - alias: "Timelapse: finish"
@@ -154,7 +160,7 @@ automation:
     action:
       - action: rest_command.timelapse_finish
         data:
-          job_id: "{{ states('input_text.current_timelapse_job_id') }}"
+          job_id: "{{ states.sensor.printer_print_status.last_changed.strftime('%Y%m%d_%H%M%S') }}"
 ```
 
 ## API

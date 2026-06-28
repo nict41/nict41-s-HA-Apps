@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+import ha_automations
 import settings
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -41,6 +43,16 @@ app = FastAPI(title="Print Timelapse")
 app.mount("/archive", StaticFiles(directory=str(ARCHIVE_DIR)), name="archive")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
+# Last time each route was called, for the Help page's "is it working?"
+# diagnostic. In-memory only (never persisted) - a timestamp that survived an
+# add-on restart would misleadingly look current, so this always means "since
+# this add-on last started".
+_last_call_at: dict[str, str | None] = {"start": None, "frame": None, "finish": None}
+
+
+def _record_call(route: str) -> None:
+    _last_call_at[route] = datetime.now().isoformat(timespec="seconds")
+
 
 def _validate_job_id(job_id: str) -> str:
     if not JOB_ID_RE.match(job_id):
@@ -59,6 +71,15 @@ def _fetch_image(url: str) -> bytes:
             return resp.read()
     except (urllib.error.URLError, ValueError) as exc:
         raise HTTPException(502, f"could not fetch image from '{url}': {exc}")
+
+
+def _local_path_for_url(url: str) -> str:
+    """The `camera.snapshot` filename Home Assistant should write to, given
+    the /local/<name> URL the customizer form's snapshot_image_url points
+    at - the inverse of the /local/ <-> /config/www/ convention DOCS.md
+    documents for making snapshot images fetchable by /frame."""
+    name = Path(urllib.parse.urlparse(url).path).name
+    return f"/config/www/{name}"
 
 
 def _export_gif(gif_path: Path, gif_name: str) -> str | None:
@@ -119,6 +140,7 @@ def _job_records():
 @app.post("/start")
 async def start_job(job_id: str = Form(...)):
     job_id = _validate_job_id(job_id)
+    _record_call("start")
     job_dir = CURRENT_DIR / job_id
     if job_dir.exists():
         shutil.rmtree(job_dir)
@@ -135,6 +157,7 @@ async def add_frame(
     job_id = _validate_job_id(job_id)
     if not 0 <= percent <= 100:
         raise HTTPException(400, "percent must be between 0 and 100")
+    _record_call("frame")
 
     contents = _fetch_image(image_url)
     if not contents:
@@ -154,6 +177,7 @@ async def add_frame(
 @app.post("/finish")
 async def finish_job(job_id: str = Form(...)):
     job_id = _validate_job_id(job_id)
+    _record_call("finish")
     job_dir = CURRENT_DIR / job_id
 
     frames = sorted(job_dir.glob("frame_*.jpg")) if job_dir.exists() else []
@@ -277,3 +301,67 @@ async def save_settings(
         "gif_export_path": gif_export_path,
     })
     return RedirectResponse("settings?saved=1", status_code=303)
+
+
+@app.get("/help", response_class=HTMLResponse)
+async def help_page(request: Request):
+    response = templates.TemplateResponse(
+        request,
+        "help.html",
+        {
+            "settings": settings.all_settings(),
+            "ha_configured": ha_automations.configured(),
+            "default_hostname": ha_automations._DEFAULT_HOSTNAME,
+            "last_call_at": _last_call_at,
+        },
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/help/status")
+async def help_status():
+    return {"last_call_at": _last_call_at}
+
+
+@app.get("/help/hostname")
+async def help_hostname():
+    if ha_automations.configured():
+        hostname = ha_automations.detect_hostname()
+        if hostname:
+            return {"detected": True, "hostname": hostname}
+    return {"detected": False, "hostname": ha_automations._DEFAULT_HOSTNAME}
+
+
+@app.post("/help/create-automations")
+async def help_create_automations(
+    print_status_entity: str = Form(...),
+    print_progress_entity: str = Form(...),
+    snapshot_camera_entity: str = Form(...),
+    snapshot_image_url: str = Form(...),
+):
+    print_status_entity = print_status_entity.strip()
+    print_progress_entity = print_progress_entity.strip()
+    snapshot_camera_entity = snapshot_camera_entity.strip()
+    snapshot_image_url = snapshot_image_url.strip()
+    if not all((print_status_entity, print_progress_entity, snapshot_camera_entity, snapshot_image_url)):
+        raise HTTPException(400, "all fields are required")
+
+    # Persisted unconditionally (even if Home Assistant isn't reachable
+    # below), so the customizer form keeps its values across a reload.
+    settings.set_many({
+        "print_status_entity": print_status_entity,
+        "print_progress_entity": print_progress_entity,
+        "snapshot_camera_entity": snapshot_camera_entity,
+        "snapshot_image_url": snapshot_image_url,
+    })
+
+    if not ha_automations.configured():
+        raise HTTPException(503, "Home Assistant API access isn't available - restart this add-on after upgrading")
+
+    return ha_automations.create_automations(
+        print_status_entity,
+        print_progress_entity,
+        snapshot_camera_entity,
+        _local_path_for_url(snapshot_image_url),
+    )

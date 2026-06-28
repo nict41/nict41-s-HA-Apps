@@ -27,6 +27,12 @@ _DEFAULTS = {
     "gif_width": int(os.environ.get("GIF_WIDTH", "480")),
     "cleanup_after_finish": _env_bool("CLEANUP_AFTER_FINISH", True),
     "gif_export_path": os.environ.get("GIF_EXPORT_PATH", ""),
+    # Entity IDs the in-app Help page's "create automations" customizer
+    # collects, persisted so the form survives a reload while filling it in.
+    "print_status_entity": "",
+    "print_progress_entity": "",
+    "snapshot_camera_entity": "",
+    "snapshot_image_url": "",
 }
 
 # Inclusive (min, max) bounds for integer settings, mirroring config.yaml's
@@ -38,7 +44,13 @@ _BOUNDS = {
 
 INT_KEYS = ("gif_fps", "gif_width")
 BOOL_KEYS = ("cleanup_after_finish",)
-STR_KEYS = ("gif_export_path",)
+STR_KEYS = (
+    "gif_export_path",
+    "print_status_entity",
+    "print_progress_entity",
+    "snapshot_camera_entity",
+    "snapshot_image_url",
+)
 
 
 def _load() -> dict:

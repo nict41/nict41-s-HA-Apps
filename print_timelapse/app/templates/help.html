@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Render-block first paint until content is parsed, so the cross-document
+       view transition doesn't flash a blank frame first (see #vt-ready). -->
+  <link rel="expect" blocking="render" href="#vt-ready" />
+  <title>Setup help &middot; Print Timelapse</title>
+  <style>
+    /* Design tokens mirror settings.html so the pages stay in lockstep. */
+    :root {
+      color-scheme: light dark; background: var(--bg);
+      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
+      --border: #e4e7ec; --border-strong: #d4d9e0;
+      --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
+      --accent: #4f46e5; --accent-hover: #4338ca; --accent-contrast: #ffffff;
+      --accent-soft: #eef2ff; --accent-soft-text: #4338ca; --focus-ring: rgba(79,70,229,0.35);
+      --ok-bg: #d8f3e0; --ok-fg: #1c8a4e;
+      --danger: #c0392b; --danger-bg: #fde0e0;
+      --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
+      --shadow-md: 0 4px 14px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
+      --radius-sm: 7px; --radius: 12px; --radius-pill: 999px;
+      --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
+      --maxw: 760px;
+      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0e1014; --surface: #181b21; --surface-2: #12151b; --surface-hover: #1e222a;
+        --border: #272c36; --border-strong: #343b48;
+        --text: #e7e9ee; --text-muted: #9aa2b1; --text-faint: #6b7482;
+        --accent: #818cf8; --accent-hover: #a5b4fc; --accent-contrast: #0e1014;
+        --accent-soft: rgba(99,102,241,0.16); --accent-soft-text: #b4bcff; --focus-ring: rgba(129,140,248,0.45);
+        --ok-bg: rgba(52,211,153,0.15); --ok-fg: #6ee7a7;
+        --danger: #fca5a5; --danger-bg: rgba(248,113,113,0.15);
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+        --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
+      }
+    }
+    * { box-sizing: border-box; }
+    svg:not([width]) { width: 15px; height: 15px; flex: none; }
+    body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
+      font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6);
+      animation: page-fade-in 160ms ease-out; }
+    @media (prefers-reduced-motion: reduce) {
+      .wrap { animation: none; }
+    }
+
+    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
+      display: flex; align-items: center; gap: var(--space-3); }
+    .brand { display: flex; align-items: center; gap: var(--space-3); }
+    .brand-logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent-soft-text); }
+    .brand-logo svg { width: 22px; height: 22px; }
+    .brand-title { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; }
+    .topbar-spacer { flex: 1; }
+
+    button, .btn { font-family: inherit; font-size: 0.82rem; font-weight: 550; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
+      padding: 0.5rem 0.8rem; border-radius: var(--radius-sm);
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+      cursor: pointer; text-decoration: none; white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease; }
+    button:hover, .btn:hover { background: var(--surface-hover); border-color: var(--text-faint); }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+    button:focus-visible, .btn:focus-visible, input:focus-visible {
+      outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    button svg, .btn svg { width: 15px; height: 15px; }
+
+    h1 { font-size: 1.3rem; font-weight: 680; letter-spacing: -0.02em; margin: var(--space-6) 0 0.25rem; }
+    .lede { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 var(--space-5); }
+
+    .group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-sm); padding: var(--space-5); margin-top: var(--space-4); }
+    .group-title { font-size: 0.92rem; font-weight: 650; margin: 0 0 var(--space-2); }
+    .group-intro { font-size: 0.85rem; color: var(--text-muted); margin: 0 0 var(--space-4); }
+
+    .field { padding: var(--space-3) 0; border-top: 1px solid var(--border); }
+    .group .field:first-of-type { border-top: 0; padding-top: 0; }
+    .field-label { font-size: 0.85rem; font-weight: 550; display: block; margin-bottom: 0.3rem; }
+    .field-help { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+    input[type="text"], input[type="url"] { width: 100%; font-family: var(--mono); font-size: 0.85rem;
+      background: var(--surface-2); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.5rem 0.65rem; }
+    input::placeholder { color: var(--text-faint); font-family: var(--mono); }
+
+    .codeblock { position: relative; margin-top: var(--space-3); }
+    .codeblock pre { margin: 0; background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: var(--space-4); padding-top: 2.6rem; overflow-x: auto; }
+    .codeblock code { font-family: var(--mono); font-size: 0.78rem; line-height: 1.55; white-space: pre; color: var(--text); }
+    .codeblock .btn { position: absolute; top: var(--space-2); right: var(--space-2); }
+
+    .actions { display: flex; gap: var(--space-3); align-items: center; margin-top: var(--space-4); }
+    .note { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: var(--space-4);
+      font-size: 0.8rem; color: var(--text-muted); }
+    .note svg { width: 15px; height: 15px; flex: none; margin-top: 1px; color: var(--text-faint); }
+
+    .result-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; font-size: 0.88rem; font-weight: 550; }
+    .result-row svg { width: 16px; height: 16px; }
+    .result-row.is-ok { color: var(--ok-fg); }
+    .result-row.is-fail { color: var(--danger); }
+
+    .status-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+      padding: 0.55rem 0; border-top: 1px solid var(--border); font-size: 0.88rem; }
+    .status-row:first-of-type { border-top: 0; }
+    .status-label { display: flex; align-items: center; gap: 0.5rem; color: var(--text); }
+    .status-label svg { width: 15px; height: 15px; color: var(--text-faint); }
+    .status-value { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  </style>
+  <script>
+    // Client-side swap for help <-> gallery <-> settings navigation. See
+    // gallery.html for the full rationale (Home Assistant's ingress iframe
+    // makes real cross-document navigations flash, so this swaps content
+    // into the current document instead of unloading it).
+    (function () {
+      function swap(href, push) {
+        fetch(href).then(function (r) {
+          if (!r.ok) throw new Error("bad response");
+          return r.text();
+        }).then(function (html) {
+          var next = new DOMParser().parseFromString(html, "text/html");
+          function apply() {
+            if (window.__pageTeardown) { window.__pageTeardown(); window.__pageTeardown = null; }
+            document.title = next.title;
+            var oldStyle = document.head.querySelector("style");
+            var newStyle = next.head.querySelector("style");
+            if (oldStyle && newStyle) oldStyle.textContent = newStyle.textContent;
+            document.body.innerHTML = next.body.innerHTML;
+            document.querySelectorAll("body script").forEach(function (old) {
+              var fresh = document.createElement("script");
+              fresh.textContent = old.textContent;
+              old.replaceWith(fresh);
+            });
+          }
+          var reduceMotion = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+          if (!reduceMotion && document.startViewTransition) document.startViewTransition(apply);
+          else apply();
+          if (push) history.pushState(null, next.title, href);
+        }).catch(function () { location.href = href; });
+      }
+
+      document.addEventListener("click", function (e) {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        var a = e.target.closest("a");
+        if (!a) return;
+        var href = a.getAttribute("href");
+        if (href !== "settings" && href !== "." && href !== "help") return;
+        e.preventDefault();
+        swap(href, true);
+      });
+
+      window.addEventListener("popstate", function () {
+        var path = location.pathname;
+        swap(/\/settings\/?$/.test(path) ? "settings" : /\/help\/?$/.test(path) ? "help" : ".", false);
+      });
+    })();
+  </script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <symbol id="i-film" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M7 3v18M17 3v18M3 8h4M3 16h4M17 8h4M17 16h4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></symbol>
+  </svg>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <span class="brand-logo"><svg aria-hidden="true"><use href="#i-film"/></svg></span>
+        <div class="brand-title">Setup help</div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a class="btn" href="."><svg aria-hidden="true"><use href="#i-back"/></svg>Back to gallery</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <h1>Setup help</h1>
+    <p class="lede">Everything this add-on needs in Home Assistant to actually capture timelapses,
+      walked through in order. Steps 2 and 3 remember what you type, so it's safe to come back later.</p>
+
+    <div class="group">
+      <div class="group-title">1. Paste this once, then restart Home Assistant</div>
+      <p class="group-intro">Add this to your <code>configuration.yaml</code>, then restart Home Assistant
+        (or <strong>Developer Tools &rarr; YAML &rarr; Reload All</strong>).</p>
+      <div class="codeblock">
+        <button type="button" class="btn" data-copy="rest-command-yaml"><svg aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+        <pre><code id="rest-command-yaml"></code></pre>
+      </div>
+      <div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg>
+        <span>This part can't be automated &mdash; Home Assistant has no API for creating
+          <code>rest_command:</code> entries, only YAML. The steps below can't take effect until this is
+          pasted in and Home Assistant has reloaded.</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">2. Tell us about your printer</div>
+      <p class="group-intro">These entity IDs depend on your printer integration (OctoPrint, Moonraker,
+        Bambu Lab, etc.) &mdash; check <strong>Settings &rarr; Devices &amp; services &rarr; Entities</strong>
+        if you're not sure of the exact names.</p>
+
+      <div class="field">
+        <label class="field-label" for="f-status">Print status entity</label>
+        <div class="field-help">Goes to <code>"printing"</code> when a print starts and <code>"completed"</code> when it finishes.</div>
+        <input type="text" id="f-status" placeholder="sensor.printer_print_status" value="{{ settings.print_status_entity }}" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-progress">Print progress entity</label>
+        <div class="field-help">A numeric percent-complete sensor, updated as the print runs.</div>
+        <input type="text" id="f-progress" placeholder="sensor.printer_print_progress" value="{{ settings.print_progress_entity }}" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-camera">Snapshot camera entity</label>
+        <div class="field-help">The camera <code>camera.snapshot</code> should capture a frame from.</div>
+        <input type="text" id="f-camera" placeholder="camera.printer" value="{{ settings.snapshot_camera_entity }}" />
+      </div>
+      <div class="field">
+        <label class="field-label" for="f-image-url">Snapshot image URL</label>
+        <div class="field-help">Where that snapshot ends up reachable by URL &mdash; usually a file under Home
+          Assistant's <code>/config/www/</code>, served at <code>/local/...</code>.</div>
+        <input type="url" id="f-image-url" placeholder="http://homeassistant:8123/local/print_progress.jpg" value="{{ settings.snapshot_image_url }}" />
+      </div>
+
+      <div class="codeblock">
+        <button type="button" class="btn" data-copy="automations-yaml"><svg aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+        <pre><code id="automations-yaml"></code></pre>
+      </div>
+      <div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg>
+        <span>This is what step 3 below creates for you automatically. Copy it instead if you'd rather paste
+          automations in by hand.</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="group-title">3. Create the automations automatically</div>
+      {% if ha_configured %}
+      <p class="group-intro">Creates (or updates, if run again) the 3 automations above directly in your
+        Home Assistant &mdash; no copy-pasting required.</p>
+      <div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg>
+        <span>Do step 1 first, or these will call a <code>rest_command</code> that doesn't exist yet.</span>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn-primary" id="create-btn"><svg aria-hidden="true"><use href="#i-check"/></svg>Create automations in Home Assistant</button>
+      </div>
+      <div id="create-results"></div>
+      {% else %}
+      <div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg>
+        <span>Home Assistant API access isn't available yet. If you just upgraded this add-on, restart it
+          once to pick up the new permission.</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="group">
+      <div class="group-title">Is it working?</div>
+      <p class="group-intro">The last time each step was actually called, since this add-on last started.</p>
+      <div class="status-row">
+        <span class="status-label"><svg aria-hidden="true"><use href="#i-play"/></svg>Start</span>
+        <span class="status-value" id="status-start">&mdash;</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label"><svg aria-hidden="true"><use href="#i-camera"/></svg>Capture frame</span>
+        <span class="status-value" id="status-frame">&mdash;</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label"><svg aria-hidden="true"><use href="#i-check"/></svg>Finish</span>
+        <span class="status-value" id="status-finish">&mdash;</span>
+      </div>
+    </div>
+    <div id="vt-ready"></div>
+  </div>
+
+  <script>
+    var DEFAULTS = {
+      status: "sensor.printer_print_status",
+      progress: "sensor.printer_print_progress",
+      camera: "camera.printer",
+      imageUrl: "http://homeassistant:8123/local/print_progress.jpg",
+    };
+    var fields = {
+      status: document.getElementById("f-status"),
+      progress: document.getElementById("f-progress"),
+      camera: document.getElementById("f-camera"),
+      imageUrl: document.getElementById("f-image-url"),
+    };
+    var hostname = {{ default_hostname|tojson }};
+
+    function val(key) {
+      return (fields[key].value || "").trim() || DEFAULTS[key];
+    }
+
+    function localPathFor(url) {
+      try {
+        var name = new URL(url, location.href).pathname.split("/").pop();
+        return "/config/www/" + (name || "snapshot.jpg");
+      } catch (e) {
+        return "/config/www/snapshot.jpg";
+      }
+    }
+
+    {% raw %}
+    function restCommandYaml() {
+      var imageUrl = val("imageUrl");
+      return [
+        "rest_command:",
+        "  timelapse_start:",
+        '    url: "http://' + hostname + ':8099/start"',
+        "    method: POST",
+        '    payload: "job_id={{ job_id }}"',
+        '    content_type: "application/x-www-form-urlencoded"',
+        "  timelapse_frame:",
+        '    url: "http://' + hostname + ':8099/frame"',
+        "    method: POST",
+        '    payload: "job_id={{ job_id }}&percent={{ percent }}&image_url=' + imageUrl + '"',
+        '    content_type: "application/x-www-form-urlencoded"',
+        "  timelapse_finish:",
+        '    url: "http://' + hostname + ':8099/finish"',
+        "    method: POST",
+        '    payload: "job_id={{ job_id }}"',
+        '    content_type: "application/x-www-form-urlencoded"',
+      ].join("\n");
+    }
+
+    function automationsYaml() {
+      var status = val("status"), progress = val("progress"), camera = val("camera");
+      var filename = localPathFor(val("imageUrl"));
+      return [
+        "automation:",
+        '  - alias: "Timelapse: start"',
+        "    trigger:",
+        "      - trigger: state",
+        "        entity_id: " + status,
+        '        to: "printing"',
+        "    action:",
+        "      - action: rest_command.timelapse_start",
+        "        data:",
+        "          job_id: \"{{ trigger.to_state.last_changed.strftime('%Y%m%d_%H%M%S') }}\"",
+        "",
+        '  - alias: "Timelapse: capture frame"',
+        "    trigger:",
+        "      - trigger: state",
+        "        entity_id: " + progress,
+        "    condition:",
+        "      - condition: template",
+        "        value_template: >-",
+        "          {{ trigger.to_state.state | int(0) != trigger.from_state.state | int(0) }}",
+        "    action:",
+        "      - action: camera.snapshot",
+        "        target:",
+        "          entity_id: " + camera,
+        "        data:",
+        '          filename: "' + filename + '"',
+        "      - action: rest_command.timelapse_frame",
+        "        data:",
+        "          job_id: \"{{ states." + status + ".last_changed.strftime('%Y%m%d_%H%M%S') }}\"",
+        '          percent: "{{ trigger.to_state.state | int }}"',
+        "",
+        '  - alias: "Timelapse: finish"',
+        "    trigger:",
+        "      - trigger: state",
+        "        entity_id: " + status,
+        '        to: "completed"',
+        "    action:",
+        "      - action: rest_command.timelapse_finish",
+        "        data:",
+        "          job_id: \"{{ states." + status + ".last_changed.strftime('%Y%m%d_%H%M%S') }}\"",
+      ].join("\n");
+    }
+    {% endraw %}
+
+    function renderPreviews() {
+      document.getElementById("rest-command-yaml").textContent = restCommandYaml();
+      document.getElementById("automations-yaml").textContent = automationsYaml();
+    }
+    Object.keys(fields).forEach(function (key) { fields[key].addEventListener("input", renderPreviews); });
+    renderPreviews();
+
+    // Refine the hostname from the static fork-hash default to this
+    // install's actual hostname, if the Supervisor API says otherwise.
+    fetch("help/hostname").then(function (r) { return r.json(); }).then(function (data) {
+      if (data && data.hostname && data.hostname !== hostname) {
+        hostname = data.hostname;
+        renderPreviews();
+      }
+    }).catch(function () {});
+
+    // ---- Copy buttons ----------------------------------------------------
+    document.querySelectorAll("[data-copy]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var text = document.getElementById(btn.getAttribute("data-copy")).textContent;
+        navigator.clipboard.writeText(text).then(function () {
+          var original = btn.innerHTML;
+          btn.innerHTML = '<svg aria-hidden="true"><use href="#i-check"/></svg>Copied!';
+          setTimeout(function () { btn.innerHTML = original; }, 1500);
+        }).catch(function () {});
+      });
+    });
+
+    // ---- Create automations -----------------------------------------------
+    var createBtn = document.getElementById("create-btn");
+    if (createBtn) {
+      var AUTOMATION_LABELS = [
+        ["print_timelapse_start", "Start"],
+        ["print_timelapse_capture_frame", "Capture frame"],
+        ["print_timelapse_finish", "Finish"],
+      ];
+      var resultsEl = document.getElementById("create-results");
+      createBtn.addEventListener("click", function () {
+        createBtn.disabled = true;
+        resultsEl.innerHTML = '<div class="note">Creating&hellip;</div>';
+        var body = new URLSearchParams();
+        body.set("print_status_entity", val("status"));
+        body.set("print_progress_entity", val("progress"));
+        body.set("snapshot_camera_entity", val("camera"));
+        body.set("snapshot_image_url", val("imageUrl"));
+        fetch("help/create-automations", { method: "POST", body: body })
+          .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+          .then(function (res) {
+            createBtn.disabled = false;
+            if (!res.ok) {
+              resultsEl.innerHTML = '<div class="note"><svg aria-hidden="true"><use href="#i-info"/></svg><span>' +
+                (res.data && res.data.detail ? res.data.detail : "Something went wrong.") + "</span></div>";
+              return;
+            }
+            var results = res.data.results || {};
+            resultsEl.innerHTML = AUTOMATION_LABELS.map(function (pair) {
+              var ok = !!results[pair[0]];
+              return '<div class="result-row ' + (ok ? "is-ok" : "is-fail") + '"><svg aria-hidden="true"><use href="#' +
+                (ok ? "i-check" : "i-x") + '"/></svg>' + pair[1] + "</div>";
+            }).join("");
+          })
+          .catch(function () {
+            createBtn.disabled = false;
+            resultsEl.innerHTML = '<div class="note">Could not reach the add-on.</div>';
+          });
+      });
+    }
+
+    // ---- "Is it working?" status panel, polled live -----------------------
+    var rtf = window.Intl && Intl.RelativeTimeFormat
+      ? new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }) : null;
+
+    function relative(iso) {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      var secs = Math.round((d.getTime() - Date.now()) / 1000), abs = Math.abs(secs);
+      if (abs < 45) return "just now";
+      if (!rtf) return d.toLocaleString();
+      var units = [["year",31536000],["month",2592000],["week",604800],["day",86400],["hour",3600],["minute",60]];
+      for (var i = 0; i < units.length; i++) {
+        if (abs >= units[i][1] || units[i][0] === "minute") return rtf.format(Math.round(secs/units[i][1]), units[i][0]);
+      }
+      return "just now";
+    }
+
+    var statusEls = {
+      start: document.getElementById("status-start"),
+      frame: document.getElementById("status-frame"),
+      finish: document.getElementById("status-finish"),
+    };
+    function renderStatus(lastCallAt) {
+      Object.keys(statusEls).forEach(function (key) {
+        var iso = lastCallAt[key];
+        statusEls[key].textContent = iso ? relative(iso) : "No calls received yet";
+        statusEls[key].title = iso ? new Date(iso).toLocaleString() : "";
+      });
+    }
+    renderStatus({{ last_call_at|tojson }});
+
+    function pollStatus() {
+      fetch("help/status").then(function (r) { return r.json(); })
+        .then(function (data) { renderStatus(data.last_call_at || {}); })
+        .catch(function () {});
+    }
+    var statusTimer = setInterval(pollStatus, 5000);
+
+    window.__pageTeardown = function () {
+      clearInterval(statusTimer);
+    };
+  </script>
+</body>
+</html>
