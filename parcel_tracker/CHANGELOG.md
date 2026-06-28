@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.6
+
+- Fixed Evri tracking numbers sometimes being rejected by Track123 at
+  registration (shown as an "A0400: trackNo not registered" status) even
+  though Track123's own web tracker resolves the same number fine.
+- Added a per-parcel **Refresh from API** action (kebab menu, on parcels
+  still being tracked) to re-check a single parcel against its tracking
+  provider immediately, instead of waiting for the next scheduled check.
+
 ## 0.9.5
 
 - The Lovelace card now mirrors the dashboard: collapsible/expandable

@@ -57,6 +57,76 @@ def _due_for_refresh(parcel: dict, throttle_minutes: int) -> bool:
     return datetime.now(timezone.utc) - last >= timedelta(minutes=throttle_minutes)
 
 
+def _select_provider(parcel: dict, active_providers: list[tuple[str, object]]) -> str:
+    return next(
+        (name for name, _ in active_providers if name == parcel["tracking_provider"]),
+        active_providers[0][0],
+    )
+
+
+def _apply_track_info(parcel: dict, info: dict, provider_name: str, dismiss_after_days: int) -> None:
+    # The provider's response is the authority on whether this is a real
+    # tracking number: a candidate it has never once confirmed (no detected
+    # carrier, no movement event) gets auto-dismissed once it's had a fair
+    # amount of time to be recognised. `provider_confirmed` is sticky, so a
+    # parcel genuinely confirmed in the past can't later be dismissed by a
+    # one-off inconclusive check. The grace period is measured from this
+    # parcel's *first* check rather than its creation time, so older parcels
+    # freshly registered with a provider (or upgrading onto this feature)
+    # aren't dismissed on the very first look.
+    if (
+        not info["confirmed"]
+        and not parcel["provider_confirmed"]
+        and parcel["first_checked_at"]
+        and dismiss_after_days > 0
+        and datetime.now(timezone.utc) - datetime.fromisoformat(parcel["first_checked_at"])
+        >= timedelta(days=dismiss_after_days)
+    ):
+        db.dismiss_parcel(parcel["id"])
+        return
+
+    # A pending candidate is auto-confirmed once the provider positively
+    # recognises the number (a detected carrier or a real tracking event) -
+    # the API is a far stronger signal than our own pattern guess. Until
+    # then it only gets a preview (carrier/status text) and stays pending
+    # for manual review.
+    if parcel["status"] == db.STATUS_PENDING and not info["confirmed"]:
+        new_status = None
+    else:
+        new_status = info["status"]
+    db.update_tracking_status(
+        parcel["id"],
+        status=new_status,
+        status_detail=info["status_detail"],
+        last_event_time=info["last_event_time"],
+        estimated_delivery=info["estimated_delivery"],
+        carrier_name=info.get("carrier_name"),
+        tracking_provider=provider_name,
+        confirmed=info["confirmed"],
+        events=info.get("events"),
+    )
+
+
+def _refresh_one_parcel(parcel: dict) -> None:
+    """On-demand single-parcel re-check, bypassing the provider-refresh
+    throttle entirely - for the dashboard's per-parcel "Refresh from API"
+    action. A no-op if no provider is configured. Can race a concurrently
+    running scheduled sync on the same parcel (last write wins); accepted as
+    a pre-existing, low-severity race already possible between two
+    overlapping run_sync_cycle() calls today, not worth locking for."""
+    active_providers = [(name, mod) for name, mod in _TRACKING_PROVIDERS if mod.configured()]
+    if not active_providers:
+        return
+    provider_name = _select_provider(parcel, active_providers)
+    mod = dict(active_providers)[provider_name]
+    number = parcel["tracking_number"]
+    mod.register([(number, parcel["carrier_name"])])
+    info = mod.get_track_info([number]).get(number)
+    if info:
+        _apply_track_info(parcel, info, provider_name, settings.get_int("dismiss_unconfirmed_after_days"))
+    ha_sync.sync(db.list_parcels())
+
+
 def run_sync_cycle(force_refresh: bool = False) -> None:
     sync_result = mail_worker.sync_mailbox()
 
@@ -75,10 +145,7 @@ def run_sync_cycle(force_refresh: bool = False) -> None:
 
         by_provider: dict[str, list[dict]] = {}
         for parcel in refresh_candidates:
-            provider_name = next(
-                (name for name, _ in active_providers if name == parcel["tracking_provider"]),
-                active_providers[0][0],
-            )
+            provider_name = _select_provider(parcel, active_providers)
             by_provider.setdefault(provider_name, []).append(parcel)
 
         providers_by_name = dict(active_providers)
@@ -92,49 +159,7 @@ def run_sync_cycle(force_refresh: bool = False) -> None:
                 sync_progress.increment()
                 if not info:
                     continue
-
-                # The provider's response is the authority on whether this is
-                # a real tracking number: a candidate it has never once
-                # confirmed (no detected carrier, no movement event) gets
-                # auto-dismissed once it's had a fair amount of time to be
-                # recognised. `provider_confirmed` is sticky, so a parcel
-                # genuinely confirmed in the past can't later be dismissed by
-                # a one-off inconclusive check. The grace period is measured
-                # from this parcel's *first* check rather than its creation
-                # time, so older parcels freshly registered with a provider
-                # (or upgrading onto this feature) aren't dismissed on the
-                # very first look.
-                if (
-                    not info["confirmed"]
-                    and not parcel["provider_confirmed"]
-                    and parcel["first_checked_at"]
-                    and dismiss_after_days > 0
-                    and datetime.now(timezone.utc) - datetime.fromisoformat(parcel["first_checked_at"])
-                    >= timedelta(days=dismiss_after_days)
-                ):
-                    db.dismiss_parcel(parcel["id"])
-                    continue
-
-                # A pending candidate is auto-confirmed once the provider
-                # positively recognises the number (a detected carrier or a
-                # real tracking event) - the API is a far stronger signal than
-                # our own pattern guess. Until then it only gets a preview
-                # (carrier/status text) and stays pending for manual review.
-                if parcel["status"] == db.STATUS_PENDING and not info["confirmed"]:
-                    new_status = None
-                else:
-                    new_status = info["status"]
-                db.update_tracking_status(
-                    parcel["id"],
-                    status=new_status,
-                    status_detail=info["status_detail"],
-                    last_event_time=info["last_event_time"],
-                    estimated_delivery=info["estimated_delivery"],
-                    carrier_name=info.get("carrier_name"),
-                    tracking_provider=provider_name,
-                    confirmed=info["confirmed"],
-                    events=info.get("events"),
-                )
+                _apply_track_info(parcel, info, provider_name, dismiss_after_days)
 
         sync_progress.finish()
 
@@ -356,6 +381,19 @@ async def delete(parcel_id: int = Form(...)):
 async def reset(parcel_id: int = Form(...)):
     db.reset_parcel(parcel_id)
     ha_sync.sync(db.list_parcels())
+    return RedirectResponse("./", status_code=303)
+
+
+@app.post("/refresh")
+async def refresh_parcel(parcel_id: int = Form(...)):
+    # Re-checks just this one parcel against its tracking provider right
+    # now, bypassing the provider-refresh throttle - for when a user doesn't
+    # want to wait for the next scheduled/throttled check (or a full "Sync
+    # now") to see an update. Blocking I/O, so it runs off the event loop
+    # just like run_sync_cycle does for /sync.
+    parcel = db.get_parcel(parcel_id)
+    if parcel:
+        await run_in_threadpool(_refresh_one_parcel, parcel)
     return RedirectResponse("./", status_code=303)
 
 

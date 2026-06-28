@@ -602,6 +602,71 @@ def test_zero_throttle_refreshes_every_cycle(monkeypatch):
     assert db.get_parcel(parcel_id)["status_detail"] == "new status"
 
 
+def test_refresh_route_queries_only_the_requested_parcel(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.upsert_parcel("ACT2", "UPS", "y", 1.0, None, db.STATUS_ACTIVE)
+    queried = _recording_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True)})
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    assert queried == ["ACT1"]
+
+
+def test_refresh_route_updates_parcel_status_detail(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    _stub_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True, status_detail="new status")})
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    assert db.get_parcel(parcel_id)["status_detail"] == "new status"
+
+
+def test_refresh_route_bypasses_throttle(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    # update_tracking_status stamps last_checked_at = now, marking it freshly checked.
+    db.update_tracking_status(parcel_id, status=db.STATUS_ACTIVE, status_detail="old status",
+                              last_event_time=None, estimated_delivery=None, confirmed=True)
+    settings.set_many({"provider_refresh_minutes": 60})
+    queried = _recording_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True, status_detail="new status")})
+
+    client.post("/refresh", data={"parcel_id": parcel_id})  # bypasses the throttle, unlike a scheduled cycle
+
+    assert "ACT1" in queried
+    assert db.get_parcel(parcel_id)["status_detail"] == "new status"
+
+
+def test_refresh_route_redirects():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    resp = client.post("/refresh", data={"parcel_id": parcel_id}, follow_redirects=False)
+    assert resp.status_code == 303
+
+
+def test_refresh_route_is_noop_for_unknown_parcel_id():
+    resp = client.post("/refresh", data={"parcel_id": 999999}, follow_redirects=False)
+    assert resp.status_code == 303
+
+
+def test_refresh_route_syncs_to_ha_immediately(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    _stub_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True)})
+    calls = []
+    monkeypatch.setattr(main.ha_sync, "sync", lambda parcels: calls.append(parcels))
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    assert len(calls) == 1
+
+
+def test_refresh_route_can_auto_dismiss_via_apply_track_info(monkeypatch):
+    parcel_id = db.upsert_parcel("BOGUS1", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
+    _backdate_first_checked_at(parcel_id, days=10)
+    _stub_provider(monkeypatch, {"BOGUS1": _UNCONFIRMED_INFO})
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    assert db.get_parcel(parcel_id)["status"] == db.STATUS_DISMISSED
+
+
 def test_settings_page_renders_current_values():
     settings.set_many({"poll_interval_minutes": 45, "ignore_senders": "spam.example"})
     html = client.get("/settings").text

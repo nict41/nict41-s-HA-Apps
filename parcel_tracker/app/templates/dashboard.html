@@ -441,6 +441,7 @@
     .kebab-item-danger { color: var(--st-exception-fg); }
     .kebab-item-danger:hover { background: var(--st-exception-bg); }
     .kebab-item-danger svg { color: var(--st-exception-fg); }
+    .kebab-item.is-loading svg { animation: spin 0.7s linear infinite; }
 
     /* ---- Email viewer dialog ------------------------------------------- */
     .email-dialog {
@@ -890,6 +891,12 @@
                 <button class="btn-primary btn-sm" type="submit"><svg aria-hidden="true"><use href="#i-check"/></svg>Confirm</button>
               </form>
               {% call kebab() %}
+                {% if tracking_providers_configured %}
+                <form action="refresh" method="post" class="refresh-form" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-refresh"/></svg>Refresh from API</button>
+                </form>
+                {% endif %}
                 {{ view_email_item(p) }}
                 <form action="dismiss" method="post" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
@@ -930,6 +937,12 @@
             <div class="actions">
               <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
               {% call kebab() %}
+                {% if tracking_providers_configured %}
+                <form action="refresh" method="post" class="refresh-form" role="menuitem">
+                  <input type="hidden" name="parcel_id" value="{{ p.id }}" />
+                  <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-refresh"/></svg>Refresh from API</button>
+                </form>
+                {% endif %}
                 {{ view_email_item(p) }}
                 <form action="reset" method="post" class="reset-form" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
@@ -1252,6 +1265,24 @@
         if (!confirm("Reset this parcel? It will go back to needs-confirmation and lose its current tracking status.")) {
           e.preventDefault();
         }
+      });
+    });
+
+    // ---- Per-parcel "Refresh from API" ----------------------------------
+    // An external provider call, so give it the same fetch+reload treatment
+    // as the global sync button rather than a plain navigation - but
+    // per-form-scoped (there's one of these per card, not a single global
+    // button), and with no progress polling (a single quick lookup, not a
+    // multi-stage mail-scan-plus-provider-refresh cycle).
+    document.querySelectorAll(".refresh-form").forEach(function (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var button = form.querySelector("button");
+        button.disabled = true;
+        button.classList.add("is-loading");
+        fetch(form.action, { method: "POST" })
+          .catch(function () {})
+          .finally(function () { window.location.reload(); });
       });
     });
 

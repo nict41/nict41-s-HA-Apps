@@ -496,3 +496,34 @@ def test_track123_register_includes_courier_code_for_known_carrier(monkeypatch):
     track123.register([("JJD3", "Cainiao / AliExpress Standard Shipping"), ("ANY3", "UPS")])
 
     assert captured_payload == [[{"trackNo": "JJD3", "courierCode": "cainiao"}, {"trackNo": "ANY3"}]]
+
+
+def test_track123_register_includes_courier_code_for_evri(monkeypatch):
+    # Evri numbers can be rejected outright at registration (A0400: trackNo
+    # not registered) without an explicit courier code, even though
+    # Track123's own web tracker resolves the same number fine.
+    captured_payload = []
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: captured_payload.append(payload) or None,
+    )
+
+    track123.register([("H06R4A0176637302", "Evri")])
+
+    assert captured_payload == [[{"trackNo": "H06R4A0176637302", "courierCode": "evri"}]]
+
+
+def test_track123_register_courier_code_lookup_is_case_insensitive(monkeypatch):
+    # carrier_name can come from the dashboard's freeform manual-add field,
+    # so the lookup can't depend on exact casing matching our own detectors.
+    captured_payload = []
+    monkeypatch.setattr(
+        track123,
+        "_post",
+        lambda path, payload: captured_payload.append(payload) or None,
+    )
+
+    track123.register([("H06R4A0176637302", "evri")])
+
+    assert captured_payload == [[{"trackNo": "H06R4A0176637302", "courierCode": "evri"}]]

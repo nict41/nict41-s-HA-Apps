@@ -177,6 +177,11 @@ next scheduled check, showing a live "checked X/Y" count for however long
 it takes. (A manual check always does a full tracking refresh, ignoring the
 refresh throttle described under Settings below.)
 
+A parcel still being tracked (**Needs confirmation**, **In transit**, or
+showing an exception) also has a **Refresh from API** action, which
+re-checks just that parcel against its tracking provider immediately,
+instead of waiting for the next scheduled or throttled check.
+
 The count cards at the top double as section toggles - click one (or a
 section's header) to collapse or expand that section's cards. The choice is
 remembered per browser.

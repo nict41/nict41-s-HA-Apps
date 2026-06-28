@@ -52,7 +52,20 @@ _INSTANT_QUERY_DELAY_SECONDS = 1.05
 # numbers registered, unlike leaving it to auto-detect.
 _COURIER_CODES = {
     "Cainiao / AliExpress Standard Shipping": "cainiao",
+    "Evri": "evri",
 }
+
+
+def _courier_code(carrier_name: str | None) -> str | None:
+    # Case-insensitive because a carrier_name here can come from the
+    # dashboard's freeform manual-add field, not just our own detectors.
+    if not carrier_name:
+        return None
+    folded = carrier_name.casefold()
+    for name, code in _COURIER_CODES.items():
+        if name.casefold() == folded:
+            return code
+    return None
 
 # Track123's transitStatus enum. Anything not listed here (including codes
 # added to the API after this was written) falls back to "in_transit" in
@@ -127,7 +140,7 @@ def register(parcels: list[tuple[str, str | None]]) -> None:
         payload = []
         for number, carrier_name in chunk:
             entry = {"trackNo": number}
-            courier_code = _COURIER_CODES.get(carrier_name)
+            courier_code = _courier_code(carrier_name)
             if courier_code:
                 entry["courierCode"] = courier_code
             payload.append(entry)
