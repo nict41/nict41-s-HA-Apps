@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6
+
+- Fixed the merged stats bar from 0.4.5 dropping back to two stacked rows on
+  narrow screens (≤480px), which defeated the point of merging them. The two
+  tiles now stay side by side at every width.
+
 ## 0.4.5
 
 - Merged the **Timelapses** and **Most recent capture** tiles into a single

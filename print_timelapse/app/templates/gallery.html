@@ -199,8 +199,8 @@
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.001ms !important; } }
-    @media (max-width: 480px) { .stats-bar { flex-direction: column; } .stats-divider { width: auto; height: 1px; margin: 0; } }
     @media (max-width: 640px) { .wrap, .topbar-inner { padding-left: var(--space-4); padding-right: var(--space-4); } }
+    @media (max-width: 480px) { .stat { padding: var(--space-3); } .stat-num { font-size: 1.3rem; } }
   </style>
   <script>
     // Client-side swap for the gear <-> back navigation. Home Assistant
