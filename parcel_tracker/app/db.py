@@ -99,6 +99,10 @@ def init_db() -> None:
             conn.execute("ALTER TABLE parcels ADD COLUMN first_checked_at TEXT")
         if "tracking_history" not in existing_columns:
             conn.execute("ALTER TABLE parcels ADD COLUMN tracking_history TEXT")
+        if "api_diagnostics" not in existing_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN api_diagnostics TEXT")
+        if "api_diagnostics_captured_at" not in existing_columns:
+            conn.execute("ALTER TABLE parcels ADD COLUMN api_diagnostics_captured_at TEXT")
         if "last_checked_at" not in existing_columns:
             # When a tracking provider last returned a result for this parcel,
             # so the provider-refresh phase can throttle how often each parcel
@@ -201,6 +205,12 @@ def _row_to_parcel(row: sqlite3.Row) -> dict:
     # without carrying the (potentially large) html/body along for the ride.
     parcel["has_email"] = bool(parcel.get("email_html") or parcel.get("email_body"))
     parcel.pop("email_html", None)
+    # Same reasoning as has_email/email_html above: api_diagnostics can be a
+    # few KB of redacted request/response JSON per parcel and would bloat
+    # /api/parcels and /export. The diagnostics viewer fetches it on demand
+    # via get_parcel_api_diagnostics() instead.
+    parcel["has_api_diagnostics"] = bool(parcel.get("api_diagnostics"))
+    parcel.pop("api_diagnostics", None)
     return parcel
 
 
@@ -233,6 +243,40 @@ def get_parcel_email(parcel_id: int) -> dict | None:
             (parcel_id,),
         ).fetchone()
         return dict(row) if row else None
+
+
+def get_parcel_api_diagnostics(parcel_id: int) -> dict | None:
+    """The raw (redacted) provider request/response JSON for one parcel,
+    including the data _row_to_parcel strips from the general dict - read on
+    demand by the diagnostics viewer/export routes. Returns None if the
+    parcel doesn't exist (distinct from a parcel that exists but has no
+    diagnostics yet, which returns a dict with api_diagnostics=None)."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT api_diagnostics, api_diagnostics_captured_at FROM parcels WHERE id = ?",
+            (parcel_id,),
+        ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["api_diagnostics"] = json.loads(result["api_diagnostics"]) if result["api_diagnostics"] else None
+        return result
+
+
+def save_api_diagnostics(parcel_id: int, provider_name: str, exchange: dict) -> None:
+    """Persists the redacted raw request/response captured for this parcel's
+    tracking number on this check (see providers/*.py get_raw_exchange()).
+    Only the latest exchange is kept - a diagnostic snapshot of the most
+    recent check, not an audit trail. Deliberately doesn't bump updated_at:
+    capturing diagnostics is incidental to the real tracking check, and
+    bumping it here would silently reorder list_parcels()'s
+    ORDER BY updated_at DESC even when nothing user-visible changed."""
+    payload = json.dumps({"provider": provider_name, **exchange})
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE parcels SET api_diagnostics = ?, api_diagnostics_captured_at = ? WHERE id = ?",
+            (payload, now_iso(), parcel_id),
+        )
 
 
 def _set_fields(parcel_id: int, **fields) -> None:

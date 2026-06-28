@@ -85,6 +85,61 @@ def test_get_parcel_email_returns_none_for_missing_parcel():
     assert db.get_parcel_email(9999) is None
 
 
+def test_api_diagnostics_is_stored_but_kept_out_of_the_general_parcel_dict():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "Widget", 0.9, "msg-1", db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", {"request": {"url": "x"}, "response": {"status": 200}})
+
+    # The raw exchange never rides along with the normal dict, but a cheap
+    # has_api_diagnostics flag does.
+    parcel = db.get_parcel(parcel_id)
+    assert "api_diagnostics" not in parcel
+    assert parcel["has_api_diagnostics"] is True
+
+
+def test_has_api_diagnostics_is_false_before_any_check():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "manual", 1.0, None, db.STATUS_ACTIVE)
+    assert db.get_parcel(parcel_id)["has_api_diagnostics"] is False
+
+
+def test_get_parcel_api_diagnostics_returns_none_for_missing_parcel():
+    assert db.get_parcel_api_diagnostics(9999) is None
+
+
+def test_get_parcel_api_diagnostics_returns_dict_with_none_value_before_any_check():
+    # Distinct from a missing parcel (None outright) - a parcel that exists
+    # but was never checked still gets a dict back, just with no exchange.
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "manual", 1.0, None, db.STATUS_ACTIVE)
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    assert record is not None
+    assert record["api_diagnostics"] is None
+
+
+def test_save_api_diagnostics_overwrites_rather_than_accumulates():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "Widget", 0.9, "msg-1", db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", {"request": {"url": "first"}, "response": {"status": 200}})
+    db.save_api_diagnostics(parcel_id, "track123", {"request": {"url": "second"}, "response": {"status": 200}})
+
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    assert record["api_diagnostics"]["request"]["url"] == "second"
+
+
+def test_save_api_diagnostics_includes_provider_name():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "Widget", 0.9, "msg-1", db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "seventeentrack", {"request": {}, "response": {}})
+
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    assert record["api_diagnostics"]["provider"] == "seventeentrack"
+
+
+def test_save_api_diagnostics_does_not_bump_updated_at():
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "Widget", 0.9, "msg-1", db.STATUS_ACTIVE)
+    updated_at_before = db.get_parcel(parcel_id)["updated_at"]
+
+    db.save_api_diagnostics(parcel_id, "track123", {"request": {}, "response": {}})
+
+    assert db.get_parcel(parcel_id)["updated_at"] == updated_at_before
+
+
 def test_update_tracking_status_stamps_last_checked_at():
     parcel_id = db.upsert_parcel("ABC123", "UPS", "x", 0.9, None, db.STATUS_ACTIVE)
     assert db.get_parcel(parcel_id)["last_checked_at"] is None

@@ -47,22 +47,64 @@ def configured() -> bool:
     return bool(API_KEY)
 
 
+_REDACTED = "<redacted>"
+
+# Set by _post() right after each HTTP call (success or failure) - holds the
+# redacted request and the response. register()/get_track_info() copy it out
+# immediately via _capture() and attribute it to the numbers in the chunk
+# that was just posted, before the next _post() call overwrites it.
+_last_exchange: dict | None = None
+
+# Per-number diagnostics, keyed by stage ("register" / "get_track_info").
+# Read by main.py right after each provider call and persisted to the DB -
+# this in-memory cache only needs to survive that long.
+_raw_exchanges: dict[str, dict[str, dict]] = {}
+
+
+def _redact_headers(headers: dict) -> dict:
+    return {k: (_REDACTED if k.lower() == "17token" else v) for k, v in headers.items()}
+
+
 def _post(path: str, payload: list[dict]) -> dict | None:
+    global _last_exchange
     if not API_KEY:
         return None
+    headers = {"Content-Type": "application/json", "17token": API_KEY}
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{_BASE_URL}/{path}",
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json", "17token": API_KEY},
-    )
+    req = urllib.request.Request(f"{_BASE_URL}/{path}", data=body, method="POST", headers=headers)
+    request_record = {
+        "method": "POST",
+        "url": req.full_url,
+        "headers": _redact_headers(headers),
+        "body": payload,
+    }
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+            parsed = json.loads(resp.read().decode("utf-8"))
+            _last_exchange = {"request": request_record, "response": {"status": resp.status, "body": parsed}}
+            return parsed
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as exc:
+        _last_exchange = {
+            "request": request_record,
+            "response": {"status": getattr(exc, "code", None), "body": str(exc)},
+        }
         print(f"[parcel_tracker] 17track request to '{path}' failed: {exc}")
         return None
+
+
+def _capture(stage: str, numbers, exchange: dict | None) -> None:
+    if exchange is None:
+        return
+    stamped = {**exchange, "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    for number in numbers:
+        _raw_exchanges.setdefault(number, {})[stage] = stamped
+
+
+def get_raw_exchange(number: str) -> dict | None:
+    """The most recently captured register()/get_track_info() exchange(s)
+    for a tracking number, or None if it's never had one. Read by main.py
+    right after a register()/get_track_info() call to persist into the DB."""
+    return _raw_exchanges.get(number)
 
 
 def _chunks(items: list, size: int):
@@ -81,7 +123,9 @@ def register(parcels: list[tuple[str, str | None]]) -> None:
     if not API_KEY or not parcels:
         return
     for chunk in _chunks(parcels, _MAX_NUMBERS_PER_REQUEST):
+        numbers = [number for number, _ in chunk]
         _post("register", [{"number": number, "carrier": 0} for number, _ in chunk])
+        _capture("register", numbers, _last_exchange)
         time.sleep(_REQUEST_DELAY_SECONDS)
 
 
@@ -143,6 +187,7 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
     for chunk in _chunks(tracking_numbers, _MAX_NUMBERS_PER_REQUEST):
         response = _post("gettrackinfo", [{"number": n, "carrier": 0} for n in chunk])
+        _capture("get_track_info", chunk, _last_exchange)
         time.sleep(_REQUEST_DELAY_SECONDS)
         if response is None:
             continue

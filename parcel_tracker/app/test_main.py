@@ -667,6 +667,107 @@ def test_refresh_route_can_auto_dismiss_via_apply_track_info(monkeypatch):
     assert db.get_parcel(parcel_id)["status"] == db.STATUS_DISMISSED
 
 
+_CANNED_EXCHANGE = {
+    "request": {"method": "POST", "url": "https://api.track123.com/gateway/open-api/tk/register",
+                "headers": {"Track123-Api-Secret": "<redacted>"}, "body": [{"number": "ACT1"}]},
+    "response": {"status": 200, "body": {"code": 0}},
+    "captured_at": "2024-01-01T00:00:00Z",
+}
+
+
+def test_dashboard_omits_view_diagnostics_when_never_checked():
+    db.upsert_parcel("PEND123", "Unknown", "manual add", 0.5, None, db.STATUS_PENDING)
+    html = client.get("/").text
+    assert "View API diagnostics" not in html
+
+
+def test_dashboard_shows_view_diagnostics_when_present():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", _CANNED_EXCHANGE)
+    html = client.get("/").text
+    assert "View API diagnostics" in html
+
+
+def test_diagnostics_route_renders_pretty_printed_json_with_strict_csp():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", _CANNED_EXCHANGE)
+
+    resp = client.get(f"/diagnostics/{parcel_id}")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert "register" in body
+    assert "&lt;redacted&gt;" in body
+    csp = resp.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "script-src" not in csp
+    assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+def test_diagnostics_route_handles_parcel_with_no_diagnostics_yet():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    resp = client.get(f"/diagnostics/{parcel_id}")
+    assert resp.status_code == 200
+    assert "No API diagnostics are stored for this parcel yet." in resp.text
+
+
+def test_diagnostics_route_handles_unknown_parcel_id():
+    resp = client.get("/diagnostics/999999")
+    assert resp.status_code == 200
+    assert "No API diagnostics are stored for this parcel yet." in resp.text
+
+
+def test_diagnostics_export_returns_json_with_attachment_header():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", _CANNED_EXCHANGE)
+
+    resp = client.get(f"/diagnostics/{parcel_id}/export")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert f"attachment; filename=parcel-{parcel_id}-api-diagnostics.json" in resp.headers["content-disposition"]
+    assert resp.json()["request"]["headers"]["Track123-Api-Secret"] == "<redacted>"
+
+
+def test_diagnostics_export_404s_for_unknown_parcel():
+    resp = client.get("/diagnostics/999999/export")
+    assert resp.status_code == 404
+
+
+def test_api_and_export_do_not_leak_raw_api_diagnostics():
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    db.save_api_diagnostics(parcel_id, "track123", _CANNED_EXCHANGE)
+
+    api = client.get("/api/parcels").json()
+    assert "api_diagnostics" not in api["parcels"][0]
+    assert api["parcels"][0]["has_api_diagnostics"] is True
+    assert "register" not in client.get("/export").text
+
+
+def test_refresh_route_populates_api_diagnostics(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    _stub_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True)})
+    monkeypatch.setattr(track123, "get_raw_exchange", lambda number: _CANNED_EXCHANGE)
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    assert record["api_diagnostics"]["provider"] == "track123"
+    assert record["api_diagnostics"]["request"]["headers"]["Track123-Api-Secret"] == "<redacted>"
+
+
+def test_run_sync_cycle_populates_api_diagnostics(monkeypatch):
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    _stub_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True)})
+    monkeypatch.setattr(track123, "get_raw_exchange", lambda number: _CANNED_EXCHANGE)
+
+    main.run_sync_cycle()
+
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    assert record["api_diagnostics"]["provider"] == "track123"
+
+
 def test_settings_page_renders_current_values():
     settings.set_many({"poll_interval_minutes": 45, "ignore_senders": "spam.example"})
     html = client.get("/settings").text

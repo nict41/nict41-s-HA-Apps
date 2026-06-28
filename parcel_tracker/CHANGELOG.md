@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.7
+
+- Added a per-parcel **View API diagnostics** action (kebab menu) showing
+  the raw request and response sent to/received from the tracking
+  provider on that parcel's most recent check, plus a **Download** action
+  to export it as JSON - useful for diagnosing cases where a tracking
+  number isn't working (e.g. a provider rejection). Provider API keys are
+  always redacted before being stored, shown, or exported.
+
 ## 0.9.6
 
 - Fixed Evri tracking numbers sometimes being rejected by Track123 at

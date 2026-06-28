@@ -1,3 +1,6 @@
+import json
+import urllib.request
+
 import pytest
 
 from providers import seventeentrack, track123
@@ -8,6 +11,45 @@ def _configured(monkeypatch):
     monkeypatch.setattr(seventeentrack, "API_KEY", "test-key")
     monkeypatch.setattr(track123, "API_KEY", "test-key")
     yield
+
+
+@pytest.fixture
+def _clear_raw_exchanges():
+    seventeentrack._raw_exchanges.clear()
+    track123._raw_exchanges.clear()
+    yield
+    seventeentrack._raw_exchanges.clear()
+    track123._raw_exchanges.clear()
+
+
+class _FakeHTTPResponse:
+    """Minimal stand-in for the context-managed object urlopen() returns -
+    just enough for _post() to read a status code and a JSON body."""
+
+    def __init__(self, status, body):
+        self.status = status
+        self._body = json.dumps(body).encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def _patch_urlopen(monkeypatch, responder):
+    """responder(req) -> (status, body). Patches the real urlopen() (rather
+    than _post() itself, like the tests above) so _post()'s capture side
+    effect - populating _last_exchange - actually runs."""
+
+    def fake_urlopen(req, timeout=15):
+        status, body = responder(req)
+        return _FakeHTTPResponse(status, body)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
 
 def test_seventeentrack_confirms_a_number_the_provider_recognizes(monkeypatch):
@@ -527,3 +569,146 @@ def test_track123_register_courier_code_lookup_is_case_insensitive(monkeypatch):
     track123.register([("H06R4A0176637302", "evri")])
 
     assert captured_payload == [[{"trackNo": "H06R4A0176637302", "courierCode": "evri"}]]
+
+
+def test_seventeentrack_redacts_api_key_in_captured_request(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(seventeentrack.time, "sleep", lambda _s: None)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {}}))
+
+    seventeentrack.register([("REDACT1", None)])
+
+    exchange = seventeentrack.get_raw_exchange("REDACT1")
+    assert exchange["register"]["request"]["headers"]["17token"] == "<redacted>"
+
+
+def test_seventeentrack_attributes_raw_exchange_to_only_the_numbers_in_its_chunk(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(seventeentrack.time, "sleep", lambda _s: None)
+    numbers = [f"N{i:03d}" for i in range(1, 42)]  # 41 forces 2 chunks (_MAX_NUMBERS_PER_REQUEST=40)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {"accepted": []}}))
+
+    seventeentrack.get_track_info(numbers)
+
+    first_body = seventeentrack.get_raw_exchange(numbers[0])["get_track_info"]["request"]["body"]
+    second_body = seventeentrack.get_raw_exchange(numbers[-1])["get_track_info"]["request"]["body"]
+    first_numbers = {entry["number"] for entry in first_body}
+    second_numbers = {entry["number"] for entry in second_body}
+
+    assert numbers[0] in first_numbers
+    assert numbers[-1] not in first_numbers
+    assert numbers[-1] in second_numbers
+    assert numbers[0] not in second_numbers
+
+
+def test_seventeentrack_register_and_get_track_info_captured_independently(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(seventeentrack.time, "sleep", lambda _s: None)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {}}))
+    seventeentrack.register([("IND1", None)])
+
+    exchange = seventeentrack.get_raw_exchange("IND1")
+    assert "register" in exchange
+    assert "get_track_info" not in exchange
+
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {"accepted": []}}))
+    seventeentrack.get_track_info(["IND1"])
+
+    exchange = seventeentrack.get_raw_exchange("IND1")
+    assert "register" in exchange
+    assert "get_track_info" in exchange
+
+
+def test_seventeentrack_get_raw_exchange_returns_none_for_unknown_number():
+    assert seventeentrack.get_raw_exchange("NEVER-SEEN-17TRACK") is None
+
+
+def test_track123_redacts_api_secret_in_captured_request(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {}}))
+
+    track123.register([("REDACT2", None)])
+
+    exchange = track123.get_raw_exchange("REDACT2")
+    assert exchange["register"]["request"]["headers"]["Track123-Api-Secret"] == "<redacted>"
+
+
+def test_track123_attributes_raw_exchange_to_only_the_numbers_in_its_chunk(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+    numbers = [f"T{i:03d}" for i in range(1, 42)]  # 41 forces 2 chunks (_MAX_NUMBERS_PER_REQUEST=40)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {"accepted": {"content": []}}}))
+
+    track123.get_track_info(numbers)
+
+    first_body = track123.get_raw_exchange(numbers[0])["get_track_info"]["request"]["body"]
+    second_body = track123.get_raw_exchange(numbers[-1])["get_track_info"]["request"]["body"]
+    first_numbers = {entry["trackNo"] for entry in first_body["trackNoInfos"]}
+    second_numbers = {entry["trackNo"] for entry in second_body["trackNoInfos"]}
+
+    assert numbers[0] in first_numbers
+    assert numbers[-1] not in first_numbers
+    assert numbers[-1] in second_numbers
+    assert numbers[0] not in second_numbers
+
+
+def test_track123_register_and_get_track_info_captured_independently(monkeypatch, _clear_raw_exchanges):
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {}}))
+    track123.register([("IND2", None)])
+
+    exchange = track123.get_raw_exchange("IND2")
+    assert "register" in exchange
+    assert "get_track_info" not in exchange
+
+    _patch_urlopen(monkeypatch, lambda req: (200, {"data": {"accepted": {"content": []}}}))
+    track123.get_track_info(["IND2"])
+
+    exchange = track123.get_raw_exchange("IND2")
+    assert "register" in exchange
+    assert "get_track_info" in exchange
+
+
+def test_track123_get_raw_exchange_returns_none_for_unknown_number():
+    assert track123.get_raw_exchange("NEVER-SEEN-TRACK123") is None
+
+
+def test_track123_captures_instant_tracking_exchange_separately_from_get_track_info(monkeypatch, _clear_raw_exchanges):
+    # The instant-tracking fallback is a distinct HTTP call from the batch
+    # get_track_info() call that triggered it - both need to be inspectable
+    # on their own, not have one silently overwrite the other.
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    def responder(req):
+        if req.full_url.endswith("track/query-realtime"):
+            return 200, {
+                "data": {
+                    "accepted": {
+                        "trackNo": "INSTANT1",
+                        "localLogisticsInfo": {
+                            "courierNameEN": "Cainiao",
+                            "trackingDetails": [
+                                {"eventDetail": "Departed facility", "eventTime": "2024-01-01T00:00:00Z"}
+                            ],
+                        },
+                    }
+                }
+            }
+        return 200, {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "INSTANT1",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {"courierCode": "cainiao", "courierNameEN": "Cainiao"},
+                        }
+                    ]
+                }
+            }
+        }
+
+    _patch_urlopen(monkeypatch, responder)
+
+    track123.get_track_info(["INSTANT1"])
+
+    exchange = track123.get_raw_exchange("INSTANT1")
+    assert "get_track_info" in exchange
+    assert "get_track_info_instant" in exchange
+    assert exchange["get_track_info"]["request"]["body"] != exchange["get_track_info_instant"]["request"]["body"]

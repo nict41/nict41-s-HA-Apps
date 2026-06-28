@@ -783,6 +783,15 @@
   {% endif %}
   {% endmacro %}
 
+  {% macro view_diagnostics_item(p) %}
+  {% if p.has_api_diagnostics %}
+  <button type="button" class="kebab-item view-diagnostics" role="menuitem"
+          data-parcel-id="{{ p.id }}" data-tracking-number="{{ p.tracking_number }}">
+    <svg aria-hidden="true"><use href="#i-info"/></svg>View API diagnostics
+  </button>
+  {% endif %}
+  {% endmacro %}
+
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">
@@ -898,6 +907,7 @@
                 </form>
                 {% endif %}
                 {{ view_email_item(p) }}
+                {{ view_diagnostics_item(p) }}
                 <form action="dismiss" method="post" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
                   <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-x"/></svg>Not a parcel</button>
@@ -944,6 +954,7 @@
                 </form>
                 {% endif %}
                 {{ view_email_item(p) }}
+                {{ view_diagnostics_item(p) }}
                 <form action="reset" method="post" class="reset-form" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
                   <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
@@ -988,6 +999,7 @@
               <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
               {% call kebab() %}
                 {{ view_email_item(p) }}
+                {{ view_diagnostics_item(p) }}
                 <form action="reset" method="post" class="reset-form" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
                   <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
@@ -1028,6 +1040,7 @@
               <a class="btn btn-sm" href="{{ get_tracking_url(p.tracking_number) }}" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-external"/></svg>Track</a>
               {% call kebab() %}
                 {{ view_email_item(p) }}
+                {{ view_diagnostics_item(p) }}
                 <form action="reset" method="post" class="reset-form" role="menuitem">
                   <input type="hidden" name="parcel_id" value="{{ p.id }}" />
                   <button class="kebab-item" type="submit"><svg aria-hidden="true"><use href="#i-reset"/></svg>Reset</button>
@@ -1080,6 +1093,22 @@
       <button type="button" class="btn btn-sm btn-icon" id="email-dialog-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
     </div>
     <iframe id="email-frame" class="email-frame" sandbox referrerpolicy="no-referrer" title="Source email"></iframe>
+  </dialog>
+
+  <!-- API diagnostics viewer. Shows the most recently captured raw provider
+       request/response for a parcel, loaded into a sandboxed iframe pointed
+       at /diagnostics/{id} - provider API secrets are already redacted at
+       capture time, never here. -->
+  <dialog id="diagnostics-dialog" class="email-dialog" aria-label="API diagnostics">
+    <div class="email-dialog-head">
+      <div class="email-dialog-meta">
+        <div class="email-dialog-subject" id="diagnostics-dialog-subject"></div>
+        <div class="email-dialog-sender">Raw provider request/response (secrets redacted)</div>
+      </div>
+      <a class="btn btn-sm" id="diagnostics-export-link" download><svg aria-hidden="true"><use href="#i-external"/></svg>Download</a>
+      <button type="button" class="btn btn-sm btn-icon" id="diagnostics-dialog-close" aria-label="Close"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <iframe id="diagnostics-frame" class="email-frame" sandbox referrerpolicy="no-referrer" title="API diagnostics"></iframe>
   </dialog>
 
   <script>
@@ -1375,6 +1404,30 @@
     emailDialog.addEventListener("close", function () {
       emailFrame.src = "about:blank";
       currentEmailId = null;
+    });
+
+    // ---- API diagnostics viewer -----------------------------------------
+    var diagnosticsDialog = document.getElementById("diagnostics-dialog");
+    var diagnosticsFrame = document.getElementById("diagnostics-frame");
+    var diagnosticsSubject = document.getElementById("diagnostics-dialog-subject");
+    var diagnosticsExportLink = document.getElementById("diagnostics-export-link");
+
+    document.querySelectorAll(".view-diagnostics").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        closeAllKebabs(null);
+        var id = btn.dataset.parcelId;
+        diagnosticsSubject.textContent = btn.dataset.trackingNumber || "";
+        diagnosticsFrame.src = "diagnostics/" + encodeURIComponent(id);
+        diagnosticsExportLink.href = "diagnostics/" + encodeURIComponent(id) + "/export";
+        if (typeof diagnosticsDialog.showModal === "function") diagnosticsDialog.showModal();
+        else diagnosticsDialog.setAttribute("open", "");
+      });
+    });
+    document.getElementById("diagnostics-dialog-close").addEventListener("click", function () {
+      diagnosticsDialog.close();
+    });
+    diagnosticsDialog.addEventListener("close", function () {
+      diagnosticsFrame.src = "about:blank";
     });
 
     // ---- Collapsible sections ------------------------------------------

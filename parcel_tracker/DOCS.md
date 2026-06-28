@@ -166,6 +166,14 @@ that opens the original message rendered as it was sent. Remote images
 images**, and the message is shown in a locked-down sandbox with scripts
 disabled, so opening one is safe.
 
+Any parcel that's been checked against a tracking provider at least once
+also has a **View API diagnostics** action, which shows the raw request and
+response from that parcel's most recent check - handy for working out why a
+tracking number isn't behaving (a provider rejecting it, an unexpected
+response shape, and so on) without digging through logs. A **Download**
+button next to it exports the same data as a JSON file. Provider API keys
+are always redacted before this data is stored, shown, or exported.
+
 Every tracked parcel also has a **Reset** action, which puts it back into
 **Needs confirmation** and clears its tracking status - useful if a parcel
 got mismatched to the wrong carrier, or you just want it re-checked from

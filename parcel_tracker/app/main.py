@@ -107,6 +107,12 @@ def _apply_track_info(parcel: dict, info: dict, provider_name: str, dismiss_afte
     )
 
 
+def _save_diagnostics(parcel_id: int, number: str, provider_name: str, mod) -> None:
+    exchange = mod.get_raw_exchange(number)
+    if exchange:
+        db.save_api_diagnostics(parcel_id, provider_name, exchange)
+
+
 def _refresh_one_parcel(parcel: dict) -> None:
     """On-demand single-parcel re-check, bypassing the provider-refresh
     throttle entirely - for the dashboard's per-parcel "Refresh from API"
@@ -122,6 +128,7 @@ def _refresh_one_parcel(parcel: dict) -> None:
     number = parcel["tracking_number"]
     mod.register([(number, parcel["carrier_name"])])
     info = mod.get_track_info([number]).get(number)
+    _save_diagnostics(parcel["id"], number, provider_name, mod)
     if info:
         _apply_track_info(parcel, info, provider_name, settings.get_int("dismiss_unconfirmed_after_days"))
     ha_sync.sync(db.list_parcels())
@@ -156,6 +163,7 @@ def run_sync_cycle(force_refresh: bool = False) -> None:
             track_info = mod.get_track_info(numbers)
             for parcel in parcels:
                 info = track_info.get(parcel["tracking_number"])
+                _save_diagnostics(parcel["id"], parcel["tracking_number"], provider_name, mod)
                 sync_progress.increment()
                 if not info:
                     continue
@@ -436,6 +444,52 @@ async def email_view(parcel_id: int, images: int = 0):
             "Referrer-Policy": "no-referrer",
             "Cache-Control": "no-store",
         },
+    )
+
+
+@app.get("/diagnostics/{parcel_id}")
+async def diagnostics_view(parcel_id: int):
+    # Renders a parcel's most recently captured provider request/response -
+    # helps diagnose why a number's tracking isn't working (provider
+    # rejection, unexpected response shape, etc.) without reading source
+    # code. Secrets are already redacted at capture time in the provider
+    # module, never here. Lenient like /email: a missing parcel or one with
+    # no diagnostics yet both render the same "nothing stored" message.
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    if record and record["api_diagnostics"]:
+        pretty = json.dumps(record["api_diagnostics"], indent=2)
+        body = (
+            "<pre style=\"white-space:pre-wrap;word-break:break-word;"
+            "font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;margin:0\">"
+            f"{html.escape(pretty)}</pre>"
+        )
+    else:
+        body = (
+            "<p style=\"color:#888;font-family:sans-serif\">"
+            "No API diagnostics are stored for this parcel yet.</p>"
+        )
+    return Response(
+        content=email_render.render_document(body),
+        media_type="text/html; charset=utf-8",
+        headers={
+            "Content-Security-Policy": email_render.content_security_policy(False),
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.get("/diagnostics/{parcel_id}/export")
+async def diagnostics_export(parcel_id: int):
+    record = db.get_parcel_api_diagnostics(parcel_id)
+    if not record:
+        return Response(status_code=404)
+    payload = json.dumps(record["api_diagnostics"], indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename=parcel-{parcel_id}-api-diagnostics.json"},
     )
 
 
