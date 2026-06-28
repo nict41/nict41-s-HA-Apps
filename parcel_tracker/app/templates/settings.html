@@ -210,7 +210,7 @@
 
         <div class="field">
           <div class="field-label">Check email every</div>
-          <div class="field-help">How often mailboxes are scanned and tracking is refreshed. Applies immediately.</div>
+          <div class="field-help">How often mailboxes are scanned and tracking is refreshed. Applies immediately. Dashboard actions (confirm, archive, delete, etc.) always update Home Assistant sensors right away, regardless of this interval.</div>
           <div class="field-control">
             <input type="number" name="poll_interval_minutes" min="5" max="1440" required value="{{ settings.poll_interval_minutes }}" />
             <span class="field-unit">minutes</span>

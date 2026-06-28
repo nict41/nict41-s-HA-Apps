@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import db
+import ha_sync
 import main
 import settings
 import sync_progress
@@ -155,6 +156,43 @@ def test_admin_reset_all_does_nothing_without_exact_confirmation():
     client.post("/admin/reset-all", data={"confirm_text": "reset"})
     client.post("/admin/reset-all", data={})
     assert len(db.list_parcels()) == 1
+
+
+def test_mutating_routes_sync_to_ha_immediately(monkeypatch):
+    # Dashboard actions used to only reach Home Assistant on the next
+    # scheduled mail-sync cycle (up to poll_interval_minutes later), since
+    # ha_sync.sync() was only ever called from run_sync_cycle(). Each
+    # mutating route must now call it itself so HA sensors reflect the
+    # change as soon as the request completes.
+    calls = []
+    monkeypatch.setattr(main.ha_sync, "sync", lambda parcels: calls.append(parcels))
+
+    parcel_id = db.upsert_parcel("ABC123", "UPS", "test", 0.5, None, db.STATUS_PENDING)
+    client.post("/confirm", data={"parcel_id": parcel_id})
+    client.post("/dismiss", data={"parcel_id": parcel_id})
+    client.post("/archive", data={"parcel_id": parcel_id})
+    client.post("/reset", data={"parcel_id": parcel_id})
+    client.post("/delete", data={"parcel_id": parcel_id})
+    client.post(
+        "/add",
+        data={"tracking_number": "1Z999AA10123456784", "carrier_name": "UPS", "description": "Cables"},
+    )
+    client.post("/admin/reset-all", data={"confirm_text": "RESET"})
+    assert len(calls) == 7
+
+
+def test_add_parcel_blank_tracking_number_does_not_sync_to_ha(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main.ha_sync, "sync", lambda parcels: calls.append(parcels))
+    client.post("/add", data={"tracking_number": "  "})
+    assert calls == []
+
+
+def test_admin_reset_all_does_not_sync_to_ha_without_exact_confirmation(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main.ha_sync, "sync", lambda parcels: calls.append(parcels))
+    client.post("/admin/reset-all", data={"confirm_text": "reset"})
+    assert calls == []
 
 
 def test_export_returns_json_attachment_of_all_parcels():

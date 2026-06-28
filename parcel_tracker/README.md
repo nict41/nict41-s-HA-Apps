@@ -97,7 +97,7 @@ The remaining options apply across all configured mailboxes:
 | Option | Default | Description |
 |---|---|---|
 | `lookback_days` | `14` | How far back to scan emails on each check. |
-| `poll_interval_minutes` | `30` | How often to check mail and refresh status. |
+| `poll_interval_minutes` | `30` | How often to check mail and refresh status. Dashboard actions (confirm, archive, delete, etc.) update Home Assistant sensors immediately regardless of this interval. |
 | `auto_archive_after_days` | `14` | Auto-archive parcels this many days after delivery. `0` disables. |
 | `dismiss_unconfirmed_after_days` | `3` | Auto-dismiss a candidate this many days after a tracking provider first checks it without ever confirming it's a real number. `0` disables. Only applies when a tracking provider is configured. |
 | `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
@@ -265,16 +265,24 @@ property.
    title: Parcels
    ```
 
-The card groups parcels into Needs confirmation / In transit / Delivered,
-same as the app's own dashboard, with a link out to each carrier's
-tracking page per parcel. Click a row to expand its full tracking
-history, fetched on demand from the add-on's own `/api/parcels`
-endpoint - the entity attribute only ever carries each parcel's latest
-status, since a full per-event history for every parcel wouldn't fit
-within Home Assistant's attribute size limit. This reuses the same
-origin (the add-on's direct port) the card's own script was loaded
-from, so it works wherever the card itself already loads, with nothing
-extra to configure.
+The card mirrors the app's own dashboard: parcels are grouped into
+collapsible Needs confirmation / In transit / Delivered / Archived
+sections (collapsed state persists per-browser), each row shows a
+progress stepper, carrier/ETA chips, and a confidence meter while
+unconfirmed, with a link out to each carrier's tracking page. Click a
+row to expand its full tracking history, fetched on demand from the
+add-on's own `/api/parcels` endpoint - the entity attribute only ever
+carries each parcel's latest status, since a full per-event history for
+every parcel wouldn't fit within Home Assistant's attribute size limit.
+The Archived section is also sourced from `/api/parcels`, since archived
+and dismissed parcels aren't synced to Home Assistant at all (see
+above). Both reuse the same origin (the add-on's direct port) the
+card's own script was loaded from, so it works wherever the card itself
+already loads, with nothing extra to configure.
+
+The card is read-only by design - it only ever reads parcel data, never
+confirms, archives, or deletes anything. Use the app's own dashboard
+(or its ingress panel) for those actions.
 
 ## Storage
 

@@ -85,11 +85,13 @@
     .btn-icon { padding: 0.45rem; }
     .btn-icon svg { width: 17px; height: 17px; }
 
-    /* Stat tiles */
-    .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3);
-      margin: var(--space-5) 0; }
-    .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: var(--space-4); box-shadow: var(--shadow-sm); }
+    /* Stat tiles: one bordered/shadowed bar with two cells split by a
+       divider, rather than two separate cards, so the summary reads as a
+       single unit and costs half the visual weight. */
+    .stats-bar { display: flex; align-items: stretch; background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-sm); margin: var(--space-5) 0; overflow: hidden; }
+    .stats-divider { width: 1px; flex: none; background: var(--border); margin: var(--space-3) 0; }
+    .stat { flex: 1; min-width: 0; padding: var(--space-4); }
     .stat-num { font-size: 1.55rem; font-weight: 680; letter-spacing: -0.02em;
       font-variant-numeric: tabular-nums; line-height: 1.1; }
     .stat-label { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.45rem;
@@ -103,11 +105,19 @@
 
     /* Section headers */
     .section-head { display: flex; align-items: center; gap: 0.5rem; margin: var(--space-6) 0 var(--space-3); }
+    .section-head[role="button"] { cursor: pointer; border-radius: var(--radius-sm); }
+    .section-head[role="button"]:hover h2 { color: var(--text); }
+    .section-head:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
     .section-head h2 { font-size: 0.82rem; font-weight: 650; letter-spacing: 0.04em;
       text-transform: uppercase; color: var(--text-muted); margin: 0; }
     .section-count { font-size: 0.72rem; font-weight: 600; color: var(--text-faint);
       font-variant-numeric: tabular-nums; background: var(--surface-2); border: 1px solid var(--border);
       border-radius: var(--radius-pill); padding: 0.05rem 0.5rem; }
+    .section-chevron { color: var(--text-faint); transition: transform 0.18s ease; display: inline-flex; }
+    .section-chevron svg { width: 15px; height: 15px; display: block; }
+    .section.is-collapsed .section-chevron { transform: rotate(-90deg); }
+    .section.is-collapsed .grid,
+    .section.is-collapsed .empty { display: none; }
 
     /* In-progress jobs */
     .job { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -189,7 +199,8 @@
 
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation-duration: 0.001ms !important; } }
-    @media (max-width: 640px) { .stats { grid-template-columns: 1fr; } .wrap, .topbar-inner { padding-left: var(--space-4); padding-right: var(--space-4); } }
+    @media (max-width: 480px) { .stats-bar { flex-direction: column; } .stats-divider { width: auto; height: 1px; margin: 0; } }
+    @media (max-width: 640px) { .wrap, .topbar-inner { padding-left: var(--space-4); padding-right: var(--space-4); } }
   </style>
   <script>
     // Client-side swap for the gear <-> back navigation. Home Assistant
@@ -256,6 +267,7 @@
     <symbol id="i-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></symbol>
     <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></symbol>
     <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -273,11 +285,12 @@
   </header>
 
   <div class="wrap">
-    <div class="stats">
+    <div class="stats-bar">
       <div class="stat">
         <div class="stat-num">{{ gifs|length }}</div>
         <div class="stat-label"><svg aria-hidden="true"><use href="#i-film"/></svg>Timelapses<span class="stat-sub">&middot; <span data-bytes="{{ total_bytes }}">{{ total_bytes }}</span> stored</span></div>
       </div>
+      <div class="stats-divider"></div>
       <div class="stat" id="recent-stat">
         <div class="stat-num" id="recent-value">{% if latest %}<time data-iso="{{ latest }}">{{ latest }}</time>{% else %}&mdash;{% endif %}</div>
         <div class="stat-label" id="recent-label"><svg aria-hidden="true"><use href="#i-clock"/></svg>Most recent capture</div>
@@ -305,30 +318,32 @@
       {% endfor %}
     </div>
 
-    <div class="section-head"><h2>Archive</h2><span class="section-count">{{ gifs|length }}</span></div>
-    {% if not gifs %}
-    <div class="empty"><svg aria-hidden="true"><use href="#i-film"/></svg>No timelapses archived yet. Finish a print job and it'll show up here.</div>
-    {% else %}
-    <div class="grid">
-      {% for gif in gifs %}
-      <div class="card">
-        <div class="card-img" data-gif="archive/{{ gif.filename }}" role="button" tabindex="0" aria-label="Play {{ gif.filename }}">
-          <canvas class="poster"></canvas>
-          <button type="button" class="play-btn" tabindex="-1" aria-hidden="true"><svg aria-hidden="true"><use href="#i-play"/></svg></button>
-        </div>
-        <div class="card-body">
-          <div class="card-name">{{ gif.filename }}</div>
-          <div class="card-meta">
-            <time data-iso="{{ gif.created }}">{{ gif.created }}</time>
-            <span class="dot">&middot;</span>
-            <span data-bytes="{{ gif.size_bytes }}">{{ gif.size_bytes }}</span>
+    <div class="section" id="archive-section">
+      <div class="section-head" role="button" tabindex="0" aria-controls="archive-section"><span class="section-chevron" aria-hidden="true"><svg><use href="#i-chevron"/></svg></span><h2>Archive</h2><span class="section-count">{{ gifs|length }}</span></div>
+      {% if not gifs %}
+      <div class="empty"><svg aria-hidden="true"><use href="#i-film"/></svg>No timelapses archived yet. Finish a print job and it'll show up here.</div>
+      {% else %}
+      <div class="grid">
+        {% for gif in gifs %}
+        <div class="card">
+          <div class="card-img" data-gif="archive/{{ gif.filename }}" role="button" tabindex="0" aria-label="Play {{ gif.filename }}">
+            <canvas class="poster"></canvas>
+            <button type="button" class="play-btn" tabindex="-1" aria-hidden="true"><svg aria-hidden="true"><use href="#i-play"/></svg></button>
           </div>
-          <a class="card-dl" href="archive/{{ gif.filename }}" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          <div class="card-body">
+            <div class="card-name">{{ gif.filename }}</div>
+            <div class="card-meta">
+              <time data-iso="{{ gif.created }}">{{ gif.created }}</time>
+              <span class="dot">&middot;</span>
+              <span data-bytes="{{ gif.size_bytes }}">{{ gif.size_bytes }}</span>
+            </div>
+            <a class="card-dl" href="archive/{{ gif.filename }}" download><svg aria-hidden="true"><use href="#i-download"/></svg>Download</a>
+          </div>
         </div>
+        {% endfor %}
       </div>
-      {% endfor %}
+      {% endif %}
     </div>
-    {% endif %}
     <div id="vt-ready"></div>
   </div>
 
@@ -371,6 +386,39 @@
       });
     }
     formatAll();
+
+    // ---- Collapsible Archive section ------------------------------------
+    // State persists per-browser so a collapsed Archive stays collapsed
+    // across reloads and across the gallery <-> settings SPA navigation.
+    (function () {
+      var STORAGE_KEY = "timelapse-collapsed-sections";
+      var collapsed;
+      try { collapsed = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+      catch (e) { collapsed = {}; }
+
+      document.querySelectorAll(".section .section-head[role='button']").forEach(function (head) {
+        var section = head.closest(".section");
+        if (!section || !section.id) return;
+        var id = section.id;
+
+        function apply() {
+          var isCollapsed = !!collapsed[id];
+          section.classList.toggle("is-collapsed", isCollapsed);
+          head.setAttribute("aria-expanded", String(!isCollapsed));
+        }
+        function toggle() {
+          collapsed[id] = !collapsed[id];
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(collapsed)); } catch (e) {}
+          apply();
+        }
+
+        head.addEventListener("click", toggle);
+        head.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+        });
+        apply();
+      });
+    })();
 
     // ---- Play-on-demand GIFs -------------------------------------------
     // GIFs autoplay and can't be paused natively, which is distracting in a

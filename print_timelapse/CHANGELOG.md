@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.5
+
+- Merged the **Timelapses** and **Most recent capture** tiles into a single
+  bordered bar with an internal divider, instead of two separate cards, to
+  cut the visual weight of the summary row in half.
+- The **Archive** section is now collapsible (chevron in its header), like
+  the **Capturing now** kebab patterns elsewhere in the gallery. Collapsed
+  state persists per-browser across reloads.
+
 ## 0.4.4
 
 - The gallery ↔ settings flash from 0.4.3 could still appear intermittently,

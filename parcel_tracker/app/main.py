@@ -320,36 +320,42 @@ async def add_parcel(
             source_message_id=None,
             initial_status=db.STATUS_ACTIVE,
         )
+        ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
 @app.post("/confirm")
 async def confirm(parcel_id: int = Form(...)):
     db.confirm_parcel(parcel_id)
+    ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
 @app.post("/dismiss")
 async def dismiss(parcel_id: int = Form(...)):
     db.dismiss_parcel(parcel_id)
+    ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
 @app.post("/archive")
 async def archive(parcel_id: int = Form(...)):
     db.archive_parcel(parcel_id)
+    ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
 @app.post("/delete")
 async def delete(parcel_id: int = Form(...)):
     db.delete_parcel(parcel_id)
+    ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
 @app.post("/reset")
 async def reset(parcel_id: int = Form(...)):
     db.reset_parcel(parcel_id)
+    ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 
@@ -361,6 +367,7 @@ async def admin_reset_all(confirm_text: str = Form("")):
     # shouldn't be enough on its own to trigger it.
     if confirm_text.strip() == "RESET":
         db.reset_all_data()
+        ha_sync.sync(db.list_parcels())
     return RedirectResponse("./", status_code=303)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.5
+
+- The Lovelace card now mirrors the dashboard: collapsible/expandable
+  **Needs confirmation / In transit / Delivered** groups (state persists
+  per-browser), a progress stepper, a confidence meter on unconfirmed
+  parcels, carrier/ETA/delivered chips, and humanized relative timestamps.
+  A new **Archived** group lists archived/dismissed parcels, sourced from
+  the existing `/api/parcels` endpoint. The card stays strictly read-only -
+  it still has no write actions, matching the add-on's existing CORS
+  boundary that only exposes read-only routes cross-origin.
+- Dashboard actions (confirm, dismiss, archive, delete, reset, manual add,
+  and the data-management reset-all) now update Home Assistant sensors
+  immediately instead of waiting for the next scheduled mail check, which
+  could be up to `poll_interval_minutes` later. The mail-check interval
+  still governs how often mailboxes are actually scanned.
+
 ## 0.9.4
 
 - The dashboard ↔ settings flash from 0.9.3 could still appear
