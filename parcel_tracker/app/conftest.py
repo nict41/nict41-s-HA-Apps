@@ -15,8 +15,14 @@ os.environ.setdefault("SEVENTEENTRACK_API_KEY", "")
 os.environ.setdefault("TRACK123_API_KEY", "")
 os.environ.setdefault("SUPERVISOR_TOKEN", "")
 
+# Same reasoning as DATA_DIR above: must be set before `main` is imported,
+# since main.py resolves HA_WWW_DIR into a module-level path at import time.
+_TMP_HA_WWW_DIR = tempfile.mkdtemp(prefix="parcel-tracker-test-www-")
+os.environ["HA_WWW_DIR"] = _TMP_HA_WWW_DIR
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_data_dir():
     yield
     shutil.rmtree(_TMP_DATA_DIR, ignore_errors=True)
+    shutil.rmtree(_TMP_HA_WWW_DIR, ignore_errors=True)

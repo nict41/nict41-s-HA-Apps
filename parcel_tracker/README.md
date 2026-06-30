@@ -251,19 +251,48 @@ A companion dashboard card ships with the add-on. It reads the parcel
 list from `sensor.parcel_tracker_summary` via the card's normal `hass`
 property.
 
-1. Make sure direct port access is enabled for the add-on (**Settings →
-   Add-ons → Parcel Tracker**, the port row next to `8000`) - the card
-   is served from the add-on's direct port rather than its ingress URL,
-   since ingress paths are session-scoped and can't be used as a stable
-   Lovelace resource URL.
+### Recommended: serve from Home Assistant's own `/local/` path
+
+The add-on automatically copies the card's JavaScript file into Home
+Assistant's `/config/www/` folder on startup (and again whenever it
+changes, on an upgrade), so it's reachable at a normal HA frontend URL -
+this works through whatever remote-access setup Home Assistant itself is
+reachable through (a Cloudflare Tunnel, Nabu Casa, etc.), not just the
+local network the add-on's own direct port is limited to.
+
+1. If you're upgrading from an older version, restart the add-on once so
+   its newly-required `/config` write access takes effect.
 2. **Settings → Dashboards → Resources → Add resource**. URL:
-   `http://<home-assistant-host-or-ip>:8000/static/parcel-tracker-card.js`,
-   resource type **JavaScript module**.
+   `/local/parcel-tracker-card.js`, resource type **JavaScript module**.
 3. Edit a dashboard, add a card, choose **Manual**, and use:
    ```yaml
    type: custom:parcel-tracker-card
    title: Parcels
    ```
+
+Because `/local/` is served by Home Assistant itself rather than the
+add-on, the card needs to be told where the add-on actually lives for its
+on-demand fetches (the Archived group and a row's full tracking history -
+see below). Add `api_base` pointing at the add-on's direct port:
+```yaml
+type: custom:parcel-tracker-card
+title: Parcels
+api_base: "http://<home-assistant-host-or-ip>:8000"
+```
+
+### Fallback: the add-on's direct port
+
+If you'd rather not grant the add-on write access to `/config`, or just
+haven't restarted yet, the card is still served from the add-on's own
+direct port too, exactly as before (no `api_base` needed - this method
+only works on the local network, not through remote access):
+
+1. Make sure direct port access is enabled for the add-on (**Settings →
+   Add-ons → Parcel Tracker**, the port row next to `8000`).
+2. **Settings → Dashboards → Resources → Add resource**. URL:
+   `http://<home-assistant-host-or-ip>:8000/static/parcel-tracker-card.js`,
+   resource type **JavaScript module**.
+3. Same manual card step as above.
 
 The card mirrors the app's own dashboard: parcels are grouped into
 collapsible Needs confirmation / In transit / Delivered / Archived
@@ -276,9 +305,10 @@ carries each parcel's latest status, since a full per-event history for
 every parcel wouldn't fit within Home Assistant's attribute size limit.
 The Archived section is also sourced from `/api/parcels`, since archived
 and dismissed parcels aren't synced to Home Assistant at all (see
-above). Both reuse the same origin (the add-on's direct port) the
-card's own script was loaded from, so it works wherever the card itself
-already loads, with nothing extra to configure.
+above). When installed via the direct-port fallback, both reuse the same
+origin the card's own script was loaded from, so it works with nothing
+extra to configure; when installed via `/local/`, they use the `api_base`
+URL set above instead.
 
 The card is read-only by design - it only ever reads parcel data, never
 confirms, archives, or deletes anything. Use the app's own dashboard

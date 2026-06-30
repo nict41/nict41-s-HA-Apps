@@ -20,10 +20,19 @@
 // local network that can reach it.
 //
 // Install: Settings -> Dashboards -> Resources -> Add resource, URL
-// `http://<home-assistant-host>:8000/static/parcel-tracker-card.js`
-// (the add-on's direct port, not its ingress URL - ingress paths are
+// `/local/parcel-tracker-card.js` (the add-on auto-publishes this file into
+// Home Assistant's /config/www on startup) or, as a fallback,
+// `http://<home-assistant-host>:8000/static/parcel-tracker-card.js` (the
+// add-on's direct port, not its ingress URL - ingress paths are
 // session-scoped and can't be used as a stable Lovelace resource), type
 // JavaScript Module. Then add a card with `type: custom:parcel-tracker-card`.
+//
+// When installed via `/local/`, the on-demand `/api/parcels` fetch below
+// can no longer rely on SCRIPT_ORIGIN (it resolves to Home Assistant's own
+// origin, not the add-on's) - set `api_base` in the card config to the
+// add-on's direct-port URL, e.g. `api_base: "http://<host>:8000"`, to keep
+// the Archived group and tracking-history expand working. Not needed when
+// installed via the direct-port fallback above.
 
 // Resolved once at load time from this script's own <script> tag, not
 // `import.meta.url`. Home Assistant's resource loader (loadModule/loadJS)
@@ -475,7 +484,7 @@ class ParcelTrackerCard extends HTMLElement {
   _ensureHistoryLoaded() {
     if (this._historyState === "loading" || this._historyState === "loaded") return;
     this._historyState = "loading";
-    fetch(`${SCRIPT_ORIGIN}/api/parcels`)
+    fetch(`${this._config.api_base || SCRIPT_ORIGIN}/api/parcels`)
       .then((resp) => {
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         return resp.json();

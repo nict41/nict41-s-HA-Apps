@@ -1,5 +1,5 @@
 name: "Parcel Tracker"
-version: "0.9.7"
+version: "0.9.8"
 slug: "parcel_tracker"
 description: "Automatically detects tracking numbers from your email and tracks deliveries"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/parcel_tracker"
@@ -17,6 +17,8 @@ ports:
   8000/tcp: null
 ports_description:
   8000/tcp: "Parcel Tracker dashboard (optional direct access)"
+map:
+  - config:rw
 options:
   mailboxes: []
   lookback_days: 14

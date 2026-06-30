@@ -1,5 +1,6 @@
 import html
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -27,6 +28,41 @@ from providers import seventeentrack, track123
 _SYNC_JOB_ID = "sync_cycle"
 
 APP_DIR = Path(__file__).resolve().parent
+
+# Where Home Assistant serves unauthenticated static files from
+# (/config/www/<file> -> http://<ha-host>/local/<file>). Overridable via env
+# var for tests, same pattern as db.DATA_DIR. Only writable once the add-on
+# has been granted `config:rw` in config.yaml - added so the Lovelace card
+# can be served from HA's own frontend origin, which (unlike the add-on's
+# direct port) is reachable through any remote-access setup HA itself is
+# reachable through, e.g. a Cloudflare Tunnel.
+HA_WWW_DIR = Path(os.environ.get("HA_WWW_DIR", "/config/www"))
+_CARD_JS_NAME = "parcel-tracker-card.js"
+
+
+def _publish_card_to_ha_www() -> None:
+    """Copies the Lovelace card into Home Assistant's /config/www so it can
+    be added as a `/local/parcel-tracker-card.js` resource. Best-effort: on
+    a fresh install `config:rw` may not be granted yet, or the user may have
+    declined it and kept the direct-port method instead - either way this
+    must never stop the app from starting. Compares full file contents
+    (cheap at ~25KB) rather than mtime, so upgrades to the card propagate on
+    next restart while an unchanged file does zero writes."""
+    src = APP_DIR / "static" / _CARD_JS_NAME
+    dest = HA_WWW_DIR / _CARD_JS_NAME
+    try:
+        if dest.exists() and dest.read_bytes() == src.read_bytes():
+            return
+        HA_WWW_DIR.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(src.read_bytes())
+        print(f"[parcel_tracker] Published Lovelace card to {dest}")
+    except OSError as exc:
+        print(
+            f"[parcel_tracker] Could not publish Lovelace card to {dest}: {exc} "
+            "- the add-on may not have config:rw access yet (restart after "
+            "upgrading), or you may be using the direct-port URL instead."
+        )
+
 
 db.init_db()
 
@@ -187,6 +223,7 @@ def run_sync_cycle(force_refresh: bool = False) -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _publish_card_to_ha_www()
     scheduler.add_job(
         run_sync_cycle,
         "interval",

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.8
+
+- The Lovelace card is now also published to Home Assistant's own
+  `/config/www/` folder on startup, so it can be added as a
+  `/local/parcel-tracker-card.js` Lovelace resource instead of the add-on's
+  direct-port URL - this works through whatever remote-access setup Home
+  Assistant itself is reachable through (a Cloudflare Tunnel, Nabu Casa,
+  etc.), not just the local network. This needs a new `config:rw`
+  permission; if you're upgrading from an older version, restart the add-on
+  once so it takes effect. The old direct-port method still works unchanged
+  as a fallback. Added an `api_base` card-config option needed alongside
+  the new `/local/` method so the card's Archived group and tracking-history
+  expand can still reach the add-on directly.
+
 ## 0.9.7
 
 - Added a per-parcel **View API diagnostics** action (kebab menu) showing

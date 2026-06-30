@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -51,6 +52,32 @@ def test_static_card_js_allows_cross_origin_requests():
 def test_dashboard_route_does_not_get_the_static_cors_header():
     resp = client.get("/")
     assert "access-control-allow-origin" not in resp.headers
+
+
+def test_publishes_card_js_to_ha_www_dir_on_startup():
+    main._publish_card_to_ha_www()
+    published = main.HA_WWW_DIR / "parcel-tracker-card.js"
+    assert published.exists()
+    assert published.read_bytes() == (main.APP_DIR / "static" / "parcel-tracker-card.js").read_bytes()
+
+
+def test_republishing_unchanged_card_js_does_not_rewrite_the_file():
+    main._publish_card_to_ha_www()
+    published = main.HA_WWW_DIR / "parcel-tracker-card.js"
+    first_mtime = published.stat().st_mtime_ns
+    main._publish_card_to_ha_www()
+    assert published.stat().st_mtime_ns == first_mtime
+
+
+def test_publish_card_js_does_not_crash_when_ha_www_dir_is_unwritable(monkeypatch, tmp_path):
+    readonly_parent = tmp_path / "readonly"
+    readonly_parent.mkdir()
+    os.chmod(readonly_parent, 0o444)
+    monkeypatch.setattr(main, "HA_WWW_DIR", readonly_parent / "www")
+    try:
+        main._publish_card_to_ha_www()  # must not raise
+    finally:
+        os.chmod(readonly_parent, 0o755)
 
 
 def test_api_parcels_allows_cross_origin_requests_for_the_lovelace_card():
