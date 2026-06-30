@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed the gallery (and Settings/Help) loading completely blank when opened
+  through a remote-access route with limited upload bandwidth, such as a
+  Cloudflare Tunnel — it always loaded fine on the LAN. The page carried a
+  leftover render-blocking tag from an earlier cross-document
+  view-transition design (superseded back in 0.4.4 by the in-app navigation
+  it uses today) that held the very first paint until the *entire* page had
+  downloaded. Since archived GIFs are kept permanently, that page only grows
+  over time, and over a slow link the wait could be long enough to look like
+  the add-on wasn't working at all. The tag was already dead weight for
+  in-app navigation, so removing it has no other effect.
+- Archived GIFs in the gallery now get a small static thumbnail image
+  generated alongside the GIF itself, so loading the gallery no longer
+  requires downloading every full animated GIF just to draw its first frame
+  as a preview. GIFs archived before this update don't have one yet and
+  keep using the old (slower) full-GIF preview until they're re-generated.
+
 ## 0.5.0
 
 - Added a **Help** page (the **?** icon in the gallery header) that walks

@@ -3,10 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Render-block first paint until content is parsed, so the cross-document
-       view transition crossfades from a fully-rendered page instead of
-       flashing a blank frame first (see #vt-ready at the end of the wrap). -->
-  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Parcel Tracker</title>
   <style>
     /* ---- Design tokens -------------------------------------------------
@@ -1076,7 +1072,6 @@
     {% if ha_sync_configured %}
     <div class="page-footer"><svg aria-hidden="true"><use href="#i-home"/></svg>Exposed to Home Assistant as sensor entities for dashboards and automations.</div>
     {% endif %}
-    <div id="vt-ready"></div>
   </div>
 
   <!-- Shared email viewer. The message is loaded into a fully sandboxed

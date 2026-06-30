@@ -3,9 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Render-block first paint until content is parsed, so the cross-document
-       view transition doesn't flash a blank frame first (see #vt-ready). -->
-  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Setup help &middot; Print Timelapse</title>
   <style>
     /* Design tokens mirror settings.html so the pages stay in lockstep. */
@@ -280,7 +277,6 @@
         <span class="status-value" id="status-finish">&mdash;</span>
       </div>
     </div>
-    <div id="vt-ready"></div>
   </div>
 
   <script>

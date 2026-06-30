@@ -3,9 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Render-block first paint until content is parsed, so the cross-document
-       view transition doesn't flash a blank frame first (see #vt-ready). -->
-  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Settings &middot; Parcel Tracker</title>
   <style>
     /* Design tokens mirror dashboard.html so the two pages stay visually in
@@ -296,7 +293,6 @@
       <span>These override the matching add-on configuration options while set. To manage mailbox
         accounts or tracking-provider API keys, use the add-on's <strong>Configuration</strong> tab.</span>
     </div>
-    <div id="vt-ready"></div>
   </div>
 </body>
 </html>

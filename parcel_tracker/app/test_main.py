@@ -795,6 +795,13 @@ def test_run_sync_cycle_populates_api_diagnostics(monkeypatch):
     assert record["api_diagnostics"]["provider"] == "track123"
 
 
+def test_pages_do_not_contain_vestigial_render_blocking_sentinel():
+    for path in ("/", "/settings"):
+        html = client.get(path).text
+        assert "vt-ready" not in html
+        assert 'rel="expect"' not in html
+
+
 def test_settings_page_renders_current_values():
     settings.set_many({"poll_interval_minutes": 45, "ignore_senders": "spam.example"})
     html = client.get("/settings").text

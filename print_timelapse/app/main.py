@@ -101,10 +101,14 @@ def _gif_records():
     records = []
     for path in sorted(ARCHIVE_DIR.glob("*.gif"), key=lambda p: p.stat().st_mtime, reverse=True):
         stat = path.stat()
+        poster_path = path.with_suffix(".jpg")
         records.append(
             {
                 "filename": path.name,
                 "url": f"/archive/{path.name}",
+                # None for GIFs archived before posters existed - the gallery
+                # falls back to fetching the full GIF for its thumbnail then.
+                "poster_url": f"/archive/{poster_path.name}" if poster_path.exists() else None,
                 "size_bytes": stat.st_size,
                 "created": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
             }
@@ -206,6 +210,30 @@ async def finish_job(job_id: str = Form(...)):
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise HTTPException(500, f"ffmpeg failed: {result.stderr[-2000:]}")
+
+    # A small static JPEG poster, built alongside the GIF, lets the gallery
+    # draw a thumbnail without fetching the whole (potentially large)
+    # animated GIF just to read its first frame. Best-effort: a failure here
+    # must never break /finish - the GIF itself is the artifact that matters,
+    # and the gallery falls back to the full GIF when no poster exists.
+    poster_name = f"{job_id}_{timestamp}.jpg"
+    poster_path = ARCHIVE_DIR / poster_name
+    poster_cmd = [
+        "ffmpeg",
+        "-y",
+        "-pattern_type",
+        "glob",
+        "-i",
+        str(job_dir / "frame_*.jpg"),
+        "-frames:v",
+        "1",
+        "-vf",
+        f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
+        str(poster_path),
+    ]
+    poster_result = subprocess.run(poster_cmd, capture_output=True, text=True)
+    if poster_result.returncode != 0:
+        print(f"[timelapse] failed to build poster for '{gif_name}': {poster_result.stderr[-500:]}")
 
     exported_to = _export_gif(gif_path, gif_name)
 

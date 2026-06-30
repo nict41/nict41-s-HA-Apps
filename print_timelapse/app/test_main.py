@@ -194,6 +194,94 @@ def test_finish_exports_gif_when_export_path_configured(monkeypatch, tmp_path):
     assert exported_path.exists()
 
 
+# ---- Poster thumbnails --------------------------------------------------
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_finish_builds_poster_and_reports_it_in_gifs():
+    client.post("/start", data={"job_id": "jobposter"})
+    for percent in (0, 50, 100):
+        client.post(
+            "/frame",
+            data={"job_id": "jobposter", "percent": str(percent), "image_url": IMAGE_URL},
+        )
+
+    resp = client.post("/finish", data={"job_id": "jobposter"})
+    assert resp.status_code == 200
+    body = resp.json()
+    poster_path = main.ARCHIVE_DIR / Path(body["filename"]).with_suffix(".jpg")
+    assert poster_path.exists()
+
+    listed = client.get("/gifs").json()["gifs"]
+    record = next(g for g in listed if g["filename"] == body["filename"])
+    assert record["poster_url"] == f"/archive/{poster_path.name}"
+
+    gallery_html = client.get("/").text
+    assert f'data-poster="archive/{poster_path.name}"' in gallery_html
+
+
+def test_gif_records_report_no_poster_for_legacy_gif_without_jpg_sibling():
+    gif = main.ARCHIVE_DIR / "legacy.gif"
+    gif.write_bytes(b"GIF89a")
+
+    listed = client.get("/gifs").json()["gifs"]
+    record = next(g for g in listed if g["filename"] == "legacy.gif")
+    assert record["poster_url"] is None
+
+
+def test_gallery_omits_data_poster_for_legacy_gif_without_jpg_sibling():
+    gif = main.ARCHIVE_DIR / "legacy.gif"
+    gif.write_bytes(b"GIF89a")
+
+    gallery_html = client.get("/").text
+    assert 'data-gif="archive/legacy.gif"' in gallery_html
+    assert "data-poster" not in gallery_html
+
+
+def test_finish_succeeds_even_when_poster_ffmpeg_fails(monkeypatch):
+    def fake_run(cmd, capture_output, text):
+        if "-frames:v" in cmd:
+            class _FailResult:
+                returncode = 1
+                stderr = "synthetic poster failure"
+
+            return _FailResult()
+        Path(cmd[-1]).write_bytes(b"GIF89a")  # produce the GIF so /finish proceeds
+
+        class _OkResult:
+            returncode = 0
+            stderr = ""
+
+        return _OkResult()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    client.post("/start", data={"job_id": "jobposterfail"})
+    client.post(
+        "/frame",
+        data={"job_id": "jobposterfail", "percent": "0", "image_url": IMAGE_URL},
+    )
+
+    resp = client.post("/finish", data={"job_id": "jobposterfail"})
+    assert resp.status_code == 200
+    body = resp.json()
+    gif_path = main.ARCHIVE_DIR / body["filename"]
+    assert gif_path.exists()
+    poster_path = gif_path.with_suffix(".jpg")
+    assert not poster_path.exists()
+
+    listed = client.get("/gifs").json()["gifs"]
+    record = next(g for g in listed if g["filename"] == body["filename"])
+    assert record["poster_url"] is None
+
+
+# ---- Regression guard: no vestigial render-blocking sentinel -----------
+
+def test_pages_do_not_contain_vestigial_render_blocking_sentinel():
+    for path in ("/", "/settings", "/help"):
+        html = client.get(path).text
+        assert "vt-ready" not in html
+        assert 'rel="expect"' not in html
+
+
 # ---- Settings ----------------------------------------------------------
 
 def test_settings_defaults_then_override_roundtrips():
@@ -331,10 +419,10 @@ def test_latest_frame_route_rejects_unsafe_job_id(bad_job_id):
 
 def test_finish_uses_settings_fps_and_width(monkeypatch):
     settings.set_many({"gif_fps": 12, "gif_width": 320})
-    recorded = {}
+    recorded = []
 
     def fake_run(cmd, capture_output, text):
-        recorded["cmd"] = cmd
+        recorded.append(cmd)
         Path(cmd[-1]).write_bytes(b"GIF89a")  # produce the output so /finish proceeds
 
         class _Result:
@@ -349,7 +437,7 @@ def test_finish_uses_settings_fps_and_width(monkeypatch):
 
     resp = client.post("/finish", data={"job_id": "jobcfg"})
     assert resp.status_code == 200
-    cmd = recorded["cmd"]
+    cmd = next(c for c in recorded if "-framerate" in c)  # the GIF-build call, not the poster call
     assert "12" in cmd  # the configured framerate was passed to ffmpeg
     assert any("scale=320:" in part for part in cmd)  # the configured width
 

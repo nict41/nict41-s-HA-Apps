@@ -3,11 +3,6 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Render-block the first paint until the page content is parsed, so a
-       cross-document view transition crossfades from a fully-rendered page
-       instead of flashing a blank frame first. Points at the #vt-ready
-       sentinel at the end of the content. -->
-  <link rel="expect" blocking="render" href="#vt-ready" />
   <title>Print Timelapse</title>
   <style>
     /* Design tokens mirror the parcel_tracker add-on so the two feel like one
@@ -329,7 +324,7 @@
       <div class="grid">
         {% for gif in gifs %}
         <div class="card">
-          <div class="card-img" data-gif="archive/{{ gif.filename }}" role="button" tabindex="0" aria-label="Play {{ gif.filename }}">
+          <div class="card-img" data-gif="archive/{{ gif.filename }}" {% if gif.poster_url %}data-poster="{{ gif.poster_url[1:] }}"{% endif %} role="button" tabindex="0" aria-label="Play {{ gif.filename }}">
             <canvas class="poster"></canvas>
             <button type="button" class="play-btn" tabindex="-1" aria-hidden="true"><svg aria-hidden="true"><use href="#i-play"/></svg></button>
           </div>
@@ -347,7 +342,6 @@
       </div>
       {% endif %}
     </div>
-    <div id="vt-ready"></div>
   </div>
 
   <script>
@@ -441,7 +435,11 @@
         canvas.height = poster.naturalHeight || 240;
         try { canvas.getContext("2d").drawImage(poster, 0, 0); } catch (e) {}
       };
-      poster.src = url;
+      // Prefer the small static poster JPEG (built alongside the GIF) so the
+      // initial page load doesn't have to fetch every full animated GIF just
+      // to draw a thumbnail; GIFs archived before posters existed have none,
+      // so fall back to the full GIF for those.
+      poster.src = holder.dataset.poster || url;
 
       function setIcon(id) {
         var use = btn.querySelector("use");

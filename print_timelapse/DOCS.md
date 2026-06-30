@@ -181,9 +181,10 @@ alongside its progress, and the bar's most-recent-capture side reads
 **Capturing now** (reverting to the most-recent-capture time, and
 refreshing the gallery, once the capture finishes).
 
-Each archived GIF shows a still preview and only animates when you press
-**play** (press again to pause), so the gallery isn't a wall of looping
-animations. The **Archive** section can be collapsed (click its header)
+Each archived GIF shows a still preview (a lightweight thumbnail generated
+alongside the GIF, not the full animated file) and only animates when you
+press **play** (press again to pause), so the gallery isn't a wall of
+looping animations. The **Archive** section can be collapsed (click its header)
 to get it out of the way - this is remembered per-browser. If a capture
 ever gets stuck in **Capturing now** (e.g. a print that never reached its
 final frame), use the **⋮** menu on that row to delete it — this only
