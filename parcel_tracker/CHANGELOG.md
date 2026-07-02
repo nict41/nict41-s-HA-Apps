@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.0
+
+- Redesigned the dashboard and settings pages onto a new editorial-technical
+  visual system: warm paper with near-black ink in light mode, near-black
+  with a neon-lime signal accent in dark mode, flat ruled surfaces and hard
+  offset shadows instead of soft rounded cards, oversized stat numerals,
+  and monospace uppercase micro-labels for data. Light/dark still follows
+  your device, and nothing functional changed - every control, menu, and
+  panel works exactly as before.
+
 ## 0.9.9
 
 - Drastically cut Track123 API quota use. Track123 bills one credit per

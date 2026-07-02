@@ -5,38 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Settings &middot; Print Timelapse</title>
   <style>
-    /* Design tokens mirror gallery.html so the two pages stay in lockstep. */
+    /* Editorial-technical design tokens, shared across this add-on family:
+       warm paper / near-black ink in light mode, near-black with a neon-
+       lime signal accent in dark. Flat surfaces, hairline rules, hard
+       offset shadows, monospace for data. */
     :root {
       color-scheme: light dark; background: var(--bg);
-      --bg: #f5f6f8; --surface: #ffffff; --surface-2: #f1f3f6; --surface-hover: #f7f8fa;
-      --border: #e4e7ec; --border-strong: #d4d9e0;
-      --text: #1b1f27; --text-muted: #5b6473; --text-faint: #8a92a0;
-      --accent: #4f46e5; --accent-hover: #4338ca; --accent-contrast: #ffffff;
-      --accent-soft: #eef2ff; --accent-soft-text: #4338ca; --focus-ring: rgba(79,70,229,0.35);
-      --ok-bg: #d8f3e0; --ok-fg: #1c8a4e;
-      --shadow-sm: 0 1px 2px rgba(16,24,40,0.05);
-      --shadow-md: 0 4px 14px rgba(16,24,40,0.08), 0 1px 3px rgba(16,24,40,0.05);
-      --radius-sm: 7px; --radius: 12px; --radius-pill: 999px;
+      --bg: #f0efe9; --surface: #f7f6f1; --surface-2: #e8e7df; --surface-hover: #ecebe3;
+      --border: #d7d5c9; --border-strong: #a9a698;
+      --text: #191b14; --text-muted: #565a4a; --text-faint: #828676;
+      --accent: #326f00; --accent-hover: #265400; --accent-contrast: #f3ffd9;
+      --accent-soft: #e0edc4; --accent-soft-text: #2c5c04; --focus-ring: rgba(80,130,20,0.5);
+      --ok-bg: #e0edc4; --ok-fg: #2c5c04;
+      --danger: #a1301f; --danger-bg: #f2d8d1;
+      --shadow-sm: none;
+      --shadow-md: 3px 3px 0 rgba(25,27,20,0.16);
+      --radius-sm: 0; --radius: 0; --radius-pill: 0;
       --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem; --space-5: 1.5rem; --space-6: 2rem;
       --maxw: 760px;
-      --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font: "Helvetica Neue", Helvetica, "Arial Nova", Arial, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0e1014; --surface: #181b21; --surface-2: #12151b; --surface-hover: #1e222a;
-        --border: #272c36; --border-strong: #343b48;
-        --text: #e7e9ee; --text-muted: #9aa2b1; --text-faint: #6b7482;
-        --accent: #818cf8; --accent-hover: #a5b4fc; --accent-contrast: #0e1014;
-        --accent-soft: rgba(99,102,241,0.16); --accent-soft-text: #b4bcff; --focus-ring: rgba(129,140,248,0.45);
-        --ok-bg: rgba(52,211,153,0.15); --ok-fg: #6ee7a7;
-        --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-        --shadow-md: 0 6px 20px rgba(0,0,0,0.4);
+        --bg: #0c0e09; --surface: #12140d; --surface-2: #171a10; --surface-hover: #1b1f12;
+        --border: #262b1a; --border-strong: #414833;
+        --text: #e7ead9; --text-muted: #9ba189; --text-faint: #6e755c;
+        --accent: #c6f53c; --accent-hover: #d7ff62; --accent-contrast: #0c0e09;
+        --accent-soft: rgba(198,245,60,0.13); --accent-soft-text: #d1f764; --focus-ring: rgba(198,245,60,0.45);
+        --ok-bg: rgba(198,245,60,0.13); --ok-fg: #d1f764;
+        --danger: #ff8a75; --danger-bg: rgba(255,120,95,0.14);
+        --shadow-sm: none;
+        --shadow-md: 3px 3px 0 rgba(0,0,0,0.55);
       }
     }
     * { box-sizing: border-box; }
     svg:not([width]) { width: 15px; height: 15px; flex: none; }
     body { margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
-      font-size: 15px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+      font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
     @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
     .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6);
       animation: page-fade-in 160ms ease-out; }
@@ -44,52 +50,56 @@
       .wrap { animation: none; }
     }
 
-    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 1px solid var(--border); }
+    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 2px solid var(--text); }
     .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
       display: flex; align-items: center; gap: var(--space-3); }
     .brand { display: flex; align-items: center; gap: var(--space-3); }
-    .brand-logo { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center;
-      background: var(--accent-soft); color: var(--accent-soft-text); }
-    .brand-logo svg { width: 22px; height: 22px; }
-    .brand-title { font-size: 1.02rem; font-weight: 650; letter-spacing: -0.01em; }
+    .brand-logo { width: 36px; height: 36px; display: grid; place-items: center;
+      background: var(--text); color: var(--bg); }
+    .brand-logo svg { width: 20px; height: 20px; }
+    .brand-title { font-size: 0.98rem; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; }
     .topbar-spacer { flex: 1; }
 
-    button, .btn { font-family: inherit; font-size: 0.82rem; font-weight: 550; line-height: 1;
-      display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem;
-      padding: 0.5rem 0.8rem; border-radius: var(--radius-sm);
-      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text);
+    button, .btn { font-family: var(--font); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em;
+      text-transform: uppercase; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+      padding: 0.58rem 0.85rem; border-radius: 0;
+      border: 1px solid var(--border-strong); background: transparent; color: var(--text);
       cursor: pointer; text-decoration: none; white-space: nowrap;
-      transition: background 0.12s ease, border-color 0.12s ease; }
-    button:hover, .btn:hover { background: var(--surface-hover); border-color: var(--text-faint); }
+      transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease; }
+    button:hover, .btn:hover { background: var(--text); border-color: var(--text); color: var(--bg); }
     .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
-    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    .btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-contrast); }
     button:focus-visible, .btn:focus-visible, input:focus-visible {
       outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
     button svg, .btn svg { width: 15px; height: 15px; }
 
-    h1 { font-size: 1.3rem; font-weight: 680; letter-spacing: -0.02em; margin: var(--space-6) 0 0.25rem; }
+    h1 { font-size: 1.7rem; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase;
+      margin: var(--space-6) 0 0.25rem; }
     .lede { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 var(--space-5); }
 
     .saved { display: flex; align-items: center; gap: 0.5rem; margin: var(--space-4) 0 0;
-      padding: 0.6rem 0.9rem; border-radius: var(--radius-sm);
-      background: var(--ok-bg); color: var(--ok-fg); font-size: 0.85rem; font-weight: 550; }
+      padding: 0.6rem 0.9rem; border-radius: 0; border: 1px solid var(--ok-fg);
+      background: var(--ok-bg); color: var(--ok-fg); font-size: 0.85rem; font-weight: 600; }
     .saved svg { width: 16px; height: 16px; }
 
-    .group { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      box-shadow: var(--shadow-sm); padding: var(--space-5); margin-top: var(--space-4); }
-    .group-title { font-size: 0.78rem; font-weight: 650; letter-spacing: 0.04em; text-transform: uppercase;
-      color: var(--text-muted); margin: 0 0 var(--space-4); display: flex; align-items: center; gap: 0.5rem; }
+    .group { background: var(--surface); border: 1px solid var(--border); border-radius: 0;
+      box-shadow: none; border-top: 2px solid var(--text);
+      padding: var(--space-5); margin-top: var(--space-4); }
+    .group-title { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--text); margin: 0 0 var(--space-4); display: flex; align-items: center; gap: 0.5rem; }
     .group-title svg { width: 16px; height: 16px; color: var(--text-faint); }
 
     .field { display: grid; grid-template-columns: 1fr auto; align-items: start; gap: 0.4rem var(--space-4);
       padding: var(--space-4) 0; border-top: 1px solid var(--border); }
     .group .field:first-of-type { border-top: 0; padding-top: 0; }
     .group .field:last-of-type { padding-bottom: 0; }
-    .field-label { font-size: 0.9rem; font-weight: 550; }
+    .field-label { font-size: 0.9rem; font-weight: 700; }
     .field-help { grid-column: 1; font-size: 0.8rem; color: var(--text-muted); }
     .field-control { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 0.4rem; }
     .field-control input[type="number"] { width: 6.5rem; text-align: right; }
-    .field-unit { font-size: 0.8rem; color: var(--text-muted); white-space: nowrap; }
+    .field-unit { font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.06em;
+      text-transform: uppercase; color: var(--text-muted); white-space: nowrap; }
     .field.field-wide { grid-template-columns: 1fr; }
     .field.field-wide .field-control { grid-column: 1; grid-row: auto; }
     .field.field-wide .field-control input { width: 100%; text-align: left; }
@@ -100,9 +110,9 @@
     .check-row input { width: 18px; height: 18px; margin: 0; flex: none; margin-top: 2px; accent-color: var(--accent); }
     .check-row .field-help { margin-top: 0.15rem; }
 
-    input[type="number"], input[type="text"] { font-family: inherit; font-size: 0.88rem;
-      background: var(--surface-2); color: var(--text);
-      border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 0.5rem 0.65rem; }
+    input[type="number"], input[type="text"] { font-family: var(--mono); font-size: 0.84rem;
+      background: var(--surface); color: var(--text);
+      border: 1px solid var(--border-strong); border-radius: 0; padding: 0.55rem 0.65rem; }
     input::placeholder { color: var(--text-faint); }
 
     .actions { display: flex; gap: var(--space-3); align-items: center; margin-top: var(--space-5); }

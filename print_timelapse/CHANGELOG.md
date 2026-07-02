@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+- Redesigned the gallery, settings, and help pages onto a new
+  editorial-technical visual system (shared with the Parcel Tracker add-on):
+  warm paper with near-black ink in light mode, near-black with a neon-lime
+  signal accent in dark mode, flat ruled surfaces and hard offset shadows
+  instead of soft rounded cards, oversized stat numerals, monospace
+  uppercase micro-labels for data, and terminal-styled YAML blocks on the
+  help page. Light/dark still follows your device, and nothing functional
+  changed - every control, menu, and panel works exactly as before.
+
 ## 0.5.2
 
 - Added a **Finish & save GIF** action to the kebab menu on each "Capturing
