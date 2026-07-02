@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- Fixed the add-on failing to start (`jq: command not found`, every
+  `bashio::config` call failing): the Dockerfile vendors bashio directly
+  from source instead of using a Home Assistant base image, and never
+  installed `jq`, which bashio requires. `jq` is now installed alongside
+  the other packages.
+
 ## 1.1.0
 
 - The add-on is now **fully self-contained**: leave `db_host` empty (the new

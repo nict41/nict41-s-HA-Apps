@@ -10,7 +10,7 @@ ARG BASHIO_VERSION="0.17.5"
 # compat packages, deliberately not installed here.
 RUN set -eu; \
     apt-get update; \
-    apt-get install -y --no-install-recommends curl ca-certificates \
+    apt-get install -y --no-install-recommends curl ca-certificates jq \
         mariadb-server mariadb-client; \
     curl -L -f -s -o /tmp/bashio.tar.gz \
         "https://github.com/hassio-addons/bashio/archive/v${BASHIO_VERSION}.tar.gz"; \
