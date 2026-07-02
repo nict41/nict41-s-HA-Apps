@@ -1,10 +1,13 @@
 configuration:
   db_host:
     name: Database host
-    description: Hostname or IP address of the MySQL/MariaDB server (e.g. core-mariadb).
+    description: >-
+      Hostname or IP address of an external MySQL/MariaDB server (e.g.
+      core-mariadb). Leave empty to use the built-in database server
+      (recommended).
   db_port:
     name: Database port
-    description: Port of the MySQL/MariaDB server.
+    description: Port of the external database server. Ignored when using the built-in database.
   db_name:
     name: Database name
     description: Name of the database to use for WordPress.
@@ -13,7 +16,9 @@ configuration:
     description: Username for the WordPress database.
   db_password:
     name: Database password
-    description: Password for the WordPress database user.
+    description: >-
+      Password for the WordPress database user. Required for an external
+      server; leave empty with the built-in database to auto-generate one.
   table_prefix:
     name: Table prefix
     description: Prefix used for WordPress's database tables.

@@ -1,5 +1,5 @@
 name: WordPress
-version: "1.0.0"
+version: "1.1.0"
 slug: wordpress
 description: Self-hosted WordPress, powered by the official docker-library/wordpress image
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/wordpress"
@@ -12,6 +12,9 @@ arch:
 startup: application
 boot: auto
 init: true
+# Graceful stop needs to outlive the Supervisor's default 10s: Apache is
+# stopped first, then the bundled MariaDB gets a clean InnoDB shutdown.
+timeout: 30
 hassio_api: false
 homeassistant_api: false
 host_network: false
@@ -28,11 +31,11 @@ options:
   table_prefix: "wp_"
   debug: false
 schema:
-  db_host: str
+  db_host: "str?"
   db_port: int(1,65535)
   db_name: str
   db_user: str
-  db_password: password
+  db_password: "password?"
   table_prefix: str
   locale: str?
   debug: bool
