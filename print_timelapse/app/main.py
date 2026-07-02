@@ -1,10 +1,13 @@
+import asyncio
 import os
 import re
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -39,7 +42,87 @@ _FRAME_RE = re.compile(r"frame_(\d+)\.jpg$")
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Print Timelapse")
+def _build_gif(job_dir: Path, gif_name: str) -> str | None:
+    """Build a GIF (and poster) from frames in job_dir, archive it, export if
+    configured, and clean up frames. Returns the export path or None.
+    Raises HTTPException on GIF build failure — /finish lets it propagate;
+    the auto-finish background task catches Exception around the call."""
+    gif_path = ARCHIVE_DIR / gif_name
+    poster_name = Path(gif_name).stem + ".jpg"
+    poster_path = ARCHIVE_DIR / poster_name
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-framerate", str(settings.get_int("gif_fps")),
+        "-pattern_type", "glob",
+        "-i", str(job_dir / "frame_*.jpg"),
+        "-vf", f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
+        str(gif_path),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise HTTPException(500, f"ffmpeg failed: {result.stderr[-2000:]}")
+
+    # A static JPEG poster lets the gallery draw a thumbnail without fetching
+    # the full animated GIF. Best-effort: failure here must never abort /finish.
+    poster_cmd = [
+        "ffmpeg", "-y",
+        "-pattern_type", "glob",
+        "-i", str(job_dir / "frame_*.jpg"),
+        "-frames:v", "1",
+        "-vf", f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
+        str(poster_path),
+    ]
+    poster_result = subprocess.run(poster_cmd, capture_output=True, text=True)
+    if poster_result.returncode != 0:
+        print(f"[timelapse] failed to build poster for '{gif_name}': {poster_result.stderr[-500:]}")
+
+    exported_to = _export_gif(gif_path, gif_name)
+    if settings.get_bool("cleanup_after_finish"):
+        shutil.rmtree(job_dir, ignore_errors=True)
+    return exported_to
+
+
+_STALE_THRESHOLD_SECONDS = 7200   # 2 hours of no new frames → treat as cancelled
+_AUTO_FINISH_INTERVAL_SECONDS = 600  # scan every 10 minutes
+
+
+def _auto_finish_stale_jobs_once() -> None:
+    """Scan CURRENT_DIR for jobs that haven't received a frame in ≥ 2 hours and
+    auto-finish them. Called by the background loop and directly in tests."""
+    now = time.time()
+    for job_dir in CURRENT_DIR.glob("*"):
+        if not job_dir.is_dir() or not JOB_ID_RE.match(job_dir.name):
+            continue
+        if not list(job_dir.glob("frame_*.jpg")):
+            continue
+        age = now - job_dir.stat().st_mtime
+        if age < _STALE_THRESHOLD_SECONDS:
+            continue
+        job_id = job_dir.name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        gif_name = f"{job_id}_cancelled_{timestamp}.gif"
+        print(f"[timelapse] auto-finishing stale job '{job_id}' (no updates for {age/3600:.1f}h)")
+        try:
+            _build_gif(job_dir, gif_name)
+        except Exception as exc:
+            print(f"[timelapse] auto-finish failed for '{job_id}': {exc}")
+
+
+async def _auto_finish_loop() -> None:
+    while True:
+        await asyncio.sleep(_AUTO_FINISH_INTERVAL_SECONDS)
+        _auto_finish_stale_jobs_once()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    task = asyncio.create_task(_auto_finish_loop())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Print Timelapse", lifespan=lifespan)
 app.mount("/archive", StaticFiles(directory=str(ARCHIVE_DIR)), name="archive")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
@@ -184,67 +267,21 @@ async def finish_job(job_id: str = Form(...)):
     _record_call("finish")
     job_dir = CURRENT_DIR / job_id
 
+    # glob (not a numbered %03d pattern) because percent steps can skip values;
+    # glob sorts zero-padded names into the right order.
     frames = sorted(job_dir.glob("frame_*.jpg")) if job_dir.exists() else []
     if not frames:
         raise HTTPException(404, f"no frames found for job_id '{job_id}'")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     gif_name = f"{job_id}_{timestamp}.gif"
-    gif_path = ARCHIVE_DIR / gif_name
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-framerate",
-        str(settings.get_int("gif_fps")),
-        # glob (not a numbered %03d pattern) because percent steps can skip
-        # values; glob still sorts the zero-padded names into the right order.
-        "-pattern_type",
-        "glob",
-        "-i",
-        str(job_dir / "frame_*.jpg"),
-        "-vf",
-        f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
-        str(gif_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise HTTPException(500, f"ffmpeg failed: {result.stderr[-2000:]}")
-
-    # A small static JPEG poster, built alongside the GIF, lets the gallery
-    # draw a thumbnail without fetching the whole (potentially large)
-    # animated GIF just to read its first frame. Best-effort: a failure here
-    # must never break /finish - the GIF itself is the artifact that matters,
-    # and the gallery falls back to the full GIF when no poster exists.
-    poster_name = f"{job_id}_{timestamp}.jpg"
-    poster_path = ARCHIVE_DIR / poster_name
-    poster_cmd = [
-        "ffmpeg",
-        "-y",
-        "-pattern_type",
-        "glob",
-        "-i",
-        str(job_dir / "frame_*.jpg"),
-        "-frames:v",
-        "1",
-        "-vf",
-        f"scale={settings.get_int('gif_width')}:-1:flags=lanczos",
-        str(poster_path),
-    ]
-    poster_result = subprocess.run(poster_cmd, capture_output=True, text=True)
-    if poster_result.returncode != 0:
-        print(f"[timelapse] failed to build poster for '{gif_name}': {poster_result.stderr[-500:]}")
-
-    exported_to = _export_gif(gif_path, gif_name)
-
-    if settings.get_bool("cleanup_after_finish"):
-        shutil.rmtree(job_dir, ignore_errors=True)
+    exported_to = _build_gif(job_dir, gif_name)
 
     return {
         "status": "ok",
         "job_id": job_id,
         "filename": gif_name,
-        "path": str(gif_path),
+        "path": str(ARCHIVE_DIR / gif_name),
         "url": f"/archive/{gif_name}",
         "exported_to": exported_to,
     }

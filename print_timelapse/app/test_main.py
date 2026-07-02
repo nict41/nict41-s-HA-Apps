@@ -3,6 +3,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -515,3 +516,88 @@ def test_create_automations_succeeds_when_configured(monkeypatch):
     body = resp.json()
     assert body["configured"] is True
     assert all(body["results"].values())
+
+
+# ---- Manual finish + auto-cancel stale jobs -----------------------------
+
+def _seed_job(job_id: str, mtime_offset: float = 0.0) -> Path:
+    """Create a job dir with one frame and optionally backdate its mtime."""
+    job_dir = main.CURRENT_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    frame = job_dir / "frame_001.jpg"
+    frame.write_bytes(_FRAME_JPEG)
+    if mtime_offset:
+        old = time.time() + mtime_offset
+        os.utime(job_dir, (old, old))
+    return job_dir
+
+
+def test_auto_finish_builds_cancelled_gif_for_stale_job(monkeypatch):
+    _seed_job("stalej", mtime_offset=-(main._STALE_THRESHOLD_SECONDS + 1))
+
+    def fake_run(cmd, capture_output, text):
+        # Write a sentinel file so the GIF path actually exists.
+        Path(cmd[-1]).write_bytes(b"GIF89a")
+        class _Ok:
+            returncode = 0
+            stderr = ""
+        return _Ok()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    main._auto_finish_stale_jobs_once()
+
+    gifs = list(main.ARCHIVE_DIR.glob("*.gif"))
+    assert len(gifs) == 1
+    assert "_cancelled_" in gifs[0].name
+    assert gifs[0].name.startswith("stalej_cancelled_")
+
+
+def test_auto_finish_ignores_recent_job(monkeypatch):
+    _seed_job("recentj", mtime_offset=-60)  # only 1 minute old
+
+    called = []
+    monkeypatch.setattr(main.subprocess, "run", lambda *a, **k: called.append(a))
+    main._auto_finish_stale_jobs_once()
+
+    assert called == []
+    assert list(main.ARCHIVE_DIR.glob("*.gif")) == []
+
+
+def test_auto_finish_does_not_record_finish_call(monkeypatch):
+    _seed_job("stalecall", mtime_offset=-(main._STALE_THRESHOLD_SECONDS + 1))
+
+    def fake_run(cmd, capture_output, text):
+        Path(cmd[-1]).write_bytes(b"GIF89a")
+        class _Ok:
+            returncode = 0
+            stderr = ""
+        return _Ok()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    main._auto_finish_stale_jobs_once()
+
+    assert main._last_call_at["finish"] is None
+
+
+def test_auto_finish_survives_ffmpeg_failure(monkeypatch):
+    job_dir = _seed_job("failstale", mtime_offset=-(main._STALE_THRESHOLD_SECONDS + 1))
+
+    def fake_run(cmd, capture_output, text):
+        class _Fail:
+            returncode = 1
+            stderr = "synthetic failure"
+        return _Fail()
+
+    monkeypatch.setattr(main.subprocess, "run", fake_run)
+    main._auto_finish_stale_jobs_once()  # must not raise
+
+    assert list(main.ARCHIVE_DIR.glob("*.gif")) == []
+    assert job_dir.exists()  # frames untouched since build failed before cleanup
+
+
+def test_gallery_renders_finish_button_in_job_rows():
+    client.post("/start", data={"job_id": "btnjob"})
+    client.post("/frame", data={"job_id": "btnjob", "percent": "10", "image_url": IMAGE_URL})
+    html = client.get("/").text
+    assert "job-finish" in html
+    assert 'data-job-id="btnjob"' in html

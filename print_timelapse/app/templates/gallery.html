@@ -265,6 +265,7 @@
     <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6"/></symbol>
     <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
     <symbol id="i-help" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a2.9 2.9 0 1 1 4.4 2.5c-.7.5-1.5 1-1.5 2.3"/><path d="M12 17h.01"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></symbol>
   </svg>
 
   <header class="topbar">
@@ -309,6 +310,7 @@
         <div class="kebab" data-kebab>
           <button type="button" class="kebab-toggle" aria-label="More actions" aria-haspopup="true" aria-expanded="false"><svg aria-hidden="true"><use href="#i-dots"/></svg></button>
           <div class="kebab-menu" role="menu" hidden>
+            <button type="button" class="kebab-item job-finish" role="menuitem" data-job-id="{{ job.job_id }}"><svg aria-hidden="true"><use href="#i-check"/></svg>Finish &amp; save GIF</button>
             <button type="button" class="kebab-item kebab-item-danger job-delete" role="menuitem" data-job-id="{{ job.job_id }}"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>
           </div>
         </div>
@@ -500,6 +502,7 @@
         '<div class="kebab" data-kebab>' +
           '<button type="button" class="kebab-toggle" aria-label="More actions" aria-haspopup="true" aria-expanded="false"><svg aria-hidden="true"><use href="#i-dots"/></svg></button>' +
           '<div class="kebab-menu" role="menu" hidden>' +
+            '<button type="button" class="kebab-item job-finish" role="menuitem" data-job-id="' + esc(j.job_id) + '"><svg aria-hidden="true"><use href="#i-check"/></svg>Finish &amp; save GIF</button>' +
             '<button type="button" class="kebab-item kebab-item-danger job-delete" role="menuitem" data-job-id="' + esc(j.job_id) + '"><svg aria-hidden="true"><use href="#i-trash"/></svg>Delete</button>' +
           '</div>' +
         '</div>' +
@@ -569,6 +572,19 @@
         closeJobMenus();
         menu.hidden = !willOpen;
         toggle.setAttribute("aria-expanded", String(willOpen));
+        return;
+      }
+      var fin = e.target.closest(".job-finish");
+      if (fin) {
+        e.stopPropagation();
+        closeJobMenus();
+        fin.disabled = true;
+        fin.textContent = "Building GIF…";
+        var body = new URLSearchParams();
+        body.set("job_id", fin.dataset.jobId);
+        fetch("finish", { method: "POST", body: body })
+          .catch(function () {})
+          .finally(function () { window.location.reload(); });
         return;
       }
       var del = e.target.closest(".job-delete");

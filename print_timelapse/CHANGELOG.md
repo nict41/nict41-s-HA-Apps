@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2
+
+- Added a **Finish & save GIF** action to the kebab menu on each "Capturing
+  now" job card — builds the GIF immediately from whatever frames were captured
+  so far, so a manually cancelled print isn't stuck in "Capturing now" forever.
+- Jobs that haven't received a new frame in 2 hours are now automatically
+  treated as cancelled and finished in the background; the resulting GIF is
+  archived with `cancelled` in its filename so it's easy to tell apart from
+  normally-completed prints.
+
 ## 0.5.1
 
 - Fixed the gallery (and Settings/Help) loading completely blank when opened

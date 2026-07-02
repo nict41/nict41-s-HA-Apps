@@ -1,5 +1,5 @@
 name: "3D Print Timelapse"
-version: "0.5.1"
+version: "0.5.2"
 slug: "print_timelapse"
 description: "Captures frame-by-frame 3D print timelapses and archives them as GIFs"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/print_timelapse"
