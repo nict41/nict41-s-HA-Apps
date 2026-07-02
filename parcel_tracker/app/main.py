@@ -162,6 +162,10 @@ def _refresh_one_parcel(parcel: dict) -> None:
     provider_name = _select_provider(parcel, active_providers)
     mod = dict(active_providers)[provider_name]
     number = parcel["tracking_number"]
+    # A manual refresh is a deliberate "look again now": lift the provider's
+    # per-number backoff on its quota-consuming instant-tracking fallback so
+    # this one check may use it even if scheduled syncs recently gave up on it.
+    mod.allow_instant_retry(number)
     mod.register([(number, parcel["carrier_name"])])
     info = mod.get_track_info([number]).get(number)
     _save_diagnostics(parcel["id"], number, provider_name, mod)

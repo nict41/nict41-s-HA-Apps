@@ -132,6 +132,16 @@ unconfigured or unavailable. Once a parcel is registered with a provider,
 it keeps using that same provider on every later refresh rather than
 switching (and consuming quota on both).
 
+The app is careful with those quotas: a number is only registered once
+(registration is what consumes a credit per shipment - routine status
+queries of already-registered numbers don't), and Track123's separate
+"instant tracking" lookup - which costs a credit on *every* call, and is
+used as a fallback for a number Track123 has accepted but has no events
+for yet - is tried at most once a day per stuck number, and no further
+after a few consecutive attempts that still found nothing. A parcel's
+**Refresh from API** action always lifts that limit for its one check, so
+you can deliberately spend a credit to give a stuck number a fresh look.
+
 ## Using the dashboard
 
 Open the app's ingress panel from your sidebar:

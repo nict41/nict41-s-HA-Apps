@@ -23,7 +23,12 @@ carrier live with no registration involved. _query_instant() below is
 that same endpoint, used as a targeted fallback only for numbers stuck in
 that accepted-but-empty state, not for every lookup - it's explicitly
 documented as quota-consuming and "not recommended for bulk or frequent
-calls", unlike the batch endpoints.
+calls", unlike the batch endpoints. Because each instant call deducts one
+quota credit, attempts are additionally rate-limited per number (see
+_instant_allowed): once a day at most, and not at all after a few
+consecutive attempts that still found nothing - otherwise a single bogus
+number stuck accepted-but-empty re-buys the same empty answer on every
+sync cycle and can burn a whole month's free quota on its own.
 """
 
 import json
@@ -42,6 +47,50 @@ _REQUEST_DELAY_SECONDS = 0.25  # stays under the documented 5 req/sec cap
 # than the batch endpoints above, in line with it being meant for occasional
 # fallback use rather than routine bulk polling.
 _INSTANT_QUERY_DELAY_SECONDS = 1.05
+
+# Per-number limits on the instant-tracking fallback, since each instant call
+# deducts one quota credit (the batch endpoints don't): retry a stuck number
+# at most once a day, and give up on it entirely (until a manual refresh or
+# an add-on restart) after this many consecutive attempts that still found no
+# events. In-memory on purpose - worst case a restart re-tries each stuck
+# number once, which is exactly the "kick it once in a while" cadence wanted.
+_INSTANT_RETRY_SECONDS = 24 * 60 * 60
+_INSTANT_MAX_MISSES = 3
+
+# number -> {"last": time.monotonic() of the latest instant attempt,
+#            "misses": consecutive attempts that still found no events}
+_instant_attempts: dict[str, dict] = {}
+
+# Numbers Track123 has accepted (in an import or batch-query response) this
+# process lifetime. Registration is what consumes a quota credit per new
+# shipment, so register() skips these outright instead of re-importing every
+# parcel on every sync cycle - re-imports are rejected as duplicates rather
+# than charged, but skipping them avoids relying on that, plus the wasted
+# request and the per-cycle "declined to register" log noise.
+_known_registered: set[str] = set()
+
+
+def _instant_allowed(number: str) -> bool:
+    state = _instant_attempts.get(number)
+    if state is None:
+        return True
+    if state["misses"] >= _INSTANT_MAX_MISSES:
+        return False
+    return time.monotonic() - state["last"] >= _INSTANT_RETRY_SECONDS
+
+
+def _note_instant_attempt(number: str, found_events: bool) -> None:
+    state = _instant_attempts.setdefault(number, {"last": 0.0, "misses": 0})
+    state["last"] = time.monotonic()
+    state["misses"] = 0 if found_events else state["misses"] + 1
+
+
+def allow_instant_retry(number: str) -> None:
+    """Clears the instant-tracking backoff for one number, so the next
+    get_track_info() may spend a quota credit on the realtime endpoint for
+    it again - called by the dashboard's per-parcel "Refresh from API"
+    action, where the user has deliberately asked for a fresh look."""
+    _instant_attempts.pop(number, None)
 
 # Track123 courier codes (the slug from a carrier's https://www.track123.com/
 # carriers/<slug> page) for carriers we can identify confidently enough at
@@ -177,8 +226,13 @@ def _rejection_reasons(response: dict) -> dict[str, str]:
 
 def register(parcels: list[tuple[str, str | None]]) -> None:
     """Register (tracking_number, carrier_name) pairs for tracking. Safe to
-    call repeatedly - Track123 no-ops on numbers it's already tracking."""
+    call repeatedly - numbers Track123 has already accepted this process
+    lifetime are skipped locally without a request, and Track123 itself
+    rejects (rather than double-charges) re-imports of the rest."""
     if not API_KEY or not parcels:
+        return
+    parcels = [(number, carrier) for number, carrier in parcels if number not in _known_registered]
+    if not parcels:
         return
     for chunk in _chunks(parcels, _MAX_NUMBERS_PER_REQUEST):
         payload = []
@@ -191,6 +245,12 @@ def register(parcels: list[tuple[str, str | None]]) -> None:
         response = _post("tk/v2.1/track/import", payload)
         _capture("register", [number for number, _ in chunk], _last_exchange)
         if response:
+            accepted = (response.get("data") or {}).get("accepted") or []
+            if isinstance(accepted, list):
+                for accepted_entry in accepted:
+                    accepted_number = (accepted_entry or {}).get("trackNo")
+                    if accepted_number:
+                        _known_registered.add(accepted_number)
             for number, reason in _rejection_reasons(response).items():
                 print(f"[parcel_tracker] Track123 declined to register '{number}': {reason}")
         time.sleep(_REQUEST_DELAY_SECONDS)
@@ -282,6 +342,9 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
         accepted = ((response.get("data") or {}).get("accepted") or {}).get("content") or []
         by_number = {entry.get("trackNo"): entry for entry in accepted if entry.get("trackNo")}
+        # A number the query accepted is definitely registered - no need for
+        # register() to ever re-import it while this process lives.
+        _known_registered.update(by_number)
         reasons = _rejection_reasons(response)
         for number, reason in reasons.items():
             print(f"[parcel_tracker] Track123 rejected '{number}': {reason}")
@@ -292,12 +355,13 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
                 print(f"[parcel_tracker] Track123 query for '{number}' returned no accepted or rejected entry")
             entry = entry or {}
             leg = _logistics_leg(entry)
-            if entry and not leg.get("trackingDetails"):
+            if entry and not leg.get("trackingDetails") and _instant_allowed(number):
                 print(f"[parcel_tracker] Track123 accepted '{number}' but its response had no tracking events yet - trying instant tracking")
                 instant_entry = _query_instant(number, leg.get("courierCode"))
                 _capture("get_track_info_instant", [number], _last_exchange)
                 time.sleep(_INSTANT_QUERY_DELAY_SECONDS)
                 instant_leg = _logistics_leg(instant_entry) if instant_entry else {}
+                _note_instant_attempt(number, found_events=bool(instant_leg.get("trackingDetails")))
                 if instant_leg.get("trackingDetails"):
                     entry, leg = instant_entry, instant_leg
                 else:

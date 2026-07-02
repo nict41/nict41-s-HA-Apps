@@ -112,9 +112,26 @@ def _chunks(items: list, size: int):
         yield items[i : i + size]
 
 
+# Numbers 17track has accepted (in a register or gettrackinfo response) this
+# process lifetime. 17track's quota is a one-time pool consumed per
+# registered number, so register() skips these outright instead of
+# re-registering every parcel on every sync cycle - re-registrations are
+# rejected as duplicates rather than re-charged, but skipping them avoids
+# relying on that plus the wasted request.
+_known_registered: set[str] = set()
+
+
+def allow_instant_retry(number: str) -> None:
+    """Call-site symmetry with the Track123 provider's manual-refresh hook -
+    17track has no separate quota-consuming instant endpoint, so there's
+    nothing to reset here."""
+
+
 def register(parcels: list[tuple[str, str | None]]) -> None:
     """Register (tracking_number, carrier_name) pairs for tracking. Safe to
-    call repeatedly - 17track no-ops on numbers it's already tracking.
+    call repeatedly - numbers 17track has already accepted this process
+    lifetime are skipped locally without a request, and 17track itself
+    rejects (rather than re-charges) re-registrations of the rest.
 
     carrier_name is accepted only for call-site symmetry with the Track123
     provider - it's deliberately ignored here, since carrier 0 (auto-detect)
@@ -122,10 +139,19 @@ def register(parcels: list[tuple[str, str | None]]) -> None:
     (see module docstring)."""
     if not API_KEY or not parcels:
         return
+    parcels = [(number, carrier) for number, carrier in parcels if number not in _known_registered]
+    if not parcels:
+        return
     for chunk in _chunks(parcels, _MAX_NUMBERS_PER_REQUEST):
         numbers = [number for number, _ in chunk]
-        _post("register", [{"number": number, "carrier": 0} for number, _ in chunk])
+        response = _post("register", [{"number": number, "carrier": 0} for number, _ in chunk])
         _capture("register", numbers, _last_exchange)
+        if response:
+            accepted = (response.get("data") or {}).get("accepted") or []
+            for accepted_entry in accepted:
+                accepted_number = (accepted_entry or {}).get("number")
+                if accepted_number:
+                    _known_registered.add(accepted_number)
         time.sleep(_REQUEST_DELAY_SECONDS)
 
 
@@ -194,6 +220,9 @@ def get_track_info(tracking_numbers: list[str]) -> dict[str, dict]:
 
         accepted = (response.get("data") or {}).get("accepted") or []
         by_number = {entry.get("number"): entry for entry in accepted if entry.get("number")}
+        # A number the query accepted is definitely registered - no need for
+        # register() to ever re-register it while this process lives.
+        _known_registered.update(by_number)
 
         for number in chunk:
             entry = by_number.get(number)

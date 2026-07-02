@@ -684,6 +684,21 @@ def test_refresh_route_syncs_to_ha_immediately(monkeypatch):
     assert len(calls) == 1
 
 
+def test_refresh_route_resets_instant_tracking_backoff(monkeypatch):
+    # A manual "Refresh from API" is a deliberate request for a fresh look -
+    # it lifts the provider's per-number backoff on the quota-consuming
+    # instant-tracking fallback, which scheduled syncs may have given up on.
+    parcel_id = db.upsert_parcel("ACT1", "UPS", "x", 1.0, None, db.STATUS_ACTIVE)
+    # _stub_provider replaces register/get_track_info but leaves the real
+    # allow_instant_retry in place, so this exercises the actual reset hook.
+    _stub_provider(monkeypatch, {"ACT1": dict(_UNCONFIRMED_INFO, confirmed=True)})
+    track123._instant_attempts["ACT1"] = {"last": 0.0, "misses": track123._INSTANT_MAX_MISSES}
+
+    client.post("/refresh", data={"parcel_id": parcel_id})
+
+    assert "ACT1" not in track123._instant_attempts
+
+
 def test_refresh_route_can_auto_dismiss_via_apply_track_info(monkeypatch):
     parcel_id = db.upsert_parcel("BOGUS1", "FedEx", "maybe", 0.4, None, db.STATUS_PENDING)
     _backdate_first_checked_at(parcel_id, days=10)

@@ -712,3 +712,244 @@ def test_track123_captures_instant_tracking_exchange_separately_from_get_track_i
     assert "get_track_info" in exchange
     assert "get_track_info_instant" in exchange
     assert exchange["get_track_info"]["request"]["body"] != exchange["get_track_info_instant"]["request"]["body"]
+
+
+@pytest.fixture
+def _clear_quota_state():
+    """Resets the per-process quota-efficiency state (instant-tracking
+    backoff, known-registered sets) around tests that exercise it."""
+    track123._instant_attempts.clear()
+    track123._known_registered.clear()
+    seventeentrack._known_registered.clear()
+    yield
+    track123._instant_attempts.clear()
+    track123._known_registered.clear()
+    seventeentrack._known_registered.clear()
+
+
+def _stuck_track123_responder(number, realtime_paths):
+    """A fake _post where track/query always accepts `number` with a detected
+    courier but no events (the stuck state that triggers the instant
+    fallback), and track/query-realtime is also always empty - recording each
+    realtime call into `realtime_paths`."""
+
+    def fake_post(path, payload):
+        if path == "tk/v2.1/track/query-realtime":
+            realtime_paths.append(path)
+            return {"data": {"accepted": {"trackNo": number, "localLogisticsInfo": {"courierNameEN": "Cainiao"}}}}
+        return {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": number,
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {"courierCode": "cainiao", "courierNameEN": "Cainiao"},
+                        }
+                    ]
+                }
+            }
+        }
+
+    return fake_post
+
+
+def test_track123_instant_fallback_not_retried_within_cooldown(monkeypatch, _clear_quota_state):
+    # Each instant call costs one quota credit, so a number stuck
+    # accepted-but-empty must not re-query the carrier live on every sync
+    # cycle - only the first cycle of the day gets to try.
+    realtime_calls = []
+    monkeypatch.setattr(track123, "_post", _stuck_track123_responder("STUCK1", realtime_calls))
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.get_track_info(["STUCK1"])
+    track123.get_track_info(["STUCK1"])
+
+    assert len(realtime_calls) == 1
+    # The stuck number still gets its normal (unconfirmed) batch-query entry.
+    assert track123.get_track_info(["STUCK1"])["STUCK1"]["confirmed"] is False
+
+
+def test_track123_instant_fallback_retries_after_cooldown(monkeypatch, _clear_quota_state):
+    realtime_calls = []
+    monkeypatch.setattr(track123, "_post", _stuck_track123_responder("STUCK2", realtime_calls))
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.get_track_info(["STUCK2"])
+    # Age the attempt past the cooldown window, as if a day had passed.
+    track123._instant_attempts["STUCK2"]["last"] -= track123._INSTANT_RETRY_SECONDS + 1
+    track123.get_track_info(["STUCK2"])
+
+    assert len(realtime_calls) == 2
+
+
+def test_track123_instant_fallback_gives_up_after_repeated_misses(monkeypatch, _clear_quota_state):
+    # After _INSTANT_MAX_MISSES consecutive empty answers, the number stops
+    # getting instant lookups even once the cooldown has expired - Track123's
+    # own background polling (served by the free batch query) is the only
+    # thing likely to ever have news for it.
+    realtime_calls = []
+    monkeypatch.setattr(track123, "_post", _stuck_track123_responder("STUCK3", realtime_calls))
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    for _ in range(track123._INSTANT_MAX_MISSES + 2):
+        track123.get_track_info(["STUCK3"])
+        track123._instant_attempts["STUCK3"]["last"] -= track123._INSTANT_RETRY_SECONDS + 1
+
+    assert len(realtime_calls) == track123._INSTANT_MAX_MISSES
+
+
+def test_track123_allow_instant_retry_resets_backoff(monkeypatch, _clear_quota_state):
+    # The dashboard's per-parcel "Refresh from API" is a deliberate request
+    # for a fresh look - it clears the backoff so its check may spend a
+    # quota credit on the instant endpoint again.
+    realtime_calls = []
+    monkeypatch.setattr(track123, "_post", _stuck_track123_responder("STUCK4", realtime_calls))
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.get_track_info(["STUCK4"])
+    track123.get_track_info(["STUCK4"])
+    assert len(realtime_calls) == 1
+
+    track123.allow_instant_retry("STUCK4")
+    track123.get_track_info(["STUCK4"])
+    assert len(realtime_calls) == 2
+
+
+def test_track123_instant_miss_counter_resets_when_events_found(monkeypatch, _clear_quota_state):
+    # A hit proves the number is real and just slow to sync - it starts a
+    # fresh backoff budget rather than inheriting the misses of its earlier
+    # stuck spell.
+    def fake_post(path, payload):
+        if path == "tk/v2.1/track/query-realtime":
+            return {
+                "data": {
+                    "accepted": {
+                        "trackNo": "STUCK5",
+                        "localLogisticsInfo": {
+                            "courierNameEN": "Cainiao",
+                            "trackingDetails": [{"eventDetail": "Departed", "eventTime": "2024-01-01T00:00:00Z"}],
+                        },
+                    }
+                }
+            }
+        return {
+            "data": {
+                "accepted": {
+                    "content": [
+                        {
+                            "trackNo": "STUCK5",
+                            "transitStatus": "IN_TRANSIT",
+                            "localLogisticsInfo": {"courierCode": "cainiao", "courierNameEN": "Cainiao"},
+                        }
+                    ]
+                }
+            }
+        }
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+    track123._instant_attempts["STUCK5"] = {
+        "last": track123.time.monotonic() - track123._INSTANT_RETRY_SECONDS - 1,
+        "misses": track123._INSTANT_MAX_MISSES - 1,
+    }
+
+    results = track123.get_track_info(["STUCK5"])
+
+    assert results["STUCK5"]["confirmed"] is True
+    assert track123._instant_attempts["STUCK5"]["misses"] == 0
+
+
+def test_track123_register_skips_numbers_already_accepted_by_a_query(monkeypatch, _clear_quota_state):
+    # Registration is what consumes a quota credit per new shipment, so a
+    # number a batch query has already accepted must never be re-imported.
+    posts = []
+
+    def fake_post(path, payload):
+        posts.append(path)
+        if path == "tk/v2.1/track/query":
+            return {
+                "data": {
+                    "accepted": {
+                        "content": [
+                            {
+                                "trackNo": "REG1",
+                                "transitStatus": "IN_TRANSIT",
+                                "localLogisticsInfo": {
+                                    "courierNameEN": "Cainiao",
+                                    "trackingDetails": [
+                                        {"eventDetail": "Departed", "eventTime": "2024-01-01T00:00:00Z"}
+                                    ],
+                                },
+                            }
+                        ]
+                    }
+                }
+            }
+        return {"data": {}}
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.get_track_info(["REG1"])
+    track123.register([("REG1", None)])
+
+    assert posts == ["tk/v2.1/track/query"]
+
+
+def test_track123_register_skips_reimport_of_numbers_it_imported(monkeypatch, _clear_quota_state):
+    posts = []
+
+    def fake_post(path, payload):
+        posts.append(path)
+        return {"data": {"accepted": [{"trackNo": "REG2"}]}}
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.register([("REG2", None)])
+    track123.register([("REG2", None)])
+
+    assert posts == ["tk/v2.1/track/import"]
+
+
+def test_track123_register_still_retries_numbers_never_accepted(monkeypatch, _clear_quota_state):
+    # A number Track123 rejected (or never answered for) isn't marked
+    # registered - it should be retried on the next cycle, e.g. after a
+    # courier-code fix ships.
+    posts = []
+
+    def fake_post(path, payload):
+        posts.append(path)
+        return {"data": {"rejected": [{"trackNo": "REG3", "error": {"code": "A0400", "msg": "not registered"}}]}}
+
+    monkeypatch.setattr(track123, "_post", fake_post)
+    monkeypatch.setattr(track123.time, "sleep", lambda _s: None)
+
+    track123.register([("REG3", None)])
+    track123.register([("REG3", None)])
+
+    assert posts == ["tk/v2.1/track/import", "tk/v2.1/track/import"]
+
+
+def test_seventeentrack_register_skips_numbers_already_accepted(monkeypatch, _clear_quota_state):
+    # 17track's quota is a one-time pool consumed per registered number -
+    # numbers it has already accepted (at registration or in a query
+    # response) must not be re-registered every sync cycle.
+    posts = []
+
+    def fake_post(path, payload):
+        posts.append(path)
+        if path == "register":
+            return {"data": {"accepted": [{"number": "SREG1"}]}}
+        return {"data": {"accepted": [{"number": "SREG2", "track_info": {}}]}}
+
+    monkeypatch.setattr(seventeentrack, "_post", fake_post)
+    monkeypatch.setattr(seventeentrack.time, "sleep", lambda _s: None)
+
+    seventeentrack.register([("SREG1", None)])
+    seventeentrack.register([("SREG1", None)])  # skipped: accepted at registration
+    seventeentrack.get_track_info(["SREG2"])
+    seventeentrack.register([("SREG2", None)])  # skipped: accepted by a query
+
+    assert posts == ["register", "gettrackinfo"]

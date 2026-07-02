@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.9
+
+- Drastically cut Track123 API quota use. Track123 bills one credit per
+  *registered shipment*, but also one credit for **every** call to its
+  "instant tracking" endpoint - the live carrier lookup this app uses as a
+  fallback for a number Track123 has accepted but found no events for yet.
+  That fallback used to run on every sync cycle for as long as a number
+  stayed stuck, so a single wrongly-detected number could quietly burn
+  ~48 credits a day (the whole free monthly tier within a day or two).
+  Instant tracking is now tried at most once a day per stuck number, and
+  given up on after 3 consecutive attempts that still found nothing. The
+  per-parcel **Refresh from API** action deliberately bypasses this limit
+  for its one check, so a stuck number can still be given a fresh look on
+  demand.
+- Tracking numbers a provider has already accepted are no longer
+  re-registered on every sync cycle (for both Track123 and 17track).
+  Re-registrations were rejected as duplicates rather than charged, but
+  skipping them avoids relying on that, and stops the associated
+  "declined to register" log noise.
+
 ## 0.9.8
 
 - The Lovelace card is now also published to Home Assistant's own
