@@ -1,5 +1,5 @@
 #!/usr/bin/env bashio
-set -e
+set -ex
 
 # ==========================================================================
 # Mode detection: no db_host configured -> bundled local MariaDB

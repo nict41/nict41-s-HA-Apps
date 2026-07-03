@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2
+
+- Diagnostic build: `run.sh` now runs with `set -x` so the log shows every
+  command as it executes. The add-on is exiting almost immediately on start
+  (exit code 141 / SIGPIPE) before any of its own log lines print, which
+  points at something inside bashio's own startup rather than `run.sh`
+  itself — this build is to pin down exactly which command breaks. The
+  trace will be removed again once the real fix lands.
+
 ## 1.1.1
 
 - Fixed the add-on failing to start (`jq: command not found`, every
