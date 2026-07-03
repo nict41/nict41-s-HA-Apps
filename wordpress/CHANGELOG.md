@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.6
+
+- `config_extra` now applies on every restart, not just when the site is
+  first created. Previously, changing it on an existing install did
+  nothing, because the upstream image only evaluates it while generating
+  a brand-new `wp-config.php`; a change is now detected and triggers a
+  clean regeneration of just that file (the rest of the install and the
+  database are untouched).
+- Documented how to enable **Application Passwords** (needed by Jetpack
+  and similar REST API integrations), which WordPress core hides unless
+  the site is served over HTTPS or `WP_ENVIRONMENT_TYPE` is `local` -
+  set via `config_extra`.
+
 ## 1.1.5
 
 - Fixed a `403 Forbidden` ("client denied by server configuration") on

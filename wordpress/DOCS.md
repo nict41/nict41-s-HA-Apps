@@ -34,7 +34,7 @@ your own via the `db_password` option instead).
 | `table_prefix` | yes | WordPress table prefix. Default `wp_`. |
 | `locale` | no | WordPress locale to install, e.g. `de_DE`. Leave unset for English. |
 | `debug` | no | Enable `WP_DEBUG`. Default `false`. |
-| `config_extra` | no | Raw PHP injected into `wp-config.php` for advanced settings (e.g. `define('WP_MEMORY_LIMIT', '256M');`). |
+| `config_extra` | no | Raw PHP injected into `wp-config.php` for advanced settings (e.g. `define('WP_MEMORY_LIMIT', '256M');`). Applied on the next restart, even on an existing install. |
 
 ## Backups & restore
 
@@ -98,6 +98,20 @@ does not work well behind Ingress's path-prefixed proxy.
 
 If you need HTTPS, put this app behind a reverse proxy app (e.g. Nginx
 Proxy Manager) rather than relying on Ingress.
+
+### Application Passwords (e.g. for Jetpack)
+
+WordPress core hides the Application Passwords feature (used by Jetpack and
+other tools that authenticate against the REST API) unless the site is
+served over HTTPS or its environment type is `local`. Since this app
+serves plain HTTP by default, set `config_extra` to:
+
+```
+define('WP_ENVIRONMENT_TYPE', 'local');
+```
+
+and restart. `config_extra` is applied on every restart (including on an
+existing install, not just when the site is first created).
 
 ## Persistent storage
 

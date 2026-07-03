@@ -79,6 +79,21 @@ fi
 mkdir -p /data/wordpress
 chown www-data:www-data /data/wordpress
 
+# The upstream entrypoint only evaluates WORDPRESS_CONFIG_EXTRA (from the
+# 'config_extra' option) when it generates a brand-new wp-config.php, so
+# changing that option on an existing install would otherwise be silently
+# ignored. Track what was last applied and force a clean regeneration
+# whenever it changes; this only removes wp-config.php itself, which the
+# entrypoint rebuilds from the current WORDPRESS_* env vars, leaving the
+# rest of the install (core, themes, plugins, uploads, database) untouched.
+CONFIG_EXTRA_MARKER=/data/wordpress/.ha-config-extra-applied
+if [ -f /data/wordpress/wp-config.php ] && \
+        ! cmp -s <(printf '%s' "${WORDPRESS_CONFIG_EXTRA:-}") "${CONFIG_EXTRA_MARKER}" 2>/dev/null; then
+    bashio::log.info "'config_extra' changed since the last start; regenerating wp-config.php."
+    rm -f /data/wordpress/wp-config.php
+fi
+printf '%s' "${WORDPRESS_CONFIG_EXTRA:-}" > "${CONFIG_EXTRA_MARKER}"
+
 # ==========================================================================
 # Local database helpers
 # ==========================================================================
