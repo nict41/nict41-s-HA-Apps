@@ -73,13 +73,11 @@ if bashio::config.has_value 'config_extra'; then
 fi
 
 # Persist the full WordPress install (core, themes, plugins, uploads) across
-# restarts and add-on updates, mirroring the upstream image's documented
-# `wordpress:/var/www/html` volume.
+# restarts and add-on updates. The Dockerfile points Apache's DocumentRoot
+# and WORKDIR at /data/wordpress directly (rather than symlinking the base
+# image's /var/www/html, which is a VOLUME and can't be replaced at runtime).
 mkdir -p /data/wordpress
-if [ ! -L /var/www/html ]; then
-    rm -rf /var/www/html
-    ln -s /data/wordpress /var/www/html
-fi
+chown www-data:www-data /data/wordpress
 
 # ==========================================================================
 # Local database helpers

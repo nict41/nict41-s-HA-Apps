@@ -23,9 +23,21 @@ RUN set -eu; \
     # The package postinst initializes a system datadir this add-on never
     # uses (the real datadir lives in /data/mysql); drop it in the same
     # layer to keep the image small.
-    rm -rf /var/lib/mysql/*
+    rm -rf /var/lib/mysql/*; \
+    # The base image declares /var/www/html as a VOLUME, which makes it a
+    # real mount point - it can't be removed or replaced with a symlink at
+    # runtime (fails with "Device or resource busy"), and even a build-time
+    # symlink would just get hidden by Docker's anonymous volume at
+    # container start. So the WordPress install lives directly in
+    # /data/wordpress (the app's real persistent storage) instead:
+    # docker-entrypoint.sh operates purely relative to $PWD (no hardcoded
+    # /var/www/html path in it), so moving WORKDIR is enough on that side;
+    # Apache's DocumentRoot/Directory config is the other half.
+    find /etc/apache2 -type f -name '*.conf' \
+        -exec sed -i 's!/var/www/html!/data/wordpress!g' {} +
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
+WORKDIR /data/wordpress
 CMD [ "/run.sh" ]

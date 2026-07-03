@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.4
+
+- Fixed another startup crash right after the 1.1.3 fix: `rm: cannot
+  remove '/var/www/html': Device or resource busy`. The base image
+  declares `/var/www/html` as a Docker `VOLUME`, which makes it a real
+  mount point that can't be removed or symlinked over from inside the
+  container. Instead of fighting that, Apache's DocumentRoot and the
+  container's working directory now point directly at `/data/wordpress`
+  (`docker-entrypoint.sh` operates purely relative to the working
+  directory, with no hardcoded `/var/www/html` path in it), so the
+  WordPress install lives there with no symlink involved.
+
 ## 1.1.3
 
 - Fixed the real cause of the startup crash (exit code 141): on a fresh
