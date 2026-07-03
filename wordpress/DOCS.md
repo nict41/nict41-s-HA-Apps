@@ -103,15 +103,32 @@ Proxy Manager) rather than relying on Ingress.
 
 WordPress core hides the Application Passwords feature (used by Jetpack and
 other tools that authenticate against the REST API) unless the site is
-served over HTTPS or its environment type is `local`. Since this app
-serves plain HTTP by default, set `config_extra` to:
+served over HTTPS or its environment type is `local`. Fix depends on how
+you access the site:
 
-```
-define('WP_ENVIRONMENT_TYPE', 'local');
-```
+- **LAN-only access** (e.g. `http://<home-assistant-host>:8080`, no real
+  HTTPS anywhere): set `config_extra` to
+  `define('WP_ENVIRONMENT_TYPE', 'local');` and restart.
+- **Behind a reverse proxy or tunnel that terminates real HTTPS**
+  (Cloudflare Tunnel, Nginx Proxy Manager, etc.): the proxy talks to this
+  app over plain HTTP internally, so WordPress needs to trust the
+  `X-Forwarded-Proto` header it sets to know the original request was
+  HTTPS. Set `config_extra` to:
 
-and restart. `config_extra` is applied on every restart (including on an
-existing install, not just when the site is first created).
+  ```php
+  if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+      $_SERVER['HTTPS'] = 'on';
+  }
+  ```
+
+  Then manage Application Passwords (and use Jetpack) via the site's real
+  public URL, not the LAN IP - the REST API calls this feature relies on
+  are built from WordPress's configured **Site Address**
+  (Settings → General), so they only succeed when accessed at that same
+  URL.
+
+`config_extra` is applied on every restart (including on an existing
+install, not just when the site is first created) - no rebuild needed.
 
 ## Persistent storage
 
