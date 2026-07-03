@@ -1,5 +1,5 @@
 #!/usr/bin/env bashio
-set -ex
+set -e
 
 # ==========================================================================
 # Mode detection: no db_host configured -> bundled local MariaDB
@@ -33,7 +33,11 @@ if [ "${LOCAL_DB}" = true ]; then
         DB_PASSWORD=$(cat /data/.db_password)
         bashio::log.info "Using previously generated database password."
     else
-        DB_PASSWORD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)
+        # `head -c` closing the pipe early sends tr a SIGPIPE (exit 141) once
+        # it has produced enough bytes; the password itself is still read
+        # correctly, but bashio runs with `set -o pipefail`, so that failure
+        # would otherwise take down the whole script under `set -e`.
+        DB_PASSWORD=$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24) || true
         bashio::log.info "Generated a database password (stored in /data/.db_password)."
     fi
     printf '%s' "${DB_PASSWORD}" > /data/.db_password

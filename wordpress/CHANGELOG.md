@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.3
+
+- Fixed the real cause of the startup crash (exit code 141): on a fresh
+  install, generating the auto database password piped `tr` from
+  `/dev/urandom` into `head -c 24`. `head` exiting after 24 bytes sends
+  `tr` a SIGPIPE, and because bashio runs the whole script under
+  `set -o pipefail` + `set -e`, that killed the add-on immediately, before
+  MariaDB or Apache ever started (the password itself was generated
+  correctly; only the script's own exit-code handling caused the crash).
+  Removes the diagnostic `set -x` tracing added in 1.1.2.
+
 ## 1.1.2
 
 - Diagnostic build: `run.sh` now runs with `set -x` so the log shows every
