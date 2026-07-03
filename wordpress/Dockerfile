@@ -32,9 +32,15 @@ RUN set -eu; \
     # /data/wordpress (the app's real persistent storage) instead:
     # docker-entrypoint.sh operates purely relative to $PWD (no hardcoded
     # /var/www/html path in it), so moving WORKDIR is enough on that side;
-    # Apache's DocumentRoot/Directory config is the other half.
+    # Apache's DocumentRoot/Directory config is the other half - the
+    # DocumentRoot itself says /var/www/html, but the <Directory> access
+    # grant (both Debian's own default and the one this base image adds)
+    # is scoped to the bare /var/www/ prefix, so both forms need rewriting.
     find /etc/apache2 -type f -name '*.conf' \
-        -exec sed -i 's!/var/www/html!/data/wordpress!g' {} +
+        -exec sed -i \
+            -e 's!/var/www/html!/data/wordpress!g' \
+            -e 's!/var/www/!/data/wordpress/!g' \
+            {} +
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh

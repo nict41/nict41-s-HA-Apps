@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.5
+
+- Fixed a `403 Forbidden` ("client denied by server configuration") on
+  every page after the 1.1.4 fix. Apache's `DocumentRoot` was correctly
+  repointed at `/data/wordpress`, but its separate `<Directory>` access
+  grant (both Debian's own default and the one the base image adds) was
+  still scoped to the bare `/var/www/` prefix, so nothing under
+  `/data/wordpress` was actually allowed to be served. Both config forms
+  are now rewritten.
+
 ## 1.1.4
 
 - Fixed another startup crash right after the 1.1.3 fix: `rm: cannot

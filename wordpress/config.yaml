@@ -1,5 +1,5 @@
 name: WordPress
-version: "1.1.4"
+version: "1.1.5"
 slug: wordpress
 description: Self-hosted WordPress, powered by the official docker-library/wordpress image
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/wordpress"
