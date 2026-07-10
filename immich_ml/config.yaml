@@ -12,8 +12,10 @@ init: false
 startup: services
 boot: auto
 watchdog: "http://[HOST]:[PORT:3003]/ping"
+video: true
 devices:
   - /dev/dri
+  - /dev/dri/renderD128
 ports:
   3003/tcp: 3003
 ports_description:

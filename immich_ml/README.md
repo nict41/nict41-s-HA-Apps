@@ -73,13 +73,17 @@ directly.
 
 ## GPU access
 
-The app requests `/dev/dri` as a device - on Linux this is a directory
-containing both the render node (`renderD128`) and the card device
-(`card0`); mapping the directory passes both through, so `renderD128`
-does not need to be listed separately. The app runs as root inside its
-container, so it doesn't need the host's `render`/`video` group IDs
-matched up either (root bypasses that device-permission check) - if
-`/dev/dri` exists on the host at all, this app can use it.
+The app sets `video: true` (HAOS's hardware category for mapping in
+available video/render devices) alongside explicit `/dev/dri` and
+`/dev/dri/renderD128` entries in `devices`. A bare `devices: [/dev/dri]`
+without `video: true` was tried first and looked correct - ONNX Runtime
+listed `OpenVINOExecutionProvider` first with no fallback warning - but
+the iGPU never actually clocked up during inference
+(`/sys/class/drm/card0/gt_act_freq_mhz` stayed at `0`), so something about
+plain device mapping alone wasn't sufficient on HAOS. The app runs as
+root inside its container either way (no `USER` directive anywhere in
+the image), so it isn't a matter of the container's own user needing
+`render`/`video` group membership on the host side.
 
 ## Persistent storage
 
@@ -143,3 +147,18 @@ See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
 to add this repository to Home Assistant, then install **Immich Machine
 Learning (OpenVINO)** from the app store. You'll also need an existing
 Immich server app to point at it.
+
+### Applying repo changes that don't bump the version
+
+This app's `version` field always equals the exact upstream image tag it
+builds from - it can't be bumped without also changing which image gets
+pulled. That means a repo change that doesn't touch which upstream tag is
+used (a `config.yaml` hardware-access fix, for example) won't make
+Supervisor show an "Update available" banner, since it only compares
+versions. To pick up that kind of change: **uninstall the app, then
+reinstall it** (not just "Rebuild") - this guarantees Supervisor re-reads
+the current `config.yaml` in full, including things like `devices`, that
+a plain rebuild isn't guaranteed to reconcile for an already-installed
+app at an unchanged version. Do **not** select "delete data" when
+uninstalling, so the downloaded models under `/data` survive and don't
+need re-downloading.
