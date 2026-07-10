@@ -27,6 +27,14 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 
 Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
+### [Immich Machine Learning (OpenVINO)](./immich_ml)
+
+![Immich Machine Learning logo](immich_ml/logo.png)
+
+![Supports amd64 Architecture][amd64-shield]
+
+Standalone Immich Machine Learning sidecar, hardware-accelerated with Intel OpenVINO, for offloading face detection and smart search from a separate Immich server app.
+
 ### [Parcel Tracker](./parcel_tracker)
 
 ![Parcel Tracker logo](parcel_tracker/logo.png)

@@ -1,0 +1,28 @@
+name: Immich Machine Learning (OpenVINO)
+version: "v3.0.2-openvino"
+slug: immich_ml
+description: >-
+  Standalone Immich Machine Learning sidecar, hardware-accelerated with
+  Intel OpenVINO, so a separate Immich server app can offload face
+  detection and smart search to an Intel iGPU instead of the CPU.
+url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/immich_ml
+arch:
+  - amd64
+init: false
+startup: services
+boot: auto
+watchdog: "http://[HOST]:[PORT:3003]/ping"
+devices:
+  - /dev/dri
+ports:
+  3003/tcp: 3003
+ports_description:
+  3003/tcp: Immich ML REST API - set as a Machine Learning URL in the Immich server's admin settings
+options:
+  workers: 1
+  model_ttl: 300
+  worker_timeout: 300
+schema:
+  workers: int(1,8)
+  model_ttl: int(0,86400)
+  worker_timeout: int(1,3600)

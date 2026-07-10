@@ -1,0 +1,20 @@
+configuration:
+  workers:
+    name: Workers
+    description: >-
+      Number of ML worker processes. Each worker loads its own copy of
+      loaded models into memory, so raising this trades RAM for throughput
+      under concurrent requests. Leave at 1 unless Immich is queuing jobs
+      slower than you'd like and the host has RAM to spare.
+  model_ttl:
+    name: Model TTL (seconds)
+    description: >-
+      Unload a model from memory after this many seconds of inactivity, to
+      free RAM between jobs. Set to 0 to disable unloading (keeps models
+      resident, trading RAM for avoiding reload latency on the next job).
+  worker_timeout:
+    name: Worker timeout (seconds)
+    description: >-
+      Kill and restart a worker if a single inference request takes longer
+      than this. Raise it if large jobs (e.g. big batches, first-time model
+      downloads) are getting killed before finishing.
