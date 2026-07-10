@@ -48,21 +48,35 @@ Machine Learning setting at.
 
 ## Verifying OpenVINO is active
 
-Trigger an ML job (face detection or smart search) from Immich, then check
-this app's log. You should see a line listing the available ONNX Runtime
-execution providers, including OpenVINO, for example:
+The app's log itself is the simplest way to check - no SSH or `docker
+exec` needed. On startup it logs a line like:
+
+```
+Watching iGPU activity (/sys/class/drm/card0/gt_act_freq_mhz) - logs a line here whenever it's actually busy.
+```
+
+Trigger an ML job (face detection or smart search) from Immich, then
+watch the log. If the iGPU is genuinely being used, you'll see lines like:
+
+```
+iGPU active: 350 MHz (OpenVINO is using the GPU)
+```
+
+**This is the check that actually matters.** The log also shows a line
+listing the available ONNX Runtime execution providers, for example:
 
 ```
 Available ORT providers: ['OpenVINOExecutionProvider', 'CPUExecutionProvider']
 ```
 
-If `OpenVINOExecutionProvider` is missing from that list, OpenVINO isn't
-being used and jobs are silently falling back to CPU - double check
-`/dev/dri` is present on the host (`ls /dev/dri` over SSH) and that the
-app's log doesn't show a GPU/driver initialization error higher up.
-
-You can also confirm GPU utilization directly on the host with
-`intel_gpu_top` (if available) while a job is running.
+`OpenVINOExecutionProvider` being listed first is a **necessary but not
+sufficient** signal - it only means the provider is registered and
+preferred, not that the GPU actually clocked up for a given job. Treat
+the `iGPU active: ... MHz` lines as the source of truth; if those never
+appear while jobs are running even though the provider list looks
+correct, something about hardware access is still wrong (see
+[Troubleshooting](#troubleshooting)) despite ONNX Runtime not reporting
+an explicit fallback warning.
 
 ## Networking
 
@@ -128,11 +142,21 @@ raise `workers` above `1`.
   persistent storage isn't being reset - this shouldn't happen under
   normal use, since models live under `/data`, which Home Assistant
   preserves across app restarts and updates.
-- **`OpenVINOExecutionProvider` missing from the log** (see
-  [above](#verifying-openvino-is-active)): usually means `/dev/dri` isn't
-  reaching the container. Confirm it exists on the host and that the
-  app's **Hardware** section (or `devices` in its configuration) lists
-  it.
+- **No `iGPU active: ... MHz` lines during a job** (see
+  [above](#verifying-openvino-is-active)), even if the providers list
+  looks correct: confirm `/dev/dri` is present on the host and that the
+  app's **Hardware** section (or `devices`/`video` in its configuration)
+  actually grants it - a config-only change to those needs a full
+  reinstall to take effect, see [Applying repo changes that don't bump
+  the version](#applying-repo-changes-that-dont-bump-the-version). If
+  that's all correct and it's still not working, check for a silent
+  driver/init error earlier in the log (grep for `level-zero`, `oneAPI`,
+  `zeInit`), and confirm the iGPU works at all outside this app (e.g.
+  `intel_gpu_top` on the host, if available).
+- **The `GPU frequency file not visible inside this container` warning**:
+  this host doesn't expose `/sys/class/drm/card0` the way this app
+  expects (e.g. a different GPU index) - check `ls /sys/class/drm/` on
+  the host for the right `cardN`.
 - **Immich server can't reach this app**: confirm the URL entered in
   Immich's Machine Learning Settings uses the Home Assistant host's IP
   (not `localhost`, which would refer to the Immich server app's own

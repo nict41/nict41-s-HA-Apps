@@ -15,3 +15,9 @@
   access](DOCS.md#gpu-access). This is a config-only change (no new
   upstream tag), so it needs a reinstall rather than an update - see the
   README's install/update notes.
+- The log now reports iGPU activity directly (`iGPU active: NNN MHz`
+  whenever `/sys/class/drm/card0/gt_act_freq_mhz` is nonzero during a
+  job), so you no longer need SSH or `docker exec` to check whether
+  OpenVINO is genuinely using the GPU - see [Verifying OpenVINO is
+  active](DOCS.md#verifying-openvino-is-active). This is a `run.sh`
+  change, so a plain **Rebuild** picks it up (no reinstall needed).
