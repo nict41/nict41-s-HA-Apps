@@ -165,6 +165,17 @@ raise `workers` above `1`.
   version has drifted out of step with the server - see
   [above](#keeping-the-version-in-step-with-your-immich-server).
 
+## Credits
+
+This app runs [Immich](https://immich.app/)'s official Machine Learning
+image,
+[`immich-app/immich-machine-learning`](https://github.com/immich-app/immich/pkgs/container/immich-machine-learning)
+(from the [immich-app/immich](https://github.com/immich-app/immich)
+project, licensed AGPL-3.0), completely unmodified. All credit for Immich
+and its machine learning features belongs to the Immich project and its
+contributors; this repo only adds a thin startup script that translates
+Home Assistant options into the image's own environment variables.
+
 ## Installation
 
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)

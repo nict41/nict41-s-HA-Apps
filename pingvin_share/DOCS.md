@@ -204,6 +204,19 @@ reversible.
   active - see [Advanced: config.yaml](#advanced-configyaml). Remove the
   file/option and restart to restore the Admin UI.
 
+## Credits
+
+This app is built on
+[Pingvin Share X](https://github.com/smp46/pingvin-share-x)
+(`smp46/pingvin-share-x`, licensed BSD-2-Clause), maintained by **smp46**,
+an actively-maintained fork of the original
+[Pingvin Share](https://github.com/stonith404/pingvin-share) created by
+**Elias Schneider (stonith404)**, archived in June 2025. All credit for
+Pingvin Share's design and functionality belongs to those projects and
+their contributors; this repo only adds Home Assistant integration (an
+options schema and a startup script translating them into the image's own
+environment variables/config file) around the upstream image.
+
 ## Installation
 
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)

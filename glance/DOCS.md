@@ -55,6 +55,15 @@ app's network configuration.
 
 After editing `glance/glance.yml`, restart the Glance app to apply changes.
 
+## Credits
+
+This app packages [Glance](https://github.com/glanceapp/glance)
+(`glanceapp/glance`, licensed AGPL-3.0) completely unmodified — built
+directly from the upstream `glanceapp/glance:v0.8.4` image, with only a
+thin nginx layer added on top for Home Assistant ingress support. All
+dashboard functionality belongs to the Glance project and its
+contributors.
+
 ## Installation
 
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)

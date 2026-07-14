@@ -166,6 +166,17 @@ and rebuild.
   Your data in `/data/mysql` and `/data/backups` is left untouched, and
   re-upgrading resumes normally.
 
+## Credits
+
+This app is built on the official
+[`docker-library/wordpress`](https://github.com/docker-library/wordpress)
+Docker image, which in turn packages [WordPress](https://wordpress.org/)
+itself (GPLv2-or-later), the open-source CMS project maintained by the
+WordPress Foundation, Automattic and its contributors. All credit for
+WordPress and its official Docker image belongs to those projects; this
+repo only adds Home Assistant integration (a bundled MariaDB server, an
+options schema and a startup script) around them.
+
 ## Installation
 
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
