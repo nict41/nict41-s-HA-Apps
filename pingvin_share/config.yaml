@@ -1,5 +1,5 @@
 name: Pingvin Share
-version: "1.0.0"
+version: "1.1.0"
 slug: pingvin_share
 description: Self-hosted file sharing platform (a WeTransfer alternative), powered by the community-maintained Pingvin Share X image
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pingvin_share"
@@ -17,6 +17,7 @@ ports:
   3000/tcp: 8095
 ports_description:
   3000/tcp: Pingvin Share web interface
+webui: "http://[HOST]:[PORT:3000]/"
 map:
   - share:rw
 options:

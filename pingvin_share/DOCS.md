@@ -59,6 +59,58 @@ account, but once the app is reachable from the public internet through
 your tunnel, turn it off there unless you actually want open public
 sign-ups.
 
+## Adding a Home Assistant sidebar shortcut
+
+The app declares a `webui` link, so **Settings → Add-ons → Pingvin Share**
+always has a working **OPEN WEB UI** button. That's one click away, but not
+in the sidebar itself.
+
+Home Assistant's own **Ingress** (which gives other apps in this repository,
+e.g. Glance, a real sidebar icon) is intentionally not used here, for the
+same reason the WordPress app in this repository avoids it: Pingvin Share X
+is a Next.js app that generates absolute (root-relative) URLs for its assets
+and share links, which breaks once Ingress proxies it under a path prefix
+like `/api/hassio_ingress/<token>/` instead of `/`.
+
+The reliable way to get a real sidebar entry pointing at this app is Home
+Assistant's built-in `panel_iframe` integration, added to
+`configuration.yaml`:
+
+```yaml
+panel_iframe:
+  pingvin_share:
+    title: Pingvin Share
+    icon: mdi:share-variant
+    url: "https://share.yourdomain.com" # your real tunnel/public URL
+```
+
+Use your actual public URL (the same one set as **App URL** in the app, see
+[Networking](#networking-cloudflare-tunnel-cloudflared) above) rather than
+the LAN `http://<home-assistant-host>:8095` address, so the link keeps
+working the same way from outside your network. Restart Home Assistant
+Core after adding this for the sidebar entry to appear.
+
+## Known upstream bug: custom links containing `_` silently fail
+
+If you type a custom share link containing an underscore (e.g.
+`my_share`) and click **Share**, nothing visibly happens - no error, the
+modal just doesn't proceed. **This is a bug in Pingvin Share X itself**,
+not something caused by this app's packaging; it reproduces the same way
+running the upstream Docker image directly.
+
+Cause: the frontend's own form validation and the backend both accept
+`[a-zA-Z0-9_-]`, but a separate client-side check that runs right before
+submitting (`isValidId` in `frontend/src/services/share.service.ts`) uses
+an older, stricter pattern, `/^[a-zA-Z0-9-]+$/`, which excludes `_`. That
+check throws an uncaught error for any link containing an underscore,
+which silently aborts the click with no visible feedback.
+
+Workaround: use hyphens instead of underscores in custom links (e.g.
+`my-share`) - fully supported and has the same effect. If you'd like this
+fixed upstream, it's a one-line regex fix in
+[`share.service.ts`](https://github.com/smp46/pingvin-share-x/blob/main/frontend/src/services/share.service.ts) -
+worth opening an issue/PR against `smp46/pingvin-share-x`.
+
 ## Configuration
 
 | Option | Required | Description |
