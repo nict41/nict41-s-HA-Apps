@@ -44,6 +44,15 @@ Standalone Immich Machine Learning sidecar, hardware-accelerated with Intel Open
 
 Automatically detects tracking numbers from your shipping emails (AliExpress, eBay, Amazon, and more) and tracks delivery status.
 
+### [Pingvin Share](./pingvin_share)
+
+![Pingvin Share logo](pingvin_share/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Self-hosted file sharing platform (a WeTransfer alternative), built on the actively-maintained Pingvin Share X fork.
+
 ### [WordPress](./wordpress)
 
 ![WordPress logo](wordpress/logo.png)

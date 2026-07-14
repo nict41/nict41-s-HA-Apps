@@ -1,0 +1,24 @@
+configuration:
+  trust_proxy:
+    name: Trust proxy
+    description: >-
+      Whether Pingvin Share is served through a reverse proxy or tunnel
+      (e.g. a Cloudflare Tunnel). When enabled, the X-Forwarded-For header
+      is trusted for client IPs. Leave enabled unless you access the app
+      directly without any proxy in front of it.
+  clamav_host:
+    name: ClamAV host
+    description: >-
+      Hostname or IP address of a ClamAV server used to scan shares for
+      malicious files. Leave empty to disable virus scanning.
+  clamav_port:
+    name: ClamAV port
+    description: Port of the ClamAV server. Ignored when clamav_host is empty.
+  config_yaml:
+    name: Advanced YAML configuration
+    description: >-
+      Advanced: full contents of Pingvin Share's config.yaml (see
+      config.example.yaml in the project). Setting this disables editing
+      settings from the app's own Admin UI. Leave empty (recommended) to
+      configure branding, sharing rules, SMTP, OAuth, LDAP, S3 and legal
+      pages from the Admin UI instead.
