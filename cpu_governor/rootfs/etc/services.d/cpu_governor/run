@@ -10,6 +10,8 @@
 #      even with full_access + privileged caps declared, so this is
 #      expected to fail here - but it's attempted first so that if a future
 #      Supervisor ever grants a writable /sys, no sidecar is needed.
+#      (Note: host_pid can't be used to help here - it makes s6-overlay fail
+#      to boot as PID 1 - so this container never shares the host PID ns.)
 #
 #   B. Fall back to managing a genuinely privileged Docker sidecar
 #      (--privileged --pid=host), which DOES get a read-write view of the

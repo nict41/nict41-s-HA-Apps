@@ -63,13 +63,12 @@ Docker daemon start (i.e. every host boot).
 Rather than assume, the add-on **tries both at runtime on the actual host**
 and reports which path it took in its log:
 
-1. **Strategy A - direct write.** It declares `host_pid: true`,
-   `full_access: true` and `privileged: [SYS_ADMIN, SYS_RAWIO, SYS_RESOURCE,
-   SYS_MODULE]`, then tries to write `scaling_governor` for every core and
-   read it back. If a (future) Supervisor ever grants a writable `/sys`,
-   this succeeds and **no sidecar is used** - the add-on just sets the
-   value and idles. On this install it fails (read-only `/sys`, as above)
-   and it moves on.
+1. **Strategy A - direct write.** It declares `full_access: true` and
+   `privileged: [SYS_ADMIN, SYS_RAWIO, SYS_RESOURCE, SYS_MODULE]`, then
+   tries to write `scaling_governor` for every core and read it back. If a
+   (future) Supervisor ever grants a writable `/sys`, this succeeds and
+   **no sidecar is used** - the add-on just sets the value and idles. On
+   this install it fails (read-only `/sys`, as above) and it moves on.
 2. **Strategy B - privileged sidecar (the path that actually runs here).**
    With `docker_api: true` for host Docker API access, the add-on becomes
    the versioned, documented **owner** of exactly the sidecar container
@@ -152,9 +151,18 @@ every host boot.
 ## Notes & caveats
 
 - **This add-on is intentionally highly privileged** (`full_access`,
-  `docker_api`, host PID). That's inherent to changing a host-level kernel
-  setting from within a container; it's why it lives in a personal repo and
-  not a public one.
+  `docker_api`). That's inherent to changing a host-level kernel setting
+  from within a container; it's why it lives in a personal repo and not a
+  public one.
+- **Do not add `host_pid: true` to this add-on.** It seems like it should
+  help the direct-write path, but it doesn't (a writable `/sys` needs real
+  `--privileged`, which remounts `/sys` read-write - sharing the host PID
+  namespace does nothing for that), and it actively **breaks boot**: this
+  add-on runs on the s6-overlay HA base image, whose init must be PID 1, and
+  sharing the host PID namespace makes that impossible. The symptom is the
+  container dying immediately with `s6-overlay-suexec: fatal: can only run
+  as pid 1`. The `--pid=host` the fix genuinely needs is applied to the
+  sidecar container instead, which is a plain Alpine image with no s6.
 - `docker_api: true` gives the add-on access to the **host Docker socket**.
   The add-on only uses it to manage the single `cpu-governor-performance`
   sidecar, but be aware that access is broad by nature.

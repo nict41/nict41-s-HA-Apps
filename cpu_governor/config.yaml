@@ -1,5 +1,5 @@
 name: "CPU Performance Governor"
-version: "1.0.0"
+version: "1.0.1"
 slug: "cpu_governor"
 description: >-
   Sets the host CPU cpufreq scaling governor (default performance) so
@@ -16,7 +16,14 @@ boot: auto
 # (see README - Supervisor mounts /sys read-only on this install even with
 # all of this set, so at runtime the add-on falls back to a privileged
 # Docker sidecar). docker_api grants the socket access that fallback needs.
-host_pid: true
+#
+# NOTE: host_pid is deliberately NOT set. This add-on runs on the s6-overlay
+# HA base image, whose init MUST be PID 1; sharing the host PID namespace
+# makes that impossible and the container dies at boot with
+# "s6-overlay-suexec: fatal: can only run as pid 1". host_pid also wouldn't
+# help - a writable /sys needs real --privileged (which remounts /sys rw),
+# not a shared PID namespace - and --pid=host is applied where it actually
+# matters: on the sidecar container the add-on spawns.
 full_access: true
 docker_api: true
 privileged:
