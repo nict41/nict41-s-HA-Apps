@@ -1,0 +1,11 @@
+configuration:
+  governor:
+    name: CPU scaling governor
+    description: >-
+      The cpufreq scaling governor to apply to every CPU core. Default
+      "performance", which pins cores to their maximum clock so CPU-bound
+      jobs (e.g. Immich ML backlog processing) aren't held down by the
+      host's "powersave" default. Other valid values depend on the host
+      kernel's cpufreq driver - commonly "powersave", and on some drivers
+      "ondemand" or "conservative". Applied to all cores on start and
+      re-applied automatically on every host boot.

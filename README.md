@@ -17,6 +17,15 @@ This repository contains the following apps
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
 
+### [CPU Performance Governor](./cpu_governor)
+
+![CPU Performance Governor logo](cpu_governor/logo.png)
+
+![Supports amd64 Architecture][amd64-shield]
+![Supports aarch64 Architecture][aarch64-shield]
+
+Sets the host CPU cpufreq scaling governor (default performance) so CPU-bound jobs get full clock speed instead of the powersave default, and re-applies it on every host boot.
+
 ### [Glance Dashboard](./glance)
 
 ![Glance logo](glance/logo.png)
