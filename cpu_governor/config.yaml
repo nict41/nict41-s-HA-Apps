@@ -1,0 +1,30 @@
+name: "CPU Performance Governor"
+version: "1.0.0"
+slug: "cpu_governor"
+description: >-
+  Sets the host CPU cpufreq scaling governor (default performance) so
+  CPU-bound jobs get full clock speed instead of being held down by the
+  powersave default. Re-applies automatically on every host boot.
+url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/cpu_governor
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: system
+boot: auto
+# Declared so the add-on can *attempt* to write scaling_governor directly
+# (see README - Supervisor mounts /sys read-only on this install even with
+# all of this set, so at runtime the add-on falls back to a privileged
+# Docker sidecar). docker_api grants the socket access that fallback needs.
+host_pid: true
+full_access: true
+docker_api: true
+privileged:
+  - SYS_ADMIN
+  - SYS_RAWIO
+  - SYS_RESOURCE
+  - SYS_MODULE
+options:
+  governor: performance
+schema:
+  governor: str

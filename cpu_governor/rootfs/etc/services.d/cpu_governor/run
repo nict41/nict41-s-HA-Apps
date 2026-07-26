@@ -1,0 +1,120 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# CPU Performance Governor
+#
+# Sets the host CPU cpufreq scaling governor. Two strategies, chosen at
+# runtime on the actual host (see this add-on's README for the full story):
+#
+#   A. Try to write /sys/.../scaling_governor directly from this add-on's
+#      own container. On this HA install Supervisor mounts /sys READ-ONLY
+#      even with full_access + privileged caps declared, so this is
+#      expected to fail here - but it's attempted first so that if a future
+#      Supervisor ever grants a writable /sys, no sidecar is needed.
+#
+#   B. Fall back to managing a genuinely privileged Docker sidecar
+#      (--privileged --pid=host), which DOES get a read-write view of the
+#      host's /sys and can set the governor. The add-on owns that sidecar:
+#      it (re)creates it idempotently on every start, so restarts and
+#      reinstalls never leave duplicates behind.
+# ==============================================================================
+
+GOVERNOR="$(bashio::config 'governor')"
+SIDECAR_NAME="cpu-governor-performance"
+GOV_GLOB="/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"
+CPU0_GOV="/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"
+
+shopt -s nullglob
+
+if bashio::var.is_empty "${GOVERNOR}"; then
+    GOVERNOR="performance"
+fi
+
+bashio::log.info "Requested CPU scaling governor: ${GOVERNOR}"
+
+# ---------------------------------------------------------------------------
+# Strategy A: direct write from inside this add-on's container.
+# Returns 0 only if every core's governor was written AND reads back as the
+# requested value; any read-only file (the expected case here) returns 1.
+# ---------------------------------------------------------------------------
+try_direct() {
+    local files f wrote_any=false current
+    files=( ${GOV_GLOB} )
+    if [ "${#files[@]}" -eq 0 ]; then
+        bashio::log.warning "No scaling_governor files visible at ${GOV_GLOB} - is cpufreq available on this host?"
+        return 1
+    fi
+    for f in "${files[@]}"; do
+        if echo "${GOVERNOR}" > "${f}" 2>/dev/null; then
+            wrote_any=true
+        else
+            return 1
+        fi
+    done
+    [ "${wrote_any}" = true ] || return 1
+    for f in "${files[@]}"; do
+        current="$(cat "${f}" 2>/dev/null || echo '')"
+        [ "${current}" = "${GOVERNOR}" ] || return 1
+    done
+    return 0
+}
+
+# ---------------------------------------------------------------------------
+# Strategy B: (re)create the privileged sidecar via the host Docker API.
+# ---------------------------------------------------------------------------
+run_sidecar() {
+    if ! command -v docker >/dev/null 2>&1; then
+        bashio::exit.nok "docker CLI not found in this add-on image - cannot manage the sidecar."
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        bashio::exit.nok "Cannot reach the host Docker API - confirm 'docker_api: true' is set for this add-on."
+    fi
+
+    # Idempotent: remove any existing sidecar first (a previous start of this
+    # add-on, a reinstall, or the original hand-created container, which uses
+    # this same name) so we never end up with two doing the same job.
+    if docker rm -f "${SIDECAR_NAME}" >/dev/null 2>&1; then
+        bashio::log.info "Removed a pre-existing '${SIDECAR_NAME}' container before recreating it."
+    fi
+
+    bashio::log.info "Launching privileged sidecar '${SIDECAR_NAME}' to set governor=${GOVERNOR}..."
+    # --restart unless-stopped: the sidecar also re-applies the governor on
+    # every Docker daemon start (i.e. every host boot) on its own, as a belt
+    # -and-braces backup to this add-on's own boot: auto restart.
+    if ! docker run -d \
+        --name "${SIDECAR_NAME}" \
+        --restart unless-stopped \
+        --privileged \
+        --pid=host \
+        alpine sh -c "
+            for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+              echo ${GOVERNOR} > \"\$f\"
+            done
+            exec sleep infinity
+        " >/dev/null; then
+        bashio::exit.nok "Failed to start the '${SIDECAR_NAME}' sidecar container."
+    fi
+    bashio::log.info "Sidecar '${SIDECAR_NAME}' started."
+}
+
+# ---------------------------------------------------------------------------
+# Choose a strategy and report what actually happened.
+# ---------------------------------------------------------------------------
+if try_direct; then
+    bashio::log.info "Set governor=${GOVERNOR} directly from this add-on (writable /sys detected)."
+    # Direct write works, so no sidecar is needed - clean up a stale one.
+    if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+        docker rm -f "${SIDECAR_NAME}" >/dev/null 2>&1 \
+            && bashio::log.info "Removed the now-unnecessary '${SIDECAR_NAME}' sidecar."
+    fi
+else
+    bashio::log.warning "Direct write to scaling_governor unavailable (read-only /sys, as expected on this install) - using a privileged Docker sidecar instead."
+    run_sidecar
+    # /sys is readable (just not writable) from here, so verify the result.
+    sleep 2
+    if [ -r "${CPU0_GOV}" ]; then
+        bashio::log.info "cpu0 scaling_governor now reads: $(cat "${CPU0_GOV}" 2>/dev/null || echo unknown) (target: ${GOVERNOR})"
+    fi
+fi
+
+bashio::log.info "CPU Performance Governor is up; idling to stay marked as started. Governor persists via the sidecar's restart policy and this add-on's boot: auto."
+exec sleep infinity
