@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.1
+
+- Fix the add-on failing to start with `s6-overlay-suexec: fatal: can only
+  run as pid 1`. This was caused by `host_pid: true`: on the s6-overlay HA
+  base image the init process must be PID 1, and sharing the host PID
+  namespace makes that impossible. `host_pid` is removed - it never helped
+  anyway (a writable `/sys` needs real `--privileged`, not a shared PID
+  namespace), and the `--pid=host` the fix actually needs is applied to the
+  spawned sidecar container, not to this add-on. See the README's "Notes &
+  caveats".
+
 ## 1.0.0
 
 - Initial release. Sets the host CPU cpufreq scaling governor (default
