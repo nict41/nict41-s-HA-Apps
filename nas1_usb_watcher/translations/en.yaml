@@ -1,0 +1,15 @@
+configuration:
+  usb_port:
+    name: USB port (sysfs)
+    description: >-
+      The sysfs USB device name of the NAS1 drive's port, checked for
+      presence under /sys/bus/usb/devices/. Default "2-1". Change it only if
+      the drive is moved to a different physical USB port (find the new value
+      with `ls /sys/bus/usb/devices/` on the host, or from `dmesg` around a
+      plug event).
+  poll_interval:
+    name: Poll interval (seconds)
+    description: >-
+      How often to check whether the drive's USB port is present. Default 5
+      seconds. This is a lightweight directory-existence check, so short
+      intervals are cheap; raise it if you want fewer, coarser readings.
