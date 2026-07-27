@@ -1,0 +1,32 @@
+name: "NAS1 USB Link Watcher"
+version: "1.0.0"
+slug: "nas1_usb_watcher"
+description: >-
+  Watches the NAS1 external drive's USB port in sysfs and publishes a Home
+  Assistant binary_sensor over MQTT that goes to "problem" whenever the
+  drive's flaky USB data link drops, so drops and recoveries are visible
+  and can be notified on.
+url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/nas1_usb_watcher
+arch:
+  - amd64
+  - aarch64
+init: false
+startup: services
+boot: auto
+# Reading whether /sys/bus/usb/devices/<port> exists only needs sysfs
+# visibility, not write access - so unlike cpu_governor this add-on does NOT
+# need real Docker --privileged/--pid=host or a sidecar. full_access ensures
+# the host USB subsystem is visible under /sys inside the container. (No
+# host_pid: it breaks the s6-overlay base image - see cpu_governor's notes.)
+full_access: true
+# Supervisor injects broker host/port/credentials as a service, so the
+# password is never hardcoded. "want": start even if no broker is present,
+# and wait for one at runtime.
+services:
+  - mqtt:want
+options:
+  usb_port: "2-1"
+  poll_interval: 5
+schema:
+  usb_port: str
+  poll_interval: int(1,300)

@@ -1,0 +1,99 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# NAS1 USB Link Watcher
+#
+# Polls the NAS1 external drive's USB port in sysfs and publishes a Home
+# Assistant MQTT-discovery binary_sensor that reads "problem" (on) whenever
+# the drive's flaky USB *data* link drops while the drive stays powered.
+#
+# The MQTT topics and unique_id below are kept EXACTLY as the original
+# hand-created watcher used, so this add-on drives the SAME entity
+# (binary_sensor.nas1_usb_watcher_nas1_usb_link) that the existing
+# "NAS1 USB Link Change" automation already references - not a duplicate.
+# ==============================================================================
+
+USB_PORT="$(bashio::config 'usb_port')"
+POLL_INTERVAL="$(bashio::config 'poll_interval')"
+
+USB_PATH="/sys/bus/usb/devices/${USB_PORT}"
+USB_ROOT="/sys/bus/usb/devices"
+
+DISCOVERY_TOPIC="homeassistant/binary_sensor/nas1_usb_link/config"
+STATE_TOPIC="watcher/nas1_usb/state"
+ATTR_TOPIC="watcher/nas1_usb/attributes"
+
+# ---------------------------------------------------------------------------
+# Wait for an MQTT broker (mqtt:want means we may start before it does).
+# ---------------------------------------------------------------------------
+for attempt in $(seq 1 30); do
+    if bashio::services.available "mqtt"; then
+        break
+    fi
+    bashio::log.warning "MQTT service not available yet - waiting (${attempt}/30)..."
+    sleep 2
+done
+if ! bashio::services.available "mqtt"; then
+    bashio::exit.nok "No MQTT service available. Install/start the Mosquitto broker add-on (this add-on declares services: mqtt:want)."
+fi
+
+MQTT_HOST="$(bashio::services mqtt 'host')"
+MQTT_PORT="$(bashio::services mqtt 'port')"
+MQTT_USER="$(bashio::services mqtt 'username')"
+MQTT_PASS="$(bashio::services mqtt 'password')"
+
+MQTT_ARGS=(-h "${MQTT_HOST}" -p "${MQTT_PORT}")
+if bashio::var.has_value "${MQTT_USER}"; then
+    MQTT_ARGS+=(-u "${MQTT_USER}")
+fi
+if bashio::var.has_value "${MQTT_PASS}"; then
+    MQTT_ARGS+=(-P "${MQTT_PASS}")
+fi
+
+mpub() {
+    # $1 = topic, $2 = payload; all publishes are retained (-r).
+    mosquitto_pub "${MQTT_ARGS[@]}" -r -t "$1" -m "$2"
+}
+
+# ---------------------------------------------------------------------------
+# Sanity check: can this add-on even see the USB subsystem in sysfs?
+# A missing /sys/bus/usb/devices means we can't distinguish "drive gone" from
+# "add-on can't read USB at all" - flag that distinctly, since it would make
+# every reading a false "disconnected".
+# ---------------------------------------------------------------------------
+if [ ! -d "${USB_ROOT}" ] || [ -z "$(ls -A "${USB_ROOT}" 2>/dev/null)" ]; then
+    bashio::log.error "Cannot see the host USB subsystem at ${USB_ROOT} from inside this add-on."
+    bashio::log.error "Every reading would be a false 'disconnected'. This add-on assumes a plain full_access add-on can read sysfs USB; if not, it needs the heavier privileged/host-pid sidecar approach (see README)."
+    bashio::exit.nok "USB sysfs not visible - refusing to publish misleading state."
+fi
+
+bashio::log.info "Watching NAS1 USB port ${USB_PORT} (${USB_PATH}) every ${POLL_INTERVAL}s."
+
+# ---------------------------------------------------------------------------
+# Idempotent MQTT discovery config (retained). Republished on every start;
+# unique_id keeps it the same entity across restarts and reinstalls.
+# ---------------------------------------------------------------------------
+mpub "${DISCOVERY_TOPIC}" '{"name":"USB Link","unique_id":"nas1_usb_link","state_topic":"watcher/nas1_usb/state","payload_on":"disconnected","payload_off":"connected","device_class":"problem","json_attributes_topic":"watcher/nas1_usb/attributes","device":{"identifiers":["nas1_usb_watcher"],"name":"NAS1"}}'
+bashio::log.info "Published MQTT discovery config to ${DISCOVERY_TOPIC}."
+
+# ---------------------------------------------------------------------------
+# Poll loop. Publishes only on change (LAST starts empty, so the first
+# reading is always published to sync HA on startup).
+# ---------------------------------------------------------------------------
+LAST=""
+while true; do
+    if [ -d "${USB_PATH}" ]; then
+        CUR="connected"
+    else
+        CUR="disconnected"
+    fi
+
+    if [ "${CUR}" != "${LAST}" ]; then
+        NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        mpub "${STATE_TOPIC}" "${CUR}"
+        mpub "${ATTR_TOPIC}" "{\"last_change\":\"${NOW}\"}"
+        bashio::log.info "NAS1 USB ${USB_PORT} is ${CUR} (as of ${NOW})."
+        LAST="${CUR}"
+    fi
+
+    sleep "${POLL_INTERVAL}"
+done

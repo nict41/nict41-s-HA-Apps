@@ -44,6 +44,15 @@ Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
 Standalone Immich Machine Learning sidecar, hardware-accelerated with Intel OpenVINO, for offloading face detection and smart search from a separate Immich server app.
 
+### [NAS1 USB Link Watcher](./nas1_usb_watcher)
+
+![NAS1 USB Link Watcher logo](nas1_usb_watcher/logo.png)
+
+![Supports amd64 Architecture][amd64-shield]
+![Supports aarch64 Architecture][aarch64-shield]
+
+Watches the NAS1 external drive's USB port in sysfs and publishes an MQTT binary_sensor that flags when the drive's flaky USB data link drops, so drops and recoveries are visible and notifiable.
+
 ### [Parcel Tracker](./parcel_tracker)
 
 ![Parcel Tracker logo](parcel_tracker/logo.png)
