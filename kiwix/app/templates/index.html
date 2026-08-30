@@ -162,6 +162,30 @@
       color: var(--text-muted); font-size: 0.9rem; }
     .hint { font-size: 0.82rem; color: var(--text-muted); margin: var(--space-3) 0 0; }
     .hint strong { color: var(--text); }
+    /* Settings panel */
+    .panel { background: var(--surface); border: 1px solid var(--border);
+      border-top: 2px solid var(--text); padding: var(--space-4) var(--space-5) var(--space-5);
+      margin-top: var(--space-5); box-shadow: var(--shadow-md); }
+    .settings-grid { display: grid; gap: var(--space-4);
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-top: var(--space-4); }
+    .settings-grid .field { gap: 0.35rem; }
+    .settings-grid input, .settings-grid select { width: 100%; }
+    .field-note { font-size: 0.78rem; color: var(--text-muted); }
+    .field-row { display: flex; gap: var(--space-2); }
+    .field-row input { flex: 1; min-width: 0; }
+    .settings-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5); }
+
+    /* Catalog entry details */
+    .details { border-top: 1px dashed var(--border-strong); margin-top: var(--space-3);
+      padding-top: var(--space-3); width: 100%; }
+    .details dl { display: grid; grid-template-columns: auto 1fr; gap: 0.3rem var(--space-4);
+      margin: 0; font-size: 0.85rem; }
+    .details dt { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--text-muted); padding-top: 0.15rem; }
+    .details dd { margin: 0; overflow-wrap: anywhere; }
+    .details .summary { margin: 0 0 var(--space-3); }
+    .row.is-open { flex-wrap: wrap; }
+
     [hidden] { display: none !important; }
     .toast { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%);
       background: var(--text); color: var(--bg); padding: 0.6rem 0.9rem; font-size: 0.85rem;
@@ -184,16 +208,20 @@
         </div>
       </div>
       <div class="topbar-spacer"></div>
-      <a class="btn btn-primary" id="read-link" href="kiwix/" target="_self">
+      <a class="btn btn-primary" id="read-link" href="read" target="_self">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
         Read
       </a>
       <button class="btn" id="server-toggle" type="button"></button>
+      <button class="btn btn-icon" id="settings-open" type="button" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      </button>
     </div>
   </header>
 
   <div class="wrap">
     <div id="storage-banner" hidden></div>
+    <div id="window-banner" hidden></div>
 
     <div class="stats-bar">
       <div class="stat">
@@ -249,6 +277,17 @@
           <select id="filter-category"><option value="">Any</option></select>
         </div>
         <div class="field">
+          <label for="filter-sort">Sort by</label>
+          <select id="filter-sort">
+            <option value="relevance">Best match</option>
+            <option value="size_desc">Size, largest first</option>
+            <option value="size_asc">Size, smallest first</option>
+            <option value="articles">Most articles</option>
+            <option value="date">Most recent</option>
+            <option value="title">Title A–Z</option>
+          </select>
+        </div>
+        <div class="field">
           <label for="do-search">&nbsp;</label>
           <button class="btn btn-primary" id="do-search" type="button">Search</button>
         </div>
@@ -263,12 +302,66 @@
       <div class="section-head">
         <h2 id="catalog-heading">Wikipedia editions</h2><span class="section-count" id="catalog-count">0</span>
       </div>
+      <p class="hint" id="sort-note" hidden></p>
       <div id="catalog-list"></div>
       <div style="display:flex;gap:0.5rem;margin-top:1rem;">
         <button class="btn" id="catalog-prev" type="button" hidden>Previous</button>
         <button class="btn" id="catalog-next" type="button" hidden>Next</button>
       </div>
     </section>
+    <div id="settings-panel" class="panel" hidden>
+      <div class="section-head"><h2>Settings</h2></div>
+      <p class="hint">
+        These apply straight away — no add-on restart, so nothing in flight is
+        interrupted. They start from the add-on options and override them
+        while set.
+      </p>
+      <div class="settings-grid">
+        <div class="field">
+          <label for="set-concurrent">Archives at once</label>
+          <input type="number" id="set-concurrent" min="1" max="6" step="1" />
+          <span class="field-note">Separate downloads running in parallel.</span>
+        </div>
+        <div class="field">
+          <label for="set-threads">Connections per archive</label>
+          <input type="number" id="set-threads" min="1" max="8" step="1" />
+          <span class="field-note">Splits one archive across several ranges. 4 is a good start; more rarely helps.</span>
+        </div>
+        <div class="field">
+          <label for="set-language">Catalog language</label>
+          <input type="text" id="set-language" placeholder="eng" />
+          <span class="field-note">ISO 639-3 code the browser opens on.</span>
+        </div>
+        <div class="field">
+          <label for="set-auto-serve">Serve new downloads</label>
+          <select id="set-auto-serve">
+            <option value="true">Yes, serve automatically</option>
+            <option value="false">No, I'll choose</option>
+          </select>
+          <span class="field-note">Add each finished archive to the served library.</span>
+        </div>
+        <div class="field">
+          <label for="set-window">Off-peak window</label>
+          <select id="set-window">
+            <option value="false">Download any time</option>
+            <option value="true">Only between these hours</option>
+          </select>
+          <span class="field-note">Outside the window, transfers pause and resume by themselves.</span>
+        </div>
+        <div class="field">
+          <label for="set-window-start">From / until</label>
+          <div class="field-row">
+            <input type="time" id="set-window-start" />
+            <input type="time" id="set-window-end" />
+          </div>
+          <span class="field-note">Home Assistant's timezone. Crossing midnight is fine.</span>
+        </div>
+      </div>
+      <div class="settings-actions">
+        <button class="btn btn-primary" id="settings-save" type="button">Save settings</button>
+        <button class="btn" id="settings-close" type="button">Close</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -276,7 +369,9 @@
       "use strict";
 
       var state = null;
-      var catalogState = { mode: "wikipedia", q: "", lang: "", category: "", start: 0, count: 30, total: 0 };
+      var catalogState = { mode: "wikipedia", q: "", lang: "", category: "",
+                           sort: "relevance", start: 0, count: 30, total: 0 };
+      var expanded = {};
       var pollTimer = null;
 
       function $(id) { return document.getElementById(id); }
@@ -321,6 +416,8 @@
         });
       }
 
+      var CLOCK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>';
+
       var WARNING_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
 
       function renderStorage(storage) {
@@ -331,6 +428,23 @@
         banner.innerHTML = WARNING_ICON +
           '<div><div class="banner-title">Storage unavailable</div>' +
           '<div class="banner-body">' + escapeHtml(storage.message) + "</div></div>";
+      }
+
+      function renderWindow() {
+        var banner = $("window-banner");
+        var win = state.window || { enabled: false, open: true };
+        if (!win.enabled) { banner.hidden = true; return; }
+        banner.hidden = false;
+        banner.className = "banner is-info";
+        banner.innerHTML = CLOCK_ICON +
+          '<div><div class="banner-title">' +
+          (win.open ? "Off-peak window open" : "Outside the download window") + "</div>" +
+          '<div class="banner-body">Downloads run between <strong>' + escapeHtml(win.start) +
+          "</strong> and <strong>" + escapeHtml(win.end) + "</strong>. " +
+          (win.open
+            ? "Transfers pause on their own when it closes and pick up the next night."
+            : "Queued transfers are waiting; use <strong>Download now</strong> on one to start it anyway.") +
+          "</div></div>";
       }
 
       function renderStats() {
@@ -354,9 +468,15 @@
         $("read-link").classList.toggle("btn-primary", Boolean(srv.running));
       }
 
+      var STATUS_LABEL = {
+        queued: "queued", downloading: "downloading", waiting: "waiting for the window",
+        paused: "paused", done: "done", error: "failed", interrupted: "interrupted"
+      };
+
       function downloadRow(job) {
         var percent = job.total ? Math.min(100, (job.downloaded / job.total) * 100) : 0;
         var meta = [bytes(job.downloaded) + (job.total ? " of " + bytes(job.total) : "")];
+        if (job.total) { meta.push(percent.toFixed(1) + "%"); }
         if (job.status === "downloading" && job.speed > 0) {
           meta.push(bytes(job.speed) + "/s");
           if (job.total) {
@@ -366,12 +486,16 @@
               : Math.max(1, Math.round(remaining / 60)) + "m left");
           }
         }
-        meta.push(job.status);
+        meta.push(STATUS_LABEL[job.status] || job.status);
+        if (job.ignore_window && state.window && state.window.enabled) { meta.push("ignoring the window"); }
 
         var actions = "";
         if (job.status === "downloading" || job.status === "queued") {
-          actions = '<button class="btn btn-sm" data-action="cancel" data-id="' + job.id + '">Pause</button>';
-        } else if (job.status === "paused" || job.status === "error") {
+          actions = '<button class="btn btn-sm" data-action="pause" data-id="' + job.id + '">Pause</button>';
+        } else if (job.status === "waiting") {
+          actions = '<button class="btn btn-sm btn-primary" data-action="now" data-id="' + job.id + '">Download now</button>' +
+            '<button class="btn btn-sm" data-action="pause" data-id="' + job.id + '">Pause</button>';
+        } else if (job.status === "paused" || job.status === "error" || job.status === "interrupted") {
           actions = '<button class="btn btn-sm" data-action="resume" data-id="' + job.id + '">Resume</button>' +
             '<button class="btn btn-sm btn-danger" data-action="forget" data-id="' + job.id + '">Remove</button>';
         } else {
@@ -411,6 +535,7 @@
 
       function render() {
         renderStorage(state.storage);
+        renderWindow();
         renderStats();
 
         var jobs = state.downloads;
@@ -473,16 +598,58 @@
           ? '<img class="row-thumb" alt="" loading="lazy" src="' + escapeHtml(entry.thumbnail) + '" />'
           : "";
 
-        return '<div class="row">' + thumb + '<div class="row-main">' +
+        var open = Boolean(expanded[entry.filename]);
+        var toggle = '<button class="btn btn-sm" data-action="details" data-file="' +
+          escapeHtml(entry.filename) + '">' + (open ? "Hide" : "Details") + "</button>";
+
+        return '<div class="row' + (open ? " is-open" : "") + '">' + thumb + '<div class="row-main">' +
           '<div class="row-title">' + escapeHtml(entry.title) + " " + flavour + "</div>" +
           '<div class="row-meta"><span>' + meta.map(escapeHtml).join("</span><span>") + "</span></div>" +
           (entry.flavour_detail
             ? '<div class="row-meta"><span>' + escapeHtml(entry.flavour_detail) + "</span></div>" : "") +
-          '</div><div class="row-actions">' + action + "</div></div>";
+          '</div><div class="row-actions">' + toggle + action + "</div>" +
+          (open ? detailsBlock(entry) : "") + "</div>";
+      }
+
+      function detailsBlock(entry) {
+        var rows = [
+          ["Archive", entry.name],
+          ["Flavour", entry.flavour_label + (entry.flavour ? " (" + entry.flavour + ")" : "")],
+          ["Size", bytes(entry.size)],
+          ["Articles", entry.article_count ? entry.article_count.toLocaleString() : "—"],
+          ["Media files", entry.media_count ? entry.media_count.toLocaleString() : "—"],
+          ["Language", entry.language || "—"],
+          ["Category", entry.category || "—"],
+          ["Published", entry.issued || entry.updated || "—"],
+          ["Publisher", entry.publisher || "—"],
+          ["Source", entry.author || "—"],
+          ["Contents", (entry.tags && entry.tags.length) ? entry.tags.join(", ") : "—"],
+          ["Filename", entry.filename]
+        ];
+
+        return '<div class="details">' +
+          (entry.summary ? '<p class="summary">' + escapeHtml(entry.summary) + "</p>" : "") +
+          "<dl>" + rows.map(function (row) {
+            return "<dt>" + escapeHtml(row[0]) + "</dt><dd>" + escapeHtml(row[1]) + "</dd>";
+          }).join("") + "</dl>" +
+          (entry.preview_url
+            ? '<p class="hint"><a href="' + escapeHtml(entry.preview_url) +
+              '" target="_blank" rel="noopener">Preview this archive on library.kiwix.org</a> ' +
+              "(needs internet; opens outside Home Assistant)</p>"
+            : "") +
+          "</div>";
       }
 
       function renderCatalog(data) {
         $("catalog-count").textContent = data.total;
+        var note = $("sort-note");
+        if (data.sorted_over && data.sorted_over >= 400) {
+          note.hidden = false;
+          note.innerHTML = "Sorted across the first <strong>" + data.sorted_over +
+            "</strong> matches. Narrow the search with a language or category to sort a smaller, exact set.";
+        } else {
+          note.hidden = true;
+        }
         $("catalog-list").innerHTML = data.entries.length
           ? data.entries.map(catalogRow).join("")
           : '<div class="empty">Nothing matched.</div>';
@@ -498,13 +665,15 @@
         if (catalogState.mode === "wikipedia") {
           $("catalog-heading").textContent = "Wikipedia editions";
           $("curated-hint").hidden = false;
-          url = "api/catalog/wikipedia?lang=" + encodeURIComponent(catalogState.lang);
+          url = "api/catalog/wikipedia?lang=" + encodeURIComponent(catalogState.lang) +
+            "&sort=" + encodeURIComponent(catalogState.sort);
         } else {
           $("catalog-heading").textContent = "Catalog results";
           $("curated-hint").hidden = true;
           url = "api/catalog?q=" + encodeURIComponent(catalogState.q) +
             "&lang=" + encodeURIComponent(catalogState.lang) +
             "&category=" + encodeURIComponent(catalogState.category) +
+            "&sort=" + encodeURIComponent(catalogState.sort) +
             "&start=" + catalogState.start + "&count=" + catalogState.count;
         }
         api(url).then(renderCatalog).catch(function (error) {
@@ -555,6 +724,7 @@
         catalogState.q = $("search").value.trim();
         catalogState.lang = $("filter-lang").value;
         catalogState.category = $("filter-category").value;
+        catalogState.sort = $("filter-sort").value;
         catalogState.start = 0;
         catalogState.mode = (catalogState.q || catalogState.category) ? "search" : "wikipedia";
         loadCatalog();
@@ -569,6 +739,47 @@
       $("catalog-next").addEventListener("click", function () {
         catalogState.start += catalogState.count;
         loadCatalog();
+      });
+
+      function fillSettings() {
+        if (!state || !state.settings) { return; }
+        var values = state.settings;
+        $("set-concurrent").value = values.max_concurrent_downloads;
+        $("set-threads").value = values.download_threads;
+        $("set-language").value = values.catalog_language;
+        $("set-auto-serve").value = values.auto_serve_new ? "true" : "false";
+        $("set-window").value = values.window_enabled ? "true" : "false";
+        $("set-window-start").value = values.window_start;
+        $("set-window-end").value = values.window_end;
+      }
+
+      $("settings-open").addEventListener("click", function () {
+        var panel = $("settings-panel");
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) {
+          fillSettings();
+          panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+      });
+
+      $("settings-close").addEventListener("click", function () {
+        $("settings-panel").hidden = true;
+      });
+
+      $("settings-save").addEventListener("click", function () {
+        post("api/settings", {
+          max_concurrent_downloads: Number($("set-concurrent").value),
+          download_threads: Number($("set-threads").value),
+          catalog_language: $("set-language").value.trim(),
+          auto_serve_new: $("set-auto-serve").value === "true",
+          window_enabled: $("set-window").value === "true",
+          window_start: $("set-window-start").value,
+          window_end: $("set-window-end").value
+        }).then(function () {
+          toast("Settings saved — they apply to running downloads too.");
+          $("settings-panel").hidden = true;
+          refresh();
+        }).catch(function (error) { toast(error.message); });
       });
 
       $("server-toggle").addEventListener("click", function () {
@@ -597,7 +808,14 @@
           return;
         }
 
-        if (action === "cancel" || action === "resume" || action === "forget") {
+        if (action === "details") {
+          var file = button.dataset.file;
+          expanded[file] = !expanded[file];
+          loadCatalog();
+          return;
+        }
+
+        if (action === "pause" || action === "resume" || action === "forget" || action === "now") {
           post("api/downloads/" + button.dataset.id + "/" + action)
             .then(refresh).catch(function (error) { toast(error.message); });
           return;
@@ -618,7 +836,8 @@
       });
 
       refresh().then(function () {
-        catalogState.lang = (state && state.options.catalog_language) || "";
+        catalogState.lang = (state && state.settings && state.settings.catalog_language) || "";
+        $("filter-sort").value = catalogState.sort;
         loadFilters();
       });
     })();

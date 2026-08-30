@@ -1,13 +1,16 @@
 """Client for a Kiwix library's OPDS catalog (library.kiwix.org by default).
 
-Only the read side of the catalog is here: searching entries, listing the
-languages and categories used to filter them, and turning an entry into the
-handful of fields the UI and the downloader need. Every call is best-effort -
-a catalog that is unreachable (which, for an offline-archive add-on, is an
-entirely normal state to be in) surfaces as an error string, not an
-exception.
+Only the read side of the catalog is here: searching entries, sorting and
+describing them, listing the languages and categories used to filter them,
+and finding the entry a given `.zim` filename came from. Every call is
+best-effort - a catalog that is unreachable (which, for an offline-archive
+add-on, is an entirely normal state to be in) surfaces as an error string,
+not an exception.
 """
 
+import re
+import threading
+import time
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -34,7 +37,7 @@ FLAVOURS = {
     },
     "nopic": {
         "label": "No pictures",
-        "detail": "Full text, no images. Roughly a tenth of the full size.",
+        "detail": "Full text, no images. Roughly a fifth of the full size.",
     },
     "mini": {
         "label": "Mini",
@@ -45,6 +48,26 @@ FLAVOURS = {
         "detail": "The publisher's single edition of this archive.",
     },
 }
+
+# The catalog has no sort parameter of its own, so sorting means fetching a
+# wide slice and ordering it here. This caps how wide.
+SORT_POOL = 400
+_PAGE = 100
+
+SORTS = {
+    "relevance": None,
+    "title": lambda e: (e["title"].lower(), e["size"] or 0),
+    "size_desc": lambda e: -(e["size"] or 0),
+    "size_asc": lambda e: e["size"] or 0,
+    "date": lambda e: (e["issued"] or "", e["title"].lower()),
+    "articles": lambda e: -(e["article_count"] or 0),
+}
+# Sorts where the interesting end is the top of the list, not the bottom.
+_DESCENDING = {"date"}
+
+_cache: dict[tuple, tuple[float, list]] = {}
+_cache_lock = threading.Lock()
+CACHE_TTL = 120.0
 
 
 class CatalogError(RuntimeError):
@@ -70,6 +93,23 @@ def _absolute(href: str) -> str:
     return f"{settings.LIBRARY_SOURCE}/{href.lstrip('/')}"
 
 
+def _readable_tags(raw: str) -> list[str]:
+    """The catalog's tag string as things worth showing.
+
+    Tags come as `wikipedia;_category:wikipedia;_pictures:no;_ftindex:yes`.
+    The bare ones repeat the category and the `_`-prefixed ones are machine
+    flags, of which only a few say anything a reader cares about.
+    """
+    interesting = {"_pictures": "pictures", "_videos": "videos", "_details": "full articles",
+                   "_ftindex": "full-text search"}
+    tags = []
+    for item in raw.split(";"):
+        key, _, value = item.partition(":")
+        if key in interesting and value in ("yes", "no"):
+            tags.append(("" if value == "yes" else "no ") + interesting[key])
+    return tags
+
+
 def parse_entry(entry: ET.Element) -> dict | None:
     """One OPDS entry as the flat dict the UI works with.
 
@@ -79,6 +119,7 @@ def parse_entry(entry: ET.Element) -> dict | None:
     download_url = ""
     size = None
     thumbnail = ""
+    preview_url = ""
 
     for link in entry.findall(f"{_ATOM}link"):
         rel = link.get("rel", "")
@@ -86,7 +127,7 @@ def parse_entry(entry: ET.Element) -> dict | None:
         if rel == _ACQUISITION_REL and href:
             # The catalog links a metalink; the ZIM itself sits at the same
             # URL without the .meta4 suffix and supports range requests,
-            # which is what makes downloads resumable.
+            # which is what makes downloads resumable and splittable.
             download_url = href[: -len(".meta4")] if href.endswith(".meta4") else href
             try:
                 size = int(link.get("length", ""))
@@ -94,6 +135,8 @@ def parse_entry(entry: ET.Element) -> dict | None:
                 size = None
         elif rel == _THUMBNAIL_REL and href:
             thumbnail = _absolute(href)
+        elif not rel and link.get("type") == "text/html" and href:
+            preview_url = href
 
     if not download_url:
         return None
@@ -112,13 +155,17 @@ def parse_entry(entry: ET.Element) -> dict | None:
         "flavour_detail": FLAVOURS.get(flavour, {}).get("detail", ""),
         "category": _text(entry, f"{_ATOM}category"),
         "publisher": _text(entry, f"{_ATOM}publisher/{_ATOM}name"),
+        "author": _text(entry, f"{_ATOM}author/{_ATOM}name"),
         "issued": _text(entry, f"{_DC}issued")[:10],
+        "updated": _text(entry, f"{_ATOM}updated")[:10],
         "article_count": _int(entry, f"{_ATOM}articleCount"),
         "media_count": _int(entry, f"{_ATOM}mediaCount"),
+        "tags": _readable_tags(_text(entry, f"{_ATOM}tags")),
         "size": size,
         "url": download_url,
         "filename": filename,
         "thumbnail": thumbnail,
+        "preview_url": preview_url,
     }
 
 
@@ -136,22 +183,7 @@ def _get(path: str, params: dict | None = None) -> ET.Element:
         raise CatalogError(f"The library at {url} returned something unreadable: {exc}") from exc
 
 
-def search(
-    query: str = "",
-    language: str = "",
-    category: str = "",
-    count: int = 30,
-    start: int = 0,
-) -> dict:
-    """Search catalog entries. Raises CatalogError if the library is down."""
-    params: dict[str, str | int] = {"count": count, "start": start}
-    if query:
-        params["q"] = query
-    if language:
-        params["lang"] = language
-    if category:
-        params["category"] = category
-
+def _page(params: dict) -> tuple[list[dict], int]:
     feed = _get("/catalog/v2/entries", params)
     entries = [parsed for entry in feed.findall(f"{_ATOM}entry") if (parsed := parse_entry(entry))]
 
@@ -166,19 +198,118 @@ def search(
     except ValueError:
         total = len(entries)
 
-    return {"entries": entries, "total": total, "start": start, "count": count}
+    return entries, total
 
 
-def wikipedia_variants(language: str = "") -> dict:
+def _pool(filters: dict) -> list[dict]:
+    """Up to SORT_POOL entries matching the filters, cached briefly.
+
+    Sorting and its paging both work over this pool, so flipping through
+    pages of a sorted result doesn't re-fetch the whole thing each time.
+    """
+    key = tuple(sorted(filters.items()))
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and now - hit[0] < CACHE_TTL:
+            return hit[1]
+
+    entries: list[dict] = []
+    while len(entries) < SORT_POOL:
+        page, total = _page({**filters, "count": _PAGE, "start": len(entries)})
+        entries.extend(page)
+        if not page or len(entries) >= total:
+            break
+
+    with _cache_lock:
+        _cache[key] = (now, entries)
+        if len(_cache) > 24:
+            _cache.pop(next(iter(_cache)))
+    return entries
+
+
+def search(
+    query: str = "",
+    language: str = "",
+    category: str = "",
+    count: int = 30,
+    start: int = 0,
+    sort: str = "relevance",
+) -> dict:
+    """Search catalog entries. Raises CatalogError if the library is down."""
+    filters: dict[str, str] = {}
+    if query:
+        filters["q"] = query
+    if language:
+        filters["lang"] = language
+    if category:
+        filters["category"] = category
+
+    if sort not in SORTS:
+        sort = "relevance"
+
+    if sort == "relevance":
+        entries, total = _page({**filters, "count": count, "start": start})
+        return {"entries": entries, "total": total, "start": start, "count": count,
+                "sort": sort, "sorted_over": None}
+
+    pool = list(_pool(filters))
+    pool.sort(key=SORTS[sort], reverse=sort in _DESCENDING)
+    return {
+        "entries": pool[start:start + count],
+        "total": len(pool),
+        "start": start,
+        "count": count,
+        "sort": sort,
+        # How many entries the ordering could see: a sorted result over a
+        # capped pool is honest about being capped rather than pretending to
+        # have ranked the whole catalog.
+        "sorted_over": len(pool),
+    }
+
+
+def wikipedia_variants(language: str = "", sort: str = "size_desc") -> dict:
     """The Wikipedia archives for a language, largest edition first.
 
     This is the curated view: same catalog, narrowed to `category=wikipedia`
     and ordered so the choice between full / no-pictures / mini for a given
     edition is a side-by-side one.
     """
-    result = search(query="", language=language or settings.CATALOG_LANGUAGE, category="wikipedia", count=100)
-    result["entries"].sort(key=lambda e: (e["name"], -(e["size"] or 0)))
+    result = search(
+        language=language or settings.get("catalog_language"),
+        category="wikipedia",
+        count=100,
+        sort=sort if sort != "relevance" else "size_desc",
+    )
+    if sort in ("relevance", "size_desc"):
+        result["entries"].sort(key=lambda e: (e["name"], -(e["size"] or 0)))
     return result
+
+
+def find_by_filename(filename: str) -> dict | None:
+    """The catalog entry a `.zim` filename came from, or None.
+
+    Used to resume a partial download whose source URL isn't known - an
+    archive interrupted before the job list was persisted, or copied onto
+    the share by hand. The catalog can be filtered by ZIM name, which is the
+    filename minus its flavour and date, so this walks the filename back one
+    underscore at a time until a query matches and then insists on the exact
+    filename: a newer edition is a different file and must not be silently
+    written into the old one.
+    """
+    stem = filename[: -len(".zim")] if filename.endswith(".zim") else filename
+    candidate = re.sub(r"_\d{4}-\d{2}$", "", stem)
+
+    while candidate:
+        feed = _get("/catalog/v2/entries", {"name": candidate, "count": 50})
+        for element in feed.findall(f"{_ATOM}entry"):
+            entry = parse_entry(element)
+            if entry and entry["filename"] == filename:
+                return entry
+        if "_" not in candidate:
+            return None
+        candidate = candidate.rsplit("_", 1)[0]
+    return None
 
 
 def languages() -> list[dict]:

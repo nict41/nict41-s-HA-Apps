@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.2.0
+
+- **Faster downloads.** An archive can now be fetched over several
+  connections at once, each pulling its own byte range into the same file.
+  Set **Connections per archive** in the new Settings panel (1-8, 4 is a
+  good default). A mirror that refuses range requests falls back to a single
+  connection on its own.
+- **More than one archive at a time.** **Archives at once** now goes up to
+  6, and changing it takes effect immediately instead of at the next
+  restart.
+- **Off-peak scheduling.** Downloads can be confined to a time window, e.g.
+  23:00-07:00, so a 100 GB transfer doesn't compete with everything else
+  during the day. Running transfers stand down when the window closes and
+  resume by themselves when it opens; **Download now** overrides it for one
+  archive.
+- **Settings in the app.** A Settings panel (the gear icon) holds the
+  download knobs, the catalog language and the off-peak window, and applies
+  changes live. The add-on options are still there and now act as its
+  defaults - saving one of those restarts the add-on, which is exactly what
+  you don't want while a 100 GB download is running.
+- **A way back from the reader.** Reading now happens under a bar with a
+  **Library** button, so you can return however deep into an archive you
+  have clicked, instead of being stuck without browser chrome inside Home
+  Assistant's panel.
+- **Better browsing.** Catalog results can be sorted by size, article count,
+  publication date or title, and **Details** on any result shows its full
+  description, article and media counts, publisher, contents (pictures,
+  videos, full-text search), exact filename and a preview link.
+- **Downloads survive a restart.** The download list is now saved, so
+  updating the add-on or rebooting Home Assistant no longer loses track of
+  what was in flight - transfers pick themselves back up automatically,
+  from where they stopped. A `.part` file left by an earlier version is
+  adopted too: resuming it looks its source up in the catalog by filename,
+  so nothing already downloaded is re-fetched.
+
 ## 0.1.0
 
 - First release. Packages `kiwix-serve` (kiwix-tools 3.8.2) as a Home

@@ -93,6 +93,10 @@ def test_starting_a_download_without_storage_is_a_400(monkeypatch):
 
 def test_unknown_download_actions_are_rejected():
     assert client.post("/api/downloads/abc/detonate").status_code == 404
+    assert client.post("/api/downloads/abc/pause").status_code == 400
+    assert client.post("/api/downloads/abc/now").status_code == 400
+    # The pre-0.2 name for pausing still answers, so a page left open across
+    # an upgrade doesn't start throwing 404s at its user.
     assert client.post("/api/downloads/abc/cancel").status_code == 400
 
 
@@ -181,3 +185,58 @@ def test_server_actions_are_validated(monkeypatch):
     monkeypatch.setattr(server, "set_enabled", lambda value, prefix=None: (True, ""))
     assert client.post("/api/server/start", headers=INGRESS).status_code == 200
     assert client.post("/api/server/levitate").status_code == 404
+
+
+# ── Settings, sorting and the reader wrapper ────────────────────────────────
+
+def test_state_carries_the_live_settings_and_window():
+    body = client.get("/api/state").json()
+
+    assert body["settings"]["download_threads"] >= 1
+    assert body["window"]["open"] in (True, False)
+
+
+def test_settings_can_be_changed_without_restarting_anything():
+    response = client.post(
+        "/api/settings",
+        json={"download_threads": 6, "max_concurrent_downloads": 3, "window_enabled": True,
+              "window_start": "23:00", "window_end": "06:30"},
+    )
+
+    assert response.status_code == 200
+    values = response.json()["settings"]
+    assert values["download_threads"] == 6
+    assert values["max_concurrent_downloads"] == 3
+    # And the change is what the rest of the app now reads.
+    assert client.get("/api/state").json()["settings"]["window_end"] == "06:30"
+
+
+def test_out_of_range_settings_come_back_clamped_not_rejected():
+    values = client.post("/api/settings", json={"download_threads": 500}).json()["settings"]
+
+    assert values["download_threads"] == 8
+
+
+def test_catalog_search_passes_the_sort_through(monkeypatch):
+    seen = {}
+
+    def fake_search(**kwargs):
+        seen.update(kwargs)
+        return {"entries": [], "total": 0, "start": 0, "count": 30, "sort": kwargs["sort"],
+                "sorted_over": 0}
+
+    monkeypatch.setattr(catalog, "search", fake_search)
+
+    client.get("/api/catalog?q=wikipedia&sort=size_desc")
+
+    assert seen["sort"] == "size_desc"
+
+
+def test_the_reader_page_frames_kiwix_with_a_way_back():
+    response = client.get("/read")
+
+    assert response.status_code == 200
+    assert 'src="kiwix/"' in response.text
+    # The way out of the reader has to be on the page itself: inside Home
+    # Assistant's ingress iframe there is no browser chrome to fall back on.
+    assert 'href="./"' in response.text

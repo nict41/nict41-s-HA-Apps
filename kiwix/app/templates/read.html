@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kiwix reader</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f0efe9; --text: #191b14; --border: #d7d5c9;
+      --font: "Helvetica Neue", Helvetica, "Arial Nova", Arial, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #0c0e09; --text: #e7ead9; --border: #262b1a; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; display: flex; flex-direction: column;
+      font-family: var(--font); background: var(--bg); color: var(--text); }
+    .bar { flex: none; display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.5rem 0.9rem; background: var(--bg); border-bottom: 2px solid var(--text); }
+    .back { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+      display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.5rem 0.75rem;
+      border: 1px solid var(--text); background: var(--text); color: var(--bg);
+      text-decoration: none; }
+    .back:hover { background: transparent; color: var(--text); }
+    .back:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(80,130,20,0.5); }
+    .title { font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.16em;
+      text-transform: uppercase; opacity: 0.7; }
+    .spacer { flex: 1; }
+    .home { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+      padding: 0.5rem 0.75rem; border: 1px solid var(--border); background: transparent;
+      color: var(--text); cursor: pointer; }
+    .home:hover { border-color: var(--text); }
+    iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+    @media (prefers-color-scheme: dark) { iframe { background: #12140d; } }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a class="back" href="./">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline>
+      </svg>
+      Library
+    </a>
+    <div class="title">Kiwix reader</div>
+    <div class="spacer"></div>
+    <button class="home" id="reader-home" type="button">Reader home</button>
+  </div>
+  <!-- kiwix-serve is proxied under /kiwix; framing it here (rather than
+       navigating the panel straight to it) is what keeps the bar above on
+       screen no matter how deep into an archive you click. -->
+  <iframe id="reader" src="kiwix/" title="Kiwix reader"></iframe>
+  <script>
+    document.getElementById("reader-home").addEventListener("click", function () {
+      // Same-origin frame, so this just resets it to the welcome page.
+      document.getElementById("reader").src = "kiwix/";
+    });
+  </script>
+</body>
+</html>

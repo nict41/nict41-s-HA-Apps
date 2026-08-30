@@ -8,6 +8,10 @@ declare library_source
 declare catalog_language
 declare auto_serve_new
 declare max_concurrent_downloads
+declare download_threads
+declare download_window_enabled
+declare download_window_start
+declare download_window_end
 declare ingress_entry
 
 zim_path=$(bashio::config 'zim_path')
@@ -15,6 +19,10 @@ library_source=$(bashio::config 'library_source')
 catalog_language=$(bashio::config 'catalog_language')
 auto_serve_new=$(bashio::config 'auto_serve_new')
 max_concurrent_downloads=$(bashio::config 'max_concurrent_downloads')
+download_threads=$(bashio::config 'download_threads')
+download_window_enabled=$(bashio::config 'download_window_enabled')
+download_window_start=$(bashio::config 'download_window_start')
+download_window_end=$(bashio::config 'download_window_end')
 
 # kiwix-serve builds absolute links from its --urlRootLocation, so it has to
 # know the Home Assistant ingress prefix its pages are reached through. The
@@ -26,6 +34,10 @@ export LIBRARY_SOURCE="${library_source}"
 export CATALOG_LANGUAGE="${catalog_language}"
 export AUTO_SERVE_NEW="${auto_serve_new}"
 export MAX_CONCURRENT_DOWNLOADS="${max_concurrent_downloads}"
+export DOWNLOAD_THREADS="${download_threads}"
+export DOWNLOAD_WINDOW_ENABLED="${download_window_enabled}"
+export DOWNLOAD_WINDOW_START="${download_window_start}"
+export DOWNLOAD_WINDOW_END="${download_window_end}"
 export INGRESS_ENTRY="${ingress_entry}"
 
 if bashio::var.has_value "${zim_path}"; then
