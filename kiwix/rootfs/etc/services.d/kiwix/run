@@ -1,0 +1,40 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start the Kiwix manager (which supervises kiwix-serve itself)
+# ==============================================================================
+
+declare zim_path
+declare library_source
+declare catalog_language
+declare auto_serve_new
+declare max_concurrent_downloads
+declare ingress_entry
+
+zim_path=$(bashio::config 'zim_path')
+library_source=$(bashio::config 'library_source')
+catalog_language=$(bashio::config 'catalog_language')
+auto_serve_new=$(bashio::config 'auto_serve_new')
+max_concurrent_downloads=$(bashio::config 'max_concurrent_downloads')
+
+# kiwix-serve builds absolute links from its --urlRootLocation, so it has to
+# know the Home Assistant ingress prefix its pages are reached through. The
+# manager appends its own /kiwix proxy path to this.
+ingress_entry=$(bashio::addon.ingress_entry 2>/dev/null) || ingress_entry=""
+
+export ZIM_PATH="${zim_path}"
+export LIBRARY_SOURCE="${library_source}"
+export CATALOG_LANGUAGE="${catalog_language}"
+export AUTO_SERVE_NEW="${auto_serve_new}"
+export MAX_CONCURRENT_DOWNLOADS="${max_concurrent_downloads}"
+export INGRESS_ENTRY="${ingress_entry}"
+
+if bashio::var.has_value "${zim_path}"; then
+    bashio::log.info "ZIM storage path: ${zim_path}"
+else
+    bashio::log.warning "No ZIM storage path configured - set 'zim_path' to a folder on your network share"
+fi
+
+bashio::log.info "Starting Kiwix manager on port 8099..."
+
+cd /app || bashio::exit.nok "Could not change to /app directory"
+exec python3 -m uvicorn main:app --host 0.0.0.0 --port 8099

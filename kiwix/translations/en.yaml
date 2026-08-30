@@ -1,0 +1,31 @@
+configuration:
+  zim_path:
+    name: ZIM storage path
+    description: >-
+      Where .zim archives are stored, on the network share you mapped into
+      Home Assistant as Media storage (Settings -> System -> Storage). Either
+      a path relative to /media (e.g. NAS1/Kiwix) or the full path
+      (e.g. /media/NAS1/Kiwix). Leave blank and the app will tell you it has
+      nowhere to store archives instead of writing to the add-on's own disk.
+  library_source:
+    name: Library source
+    description: >-
+      Base URL of the Kiwix catalog to browse. Defaults to the official
+      library at https://library.kiwix.org; point it at your own mirror if
+      you run one.
+  catalog_language:
+    name: Default catalog language
+    description: >-
+      ISO 639-3 language code the catalog is filtered by when the browser
+      opens (e.g. eng, fra, deu). You can change the filter in the app at
+      any time.
+  auto_serve_new:
+    name: Serve newly downloaded archives
+    description: >-
+      Add each finished download to the served library automatically. Turn
+      this off to choose what kiwix-serve serves yourself.
+  max_concurrent_downloads:
+    name: Concurrent downloads
+    description: >-
+      How many ZIM downloads may run at once. ZIM files are large and
+      downloads are disk- and network-bound, so 1 is usually fastest.

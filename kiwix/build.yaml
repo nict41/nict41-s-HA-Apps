@@ -1,0 +1,5 @@
+build_from:
+  aarch64: ghcr.io/home-assistant/base:3.23
+  amd64: ghcr.io/home-assistant/base:3.23
+args:
+  KIWIX_TOOLS_VERSION: "3.8.2"
