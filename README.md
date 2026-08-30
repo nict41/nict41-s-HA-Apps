@@ -44,6 +44,15 @@ Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
 Standalone Immich Machine Learning sidecar, hardware-accelerated with Intel OpenVINO, for offloading face detection and smart search from a separate Immich server app.
 
+### [Kiwix](./kiwix)
+
+![Kiwix logo](kiwix/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Offline Wikipedia and other ZIM archives: browse the Kiwix catalog, download archives onto a NAS share, and read them in the sidebar through kiwix-serve.
+
 ### [NAS1 USB Link Watcher](./nas1_usb_watcher)
 
 ![NAS1 USB Link Watcher logo](nas1_usb_watcher/logo.png)

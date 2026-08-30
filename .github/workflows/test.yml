@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [print_timelapse, parcel_tracker]
+        app: [print_timelapse, parcel_tracker, kiwix]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

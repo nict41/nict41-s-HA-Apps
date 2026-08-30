@@ -1,0 +1,33 @@
+name: "Kiwix"
+version: "0.1.0"
+slug: "kiwix"
+description: "Browse, download and serve offline Wikipedia (and other ZIM) archives from NAS storage"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/kiwix"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+ingress: true
+ingress_port: 8099
+hassio_api: true
+panel_icon: mdi:bookshelf
+panel_title: "Kiwix"
+ports:
+  8099/tcp: null
+ports_description:
+  8099/tcp: "Kiwix manager UI (optional direct access; reading articles needs ingress)"
+map:
+  - media:rw
+options:
+  zim_path: ""
+  library_source: "https://library.kiwix.org"
+  catalog_language: "eng"
+  auto_serve_new: true
+  max_concurrent_downloads: 1
+schema:
+  zim_path: str
+  library_source: url
+  catalog_language: str
+  auto_serve_new: bool
+  max_concurrent_downloads: int(1,3)

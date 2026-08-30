@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kiwix</title>
+  <style>
+    /* Editorial-technical design system, shared with the print_timelapse and
+       parcel_tracker add-ons so the family reads as one: warm paper / near-
+       black ink in light mode, near-black with a neon-lime signal accent in
+       dark. Flat surfaces, hairline rules and hard offset shadows instead of
+       soft elevation, oversized numerals, monospace for data. Light/dark
+       follows the device. */
+    :root {
+      color-scheme: light dark; background: var(--bg);
+      --bg: #f0efe9; --surface: #f7f6f1; --surface-2: #e8e7df; --surface-hover: #ecebe3;
+      --border: #d7d5c9; --border-strong: #a9a698;
+      --text: #191b14; --text-muted: #565a4a; --text-faint: #828676;
+      --accent: #326f00; --accent-hover: #265400; --accent-contrast: #f3ffd9;
+      --accent-soft: #e0edc4; --accent-soft-text: #2c5c04; --focus-ring: rgba(80,130,20,0.5);
+      --danger: #a1301f; --danger-bg: #f2d8d1;
+      --shadow-md: 3px 3px 0 rgba(25,27,20,0.16);
+      --space-1: 0.25rem; --space-2: 0.5rem; --space-3: 0.75rem; --space-4: 1rem;
+      --space-5: 1.5rem; --space-6: 2rem;
+      --maxw: 1040px;
+      --font: "Helvetica Neue", Helvetica, "Arial Nova", Arial, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c0e09; --surface: #12140d; --surface-2: #171a10; --surface-hover: #1b1f12;
+        --border: #262b1a; --border-strong: #414833;
+        --text: #e7ead9; --text-muted: #9ba189; --text-faint: #6e755c;
+        --accent: #c6f53c; --accent-hover: #d7ff62; --accent-contrast: #0c0e09;
+        --accent-soft: rgba(198,245,60,0.13); --accent-soft-text: #d1f764; --focus-ring: rgba(198,245,60,0.45);
+        --danger: #ff8a75; --danger-bg: rgba(255,120,95,0.14);
+        --shadow-md: 3px 3px 0 rgba(0,0,0,0.55);
+      }
+    }
+    * { box-sizing: border-box; }
+    svg:not([width]) { width: 15px; height: 15px; flex: none; }
+    body {
+      margin: 0; font-family: var(--font); background: var(--bg); color: var(--text);
+      font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased;
+    }
+    @keyframes page-fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+    .wrap { max-width: var(--maxw); margin: 0 auto; padding: 0 var(--space-5) var(--space-6);
+      animation: page-fade-in 160ms ease-out; }
+    @media (prefers-reduced-motion: reduce) { .wrap { animation: none; } }
+
+    /* Topbar */
+    .topbar { position: sticky; top: 0; z-index: 20; background: var(--bg); border-bottom: 2px solid var(--text); }
+    .topbar-inner { max-width: var(--maxw); margin: 0 auto; padding: var(--space-3) var(--space-5);
+      display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+    .brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+    .brand-logo { width: 36px; height: 36px; flex: none; display: grid; place-items: center;
+      background: var(--text); color: var(--bg); }
+    .brand-logo svg { width: 20px; height: 20px; }
+    .brand-title { font-size: 0.98rem; font-weight: 800; letter-spacing: 0.05em;
+      text-transform: uppercase; line-height: 1.2; }
+    .brand-sub { font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--text-muted); }
+    .topbar-spacer { flex: 1; }
+
+    .btn { font-family: var(--font); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em;
+      text-transform: uppercase; line-height: 1;
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+      padding: 0.58rem 0.85rem; border-radius: 0;
+      border: 1px solid var(--border-strong); background: transparent; color: var(--text);
+      cursor: pointer; text-decoration: none; white-space: nowrap;
+      transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease; }
+    .btn:hover:not(:disabled) { background: var(--text); border-color: var(--text); color: var(--bg); }
+    .btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary { background: var(--text); border-color: var(--text); color: var(--bg); }
+    .btn-primary:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast); }
+    .btn-danger { border-color: var(--danger); color: var(--danger); }
+    .btn-danger:hover:not(:disabled) { background: var(--danger); border-color: var(--danger); color: var(--bg); }
+    .btn-sm { padding: 0.4rem 0.6rem; font-size: 0.64rem; }
+
+    /* Banners */
+    .banner { border: 1px solid var(--border); border-top: 2px solid var(--danger);
+      background: var(--danger-bg); color: var(--text); padding: var(--space-4);
+      margin: var(--space-5) 0; display: flex; gap: var(--space-3); align-items: flex-start; }
+    .banner svg { color: var(--danger); margin-top: 2px; }
+    .banner-title { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.14em;
+      text-transform: uppercase; margin-bottom: 0.35rem; }
+    .banner-body { font-size: 0.9rem; }
+    .banner code { font-family: var(--mono); font-size: 0.82rem; }
+    .banner.is-info { border-top-color: var(--border-strong); background: var(--surface-2); }
+    .banner.is-info svg { color: var(--text-muted); }
+
+    /* Stat strip */
+    .stats-bar { display: flex; align-items: stretch; background: var(--surface);
+      border: 1px solid var(--border); border-top: 2px solid var(--text);
+      margin: var(--space-5) 0; overflow: hidden; flex-wrap: wrap; }
+    .stats-divider { width: 1px; flex: none; background: var(--border); }
+    .stat { flex: 1; min-width: 140px; padding: var(--space-4); }
+    .stat-num { font-size: 2rem; font-weight: 800; letter-spacing: -0.03em;
+      font-variant-numeric: tabular-nums; line-height: 1; }
+    .stat-num small { font-size: 0.9rem; font-weight: 700; letter-spacing: 0; }
+    .stat-label { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.55rem;
+      font-family: var(--mono); font-size: 0.64rem; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--text-muted); flex-wrap: wrap; }
+    .stat.is-live .stat-num { color: var(--accent-soft-text); display: inline-flex; align-items: center; gap: 0.5rem; }
+    .stat.is-live .stat-num::before { content: ""; width: 10px; height: 10px; background: var(--accent);
+      animation: pulse 1.6s ease-in-out infinite; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border-strong); margin-top: var(--space-5); }
+    .tab { font-family: var(--font); font-size: 0.72rem; font-weight: 800; letter-spacing: 0.14em;
+      text-transform: uppercase; padding: 0.7rem 1rem; border: 0; background: transparent;
+      color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab:hover { color: var(--text); }
+    .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+    .tab:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+
+    /* Section headers */
+    .section-head { display: flex; align-items: center; gap: 0.6rem; margin: var(--space-6) 0 var(--space-3); }
+    .section-head::after { content: ""; flex: 1; height: 1px; background: var(--border-strong); }
+    .section-head h2 { font-size: 0.76rem; font-weight: 800; letter-spacing: 0.16em;
+      text-transform: uppercase; color: var(--text); margin: 0; }
+    .section-count { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; color: var(--text-muted);
+      font-variant-numeric: tabular-nums; border: 1px solid var(--border-strong); padding: 0.05rem 0.45rem; }
+
+    /* Rows */
+    .row { background: var(--surface); border: 1px solid var(--border); padding: var(--space-4);
+      margin-bottom: var(--space-3); display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+    .row-main { flex: 1; min-width: 220px; }
+    .row-title { font-weight: 700; font-size: 0.95rem; overflow-wrap: anywhere; }
+    .row-meta { font-family: var(--mono); font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem;
+      display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    .row-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+    .row-thumb { width: 40px; height: 40px; flex: none; border: 1px solid var(--border-strong);
+      background: var(--surface-2); object-fit: contain; }
+
+    .pill { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase;
+      border: 1px solid var(--border-strong); padding: 0.1rem 0.4rem; color: var(--text-muted); }
+    .pill.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-soft-text); }
+    .pill.is-warn { border-color: var(--danger); color: var(--danger); }
+
+    /* Progress */
+    .progress { height: 6px; background: var(--surface-2); border: 1px solid var(--border);
+      margin-top: 0.5rem; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+    .progress-fill.is-indeterminate { width: 35% !important; animation: pulse 1.4s ease-in-out infinite; }
+
+    /* Filters */
+    .filters { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    .field label { font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--text-muted); }
+    input[type="search"], input[type="text"], select {
+      font-family: var(--font); font-size: 0.88rem; padding: 0.5rem 0.6rem; border-radius: 0;
+      border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); min-width: 150px; }
+    input:focus-visible, select:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--focus-ring); }
+    .field.grow { flex: 1; min-width: 220px; }
+    .field.grow input { width: 100%; }
+
+    .empty { border: 1px dashed var(--border-strong); padding: var(--space-5); text-align: center;
+      color: var(--text-muted); font-size: 0.9rem; }
+    .hint { font-size: 0.82rem; color: var(--text-muted); margin: var(--space-3) 0 0; }
+    .hint strong { color: var(--text); }
+    [hidden] { display: none !important; }
+    .toast { position: fixed; left: 50%; bottom: 1.25rem; transform: translateX(-50%);
+      background: var(--text); color: var(--bg); padding: 0.6rem 0.9rem; font-size: 0.85rem;
+      box-shadow: var(--shadow-md); max-width: 90vw; z-index: 50; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">Kiwix</div>
+          <div class="brand-sub">Offline archives</div>
+        </div>
+      </div>
+      <div class="topbar-spacer"></div>
+      <a class="btn btn-primary" id="read-link" href="kiwix/" target="_self">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+        Read
+      </a>
+      <button class="btn" id="server-toggle" type="button"></button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="storage-banner" hidden></div>
+
+    <div class="stats-bar">
+      <div class="stat">
+        <div class="stat-num" id="stat-count">–</div>
+        <div class="stat-label">Archives<span class="stat-sub" id="stat-size"></span></div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stat">
+        <div class="stat-num" id="stat-free">–</div>
+        <div class="stat-label">Free on share</div>
+      </div>
+      <div class="stats-divider"></div>
+      <div class="stat" id="stat-server-tile">
+        <div class="stat-num" id="stat-server">–</div>
+        <div class="stat-label">kiwix-serve<span class="stat-sub" id="stat-served"></span></div>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="tab-library" aria-selected="true" aria-controls="panel-library">Library</button>
+      <button class="tab" role="tab" id="tab-browse" aria-selected="false" aria-controls="panel-browse">Browse &amp; download</button>
+    </div>
+
+    <section id="panel-library" role="tabpanel" aria-labelledby="tab-library">
+      <div class="section-head">
+        <h2>Downloads in progress</h2><span class="section-count" id="downloads-count">0</span>
+      </div>
+      <div id="downloads-list"></div>
+
+      <div class="section-head">
+        <h2>On disk</h2><span class="section-count" id="library-count">0</span>
+      </div>
+      <div id="library-list"></div>
+      <p class="hint">
+        Archives are read straight from the share, so serving one costs no extra
+        space. Deleting an archive removes the <strong>.zim</strong> file from
+        the share permanently.
+      </p>
+    </section>
+
+    <section id="panel-browse" role="tabpanel" aria-labelledby="tab-browse" hidden>
+      <div class="filters">
+        <div class="field grow">
+          <label for="search">Search the library catalog</label>
+          <input type="search" id="search" placeholder="wikipedia, wiktionary, gutenberg…" />
+        </div>
+        <div class="field">
+          <label for="filter-lang">Language</label>
+          <select id="filter-lang"><option value="">Any</option></select>
+        </div>
+        <div class="field">
+          <label for="filter-category">Category</label>
+          <select id="filter-category"><option value="">Any</option></select>
+        </div>
+        <div class="field">
+          <label for="do-search">&nbsp;</label>
+          <button class="btn btn-primary" id="do-search" type="button">Search</button>
+        </div>
+      </div>
+      <p class="hint" id="curated-hint">
+        Showing the <strong>Wikipedia</strong> editions for your configured
+        language. Each edition comes in flavours: <strong>Full</strong> (with
+        images, 100 GB+ for English), <strong>No pictures</strong> (about a
+        tenth of that) and <strong>Mini</strong> (introductions only). Pick a
+        smaller flavour if the share is tight on space.
+      </p>
+      <div class="section-head">
+        <h2 id="catalog-heading">Wikipedia editions</h2><span class="section-count" id="catalog-count">0</span>
+      </div>
+      <div id="catalog-list"></div>
+      <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+        <button class="btn" id="catalog-prev" type="button" hidden>Previous</button>
+        <button class="btn" id="catalog-next" type="button" hidden>Next</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var state = null;
+      var catalogState = { mode: "wikipedia", q: "", lang: "", category: "", start: 0, count: 30, total: 0 };
+      var pollTimer = null;
+
+      function $(id) { return document.getElementById(id); }
+
+      function bytes(value) {
+        if (value === null || value === undefined) { return "unknown"; }
+        var units = ["B", "KB", "MB", "GB", "TB"];
+        var index = 0;
+        var size = value;
+        while (size >= 1024 && index < units.length - 1) { size /= 1024; index += 1; }
+        return (size >= 100 || index === 0 ? Math.round(size) : size.toFixed(1)) + " " + units[index];
+      }
+
+      function escapeHtml(text) {
+        return String(text === null || text === undefined ? "" : text)
+          .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+      }
+
+      function toast(message) {
+        var node = document.createElement("div");
+        node.className = "toast";
+        node.textContent = message;
+        document.body.appendChild(node);
+        setTimeout(function () { node.remove(); }, 5000);
+      }
+
+      function api(path, options) {
+        return fetch(path, options).then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (data) {
+            if (!response.ok) { throw new Error(data.error || ("Request failed (" + response.status + ")")); }
+            return data;
+          });
+        });
+      }
+
+      function post(path, body) {
+        return api(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body || {})
+        });
+      }
+
+      var WARNING_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
+
+      function renderStorage(storage) {
+        var banner = $("storage-banner");
+        if (storage.ok) { banner.hidden = true; return; }
+        banner.hidden = false;
+        banner.className = "banner";
+        banner.innerHTML = WARNING_ICON +
+          '<div><div class="banner-title">Storage unavailable</div>' +
+          '<div class="banner-body">' + escapeHtml(storage.message) + "</div></div>";
+      }
+
+      function renderStats() {
+        var complete = state.library.filter(function (item) { return item.complete; });
+        var used = complete.reduce(function (total, item) { return total + item.size; }, 0);
+        $("stat-count").textContent = complete.length;
+        $("stat-size").textContent = complete.length ? "· " + bytes(used) + " on disk" : "";
+        $("stat-free").innerHTML = state.storage.free_bytes === undefined
+          ? "–" : bytes(state.storage.free_bytes);
+
+        var srv = state.server;
+        var tile = $("stat-server-tile");
+        var label = srv.running ? (srv.ready ? "Serving" : "Starting") : (srv.enabled ? "Idle" : "Stopped");
+        $("stat-server").textContent = label;
+        tile.classList.toggle("is-live", Boolean(srv.running && srv.ready));
+        $("stat-served").textContent = "· " + srv.served_count + " selected";
+
+        var toggle = $("server-toggle");
+        toggle.textContent = srv.enabled ? "Stop server" : "Start server";
+        toggle.disabled = !state.storage.ok;
+        $("read-link").classList.toggle("btn-primary", Boolean(srv.running));
+      }
+
+      function downloadRow(job) {
+        var percent = job.total ? Math.min(100, (job.downloaded / job.total) * 100) : 0;
+        var meta = [bytes(job.downloaded) + (job.total ? " of " + bytes(job.total) : "")];
+        if (job.status === "downloading" && job.speed > 0) {
+          meta.push(bytes(job.speed) + "/s");
+          if (job.total) {
+            var remaining = (job.total - job.downloaded) / job.speed;
+            meta.push(remaining > 3600
+              ? Math.round(remaining / 3600) + "h left"
+              : Math.max(1, Math.round(remaining / 60)) + "m left");
+          }
+        }
+        meta.push(job.status);
+
+        var actions = "";
+        if (job.status === "downloading" || job.status === "queued") {
+          actions = '<button class="btn btn-sm" data-action="cancel" data-id="' + job.id + '">Pause</button>';
+        } else if (job.status === "paused" || job.status === "error") {
+          actions = '<button class="btn btn-sm" data-action="resume" data-id="' + job.id + '">Resume</button>' +
+            '<button class="btn btn-sm btn-danger" data-action="forget" data-id="' + job.id + '">Remove</button>';
+        } else {
+          actions = '<button class="btn btn-sm" data-action="forget" data-id="' + job.id + '">Dismiss</button>';
+        }
+
+        return '<div class="row"><div class="row-main">' +
+          '<div class="row-title">' + escapeHtml(job.title) + "</div>" +
+          '<div class="row-meta"><span>' + meta.map(escapeHtml).join("</span><span>") + "</span></div>" +
+          '<div class="progress"><div class="progress-fill' +
+          (job.status === "downloading" && !job.total ? " is-indeterminate" : "") +
+          '" style="width:' + percent.toFixed(1) + '%"></div></div>' +
+          (job.error ? '<div class="row-meta"><span>' + escapeHtml(job.error) + "</span></div>" : "") +
+          '</div><div class="row-actions">' + actions + "</div></div>";
+      }
+
+      function libraryRow(item) {
+        var meta = [bytes(item.size)];
+        if (!item.complete) { meta.push("incomplete download"); }
+        var pills = item.complete
+          ? '<span class="pill' + (item.served ? " is-on" : "") + '">' + (item.served ? "Serving" : "Not served") + "</span>"
+          : '<span class="pill is-warn">Partial</span>';
+
+        var actions = item.complete
+          ? '<button class="btn btn-sm" data-action="serve" data-file="' + escapeHtml(item.filename) +
+            '" data-served="' + (item.served ? "1" : "0") + '">' + (item.served ? "Stop serving" : "Serve") + "</button>"
+          : "";
+        actions += '<button class="btn btn-sm btn-danger" data-action="delete" data-file="' +
+          escapeHtml(item.filename) + '">Delete</button>';
+
+        return '<div class="row"><div class="row-main">' +
+          '<div class="row-title">' + escapeHtml(item.title) + " " + pills + "</div>" +
+          '<div class="row-meta"><span>' + meta.map(escapeHtml).join("</span><span>") + "</span>" +
+          "<span>" + escapeHtml(item.filename) + "</span></div>" +
+          '</div><div class="row-actions">' + actions + "</div></div>";
+      }
+
+      function render() {
+        renderStorage(state.storage);
+        renderStats();
+
+        var jobs = state.downloads;
+        $("downloads-count").textContent = jobs.length;
+        $("downloads-list").innerHTML = jobs.length
+          ? jobs.map(downloadRow).join("")
+          : '<div class="empty">No downloads running. Find archives under <strong>Browse &amp; download</strong>.</div>';
+
+        var items = state.library;
+        $("library-count").textContent = items.length;
+        $("library-list").innerHTML = items.length
+          ? items.map(libraryRow).join("")
+          : '<div class="empty">' + (state.storage.ok
+              ? "No .zim archives on the share yet."
+              : "The storage share is unavailable, so its archives can't be listed.") + "</div>";
+      }
+
+      function refresh() {
+        return api("api/state").then(function (data) {
+          state = data;
+          render();
+          schedulePoll();
+        }).catch(function (error) {
+          toast(error.message);
+          schedulePoll();
+        });
+      }
+
+      function schedulePoll() {
+        clearTimeout(pollTimer);
+        var busy = state && state.downloads.some(function (job) {
+          return job.status === "downloading" || job.status === "queued";
+        });
+        pollTimer = setTimeout(refresh, busy ? 2000 : 15000);
+      }
+
+      // ── Catalog ──────────────────────────────────────────────────────────
+      function catalogRow(entry) {
+        var meta = [bytes(entry.size)];
+        if (entry.article_count) { meta.push(entry.article_count.toLocaleString() + " articles"); }
+        if (entry.language) { meta.push(entry.language); }
+        if (entry.issued) { meta.push(entry.issued); }
+
+        var flavour = entry.flavour_label
+          ? '<span class="pill">' + escapeHtml(entry.flavour_label) + "</span>" : "";
+
+        var action;
+        if (entry.downloaded) {
+          action = '<span class="pill is-on">In library</span>';
+        } else if (entry.downloading) {
+          action = '<span class="pill">Downloading</span>';
+        } else {
+          action = '<button class="btn btn-sm btn-primary" data-action="download" ' +
+            'data-url="' + escapeHtml(entry.url) + '" data-file="' + escapeHtml(entry.filename) +
+            '" data-title="' + escapeHtml(entry.title + " · " + entry.flavour_label) +
+            '" data-size="' + (entry.size || 0) + '">Download</button>';
+        }
+
+        var thumb = entry.thumbnail
+          ? '<img class="row-thumb" alt="" loading="lazy" src="' + escapeHtml(entry.thumbnail) + '" />'
+          : "";
+
+        return '<div class="row">' + thumb + '<div class="row-main">' +
+          '<div class="row-title">' + escapeHtml(entry.title) + " " + flavour + "</div>" +
+          '<div class="row-meta"><span>' + meta.map(escapeHtml).join("</span><span>") + "</span></div>" +
+          (entry.flavour_detail
+            ? '<div class="row-meta"><span>' + escapeHtml(entry.flavour_detail) + "</span></div>" : "") +
+          '</div><div class="row-actions">' + action + "</div></div>";
+      }
+
+      function renderCatalog(data) {
+        $("catalog-count").textContent = data.total;
+        $("catalog-list").innerHTML = data.entries.length
+          ? data.entries.map(catalogRow).join("")
+          : '<div class="empty">Nothing matched.</div>';
+        catalogState.total = data.total;
+        $("catalog-prev").hidden = catalogState.start <= 0;
+        $("catalog-next").hidden = catalogState.start + catalogState.count >= data.total;
+      }
+
+      function loadCatalog() {
+        var list = $("catalog-list");
+        list.innerHTML = '<div class="empty">Loading the catalog…</div>';
+        var url;
+        if (catalogState.mode === "wikipedia") {
+          $("catalog-heading").textContent = "Wikipedia editions";
+          $("curated-hint").hidden = false;
+          url = "api/catalog/wikipedia?lang=" + encodeURIComponent(catalogState.lang);
+        } else {
+          $("catalog-heading").textContent = "Catalog results";
+          $("curated-hint").hidden = true;
+          url = "api/catalog?q=" + encodeURIComponent(catalogState.q) +
+            "&lang=" + encodeURIComponent(catalogState.lang) +
+            "&category=" + encodeURIComponent(catalogState.category) +
+            "&start=" + catalogState.start + "&count=" + catalogState.count;
+        }
+        api(url).then(renderCatalog).catch(function (error) {
+          list.innerHTML = '<div class="banner">' + WARNING_ICON +
+            '<div><div class="banner-title">Catalog unavailable</div><div class="banner-body">' +
+            escapeHtml(error.message) +
+            " Archives already on the share keep working offline.</div></div></div>";
+          $("catalog-prev").hidden = true;
+          $("catalog-next").hidden = true;
+        });
+      }
+
+      function loadFilters() {
+        api("api/catalog/filters").then(function (data) {
+          var langSelect = $("filter-lang");
+          data.languages.forEach(function (language) {
+            var option = document.createElement("option");
+            option.value = language.code;
+            option.textContent = language.title + " (" + language.count + ")";
+            langSelect.appendChild(option);
+          });
+          langSelect.value = catalogState.lang;
+
+          var categorySelect = $("filter-category");
+          data.categories.forEach(function (name) {
+            var option = document.createElement("option");
+            option.value = name;
+            option.textContent = name;
+            categorySelect.appendChild(option);
+          });
+        }).catch(function () { /* filters are a convenience; search still works */ });
+      }
+
+      // ── Events ───────────────────────────────────────────────────────────
+      function selectTab(name) {
+        var isLibrary = name === "library";
+        $("tab-library").setAttribute("aria-selected", isLibrary ? "true" : "false");
+        $("tab-browse").setAttribute("aria-selected", isLibrary ? "false" : "true");
+        $("panel-library").hidden = !isLibrary;
+        $("panel-browse").hidden = isLibrary;
+        if (!isLibrary && !$("catalog-list").innerHTML) { loadCatalog(); }
+      }
+
+      $("tab-library").addEventListener("click", function () { selectTab("library"); });
+      $("tab-browse").addEventListener("click", function () { selectTab("browse"); });
+
+      $("do-search").addEventListener("click", function () {
+        catalogState.q = $("search").value.trim();
+        catalogState.lang = $("filter-lang").value;
+        catalogState.category = $("filter-category").value;
+        catalogState.start = 0;
+        catalogState.mode = (catalogState.q || catalogState.category) ? "search" : "wikipedia";
+        loadCatalog();
+      });
+      $("search").addEventListener("keydown", function (event) {
+        if (event.key === "Enter") { $("do-search").click(); }
+      });
+      $("catalog-prev").addEventListener("click", function () {
+        catalogState.start = Math.max(0, catalogState.start - catalogState.count);
+        loadCatalog();
+      });
+      $("catalog-next").addEventListener("click", function () {
+        catalogState.start += catalogState.count;
+        loadCatalog();
+      });
+
+      $("server-toggle").addEventListener("click", function () {
+        var action = state && state.server.enabled ? "stop" : "start";
+        post("api/server/" + action).then(refresh).catch(function (error) { toast(error.message); refresh(); });
+      });
+
+      document.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-action]");
+        if (!button) { return; }
+        var action = button.dataset.action;
+
+        if (action === "download") {
+          button.disabled = true;
+          post("api/downloads", {
+            url: button.dataset.url,
+            filename: button.dataset.file,
+            title: button.dataset.title,
+            size: Number(button.dataset.size) || null
+          }).then(function () {
+            toast("Download started - follow it on the Library tab.");
+            selectTab("library");
+            refresh();
+            loadCatalog();
+          }).catch(function (error) { button.disabled = false; toast(error.message); });
+          return;
+        }
+
+        if (action === "cancel" || action === "resume" || action === "forget") {
+          post("api/downloads/" + button.dataset.id + "/" + action)
+            .then(refresh).catch(function (error) { toast(error.message); });
+          return;
+        }
+
+        if (action === "serve") {
+          post("api/library/" + encodeURIComponent(button.dataset.file) + "/serve", {
+            served: button.dataset.served !== "1"
+          }).then(refresh).catch(function (error) { toast(error.message); });
+          return;
+        }
+
+        if (action === "delete") {
+          if (!window.confirm("Delete " + button.dataset.file + " from the share permanently?")) { return; }
+          api("api/library/" + encodeURIComponent(button.dataset.file), { method: "DELETE" })
+            .then(refresh).catch(function (error) { toast(error.message); });
+        }
+      });
+
+      refresh().then(function () {
+        catalogState.lang = (state && state.options.catalog_language) || "";
+        loadFilters();
+      });
+    })();
+  </script>
+</body>
+</html>

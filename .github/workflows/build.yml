@@ -1,0 +1,51 @@
+name: Build
+
+on:
+  push:
+    paths:
+      - "*/Dockerfile"
+      - "*/build.yaml"
+      - "*/config.yaml"
+      - "*/rootfs/**"
+      - "*/app/**"
+      - ".github/workflows/build.yml"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }} (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Every combination is listed in full: an `include` that only adds keys
+      # missing from the base matrix merges into the first combination and
+      # then splits off as its own, which would silently drop `app`.
+      matrix:
+        include:
+          - app: kiwix
+            arch: aarch64
+            platform: linux/arm64
+          - app: kiwix
+            arch: amd64
+            platform: linux/amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      # aarch64 images are built under emulation on the amd64 runner.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # The same two build args the Supervisor passes when it builds an app
+      # on the machine it's installed on, with BUILD_FROM taken from the
+      # app's own build.yaml - so this proves the real install-time build.
+      - name: Build ${{ matrix.app }} for ${{ matrix.arch }}
+        run: |
+          build_from=$(yq -r '.build_from.${{ matrix.arch }}' "${{ matrix.app }}/build.yaml")
+          echo "Building ${{ matrix.app }} for ${{ matrix.arch }} from ${build_from}"
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg BUILD_FROM="${build_from}" \
+            --build-arg BUILD_ARCH=${{ matrix.arch }} \
+            --output type=cacheonly \
+            "${{ matrix.app }}"
