@@ -27,7 +27,7 @@ jobs:
       # needed to prove the app builds on both architectures; Home Assistant
       # itself builds the image locally when the app is installed.
       - name: Build ${{ matrix.app }} for ${{ matrix.arch }}
-        uses: home-assistant/builder@2026.06.0
+        uses: home-assistant/builder@2026.03.2
         with:
           args: |
             --test \
