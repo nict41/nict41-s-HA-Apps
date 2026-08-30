@@ -26,10 +26,16 @@ jobs:
       # --test builds the image without publishing it, which is all that is
       # needed to prove the app builds on both architectures; Home Assistant
       # itself builds the image locally when the app is installed.
+      #
+      # --image has to be given explicitly: the apps in this repository are
+      # built by the Supervisor on the machine they're installed on, so none
+      # of them carries an `image:` key in config.yaml for the builder to
+      # take a tag from. The name is only used for this throwaway build.
       - name: Build ${{ matrix.app }} for ${{ matrix.arch }}
         uses: home-assistant/builder@2026.03.2
         with:
           args: |
             --test \
             --${{ matrix.arch }} \
+            --image "local/{arch}-addon-${{ matrix.app }}" \
             --target /data/${{ matrix.app }}
