@@ -31,9 +31,11 @@ still there. The app refuses to start a download that doesn't fit in the free
 space it can see on the share, but it can't stop you filling the share with
 several archives over time.
 
-Downloads are resumable: an interrupted transfer keeps its `.part` file and
-picks up where it left off, so a 124 GB download surviving a restart is
-normal rather than a disaster.
+Downloads are resumable and restartable: an interrupted transfer keeps its
+`.part` file and picks up where it left off, including after the add-on is
+updated or Home Assistant reboots. A 124 GB download surviving a restart is
+normal rather than a disaster - nothing needs re-fetching but the last few
+seconds.
 
 ## Setup
 
@@ -86,7 +88,11 @@ configured language, with each edition's flavours side by side:
 
 Search the whole catalog from the same tab for anything else the Kiwix
 library carries (Wiktionary, Stack Exchange, Project Gutenberg, TED,
-WikiHow, the DevDocs programming references, and so on).
+WikiHow, the DevDocs programming references, and so on), and sort the
+results by size, article count, publication date or title. **Details** on
+any result opens its full description, article and media counts, publisher,
+what it contains (pictures, videos, full-text search) and its exact
+filename, plus a link to preview it on library.kiwix.org.
 
 Press **Download** and the transfer starts onto the share, with live
 progress, transfer rate and estimated time on the **Library** tab.
@@ -95,7 +101,8 @@ progress, transfer rate and estimated time on the **Library** tab.
 
 Finished downloads are added to what kiwix-serve serves (unless you turn
 **Serve newly downloaded archives** off), and the **Read** button in the
-header opens the reader in the same panel. Use **Serve** / **Stop serving**
+header opens the reader in the same panel, under a bar with a **Library**
+button that brings you back however deep into an archive you have clicked. Use **Serve** / **Stop serving**
 on the Library tab to control which archives are searchable and readable;
 changes take effect immediately, without restarting anything.
 
@@ -108,6 +115,28 @@ changes take effect immediately, without restarting anything.
 | `catalog_language` | `eng` | ISO 639-3 language the catalog is filtered by when the browser opens. |
 | `auto_serve_new` | `true` | Serve each archive automatically once it finishes downloading. |
 | `max_concurrent_downloads` | `1` | How many downloads may run at once. |
+
+## Download speed and scheduling
+
+The gear icon in the header opens **Settings**. Everything there applies
+immediately, including to transfers already running - unlike the add-on
+options below it, saving which restarts the add-on and interrupts them.
+
+| Setting | What it does |
+|---|---|
+| **Archives at once** | How many separate downloads run in parallel (1-6). |
+| **Connections per archive** | Splits one archive across several byte ranges fetched at the same time (1-8). This is usually the one that makes a large download faster; 4 is a good default. |
+| **Off-peak window** | Confines transfers to a time range, e.g. 23:00-07:00, so a 100 GB download isn't competing with everything else during the day. The window may cross midnight, and uses Home Assistant's timezone. |
+
+When the window closes, running transfers stand down and show as *waiting
+for the window*; they resume by themselves when it opens again, from exactly
+where they stopped. **Download now** on any waiting transfer starts it
+regardless, and that archive keeps ignoring the window until it finishes.
+
+More connections is not always faster: mirrors rate-limit per connection, so
+4-8 helps on a fast line, while a slow connection or a busy NAS may be
+happier with 1-2. If a mirror refuses range requests, the download quietly
+falls back to a single connection.
 
 ## How it works
 
@@ -128,8 +157,12 @@ restart.
 
 - `/media/<zim_path>/*.zim` — the archives, on your share.
 - `/media/<zim_path>/*.zim.part` — in-progress downloads, resumable.
-- `/data/state.json`, `/data/library.xml` — which archives are served
-  (a few kilobytes, on Home Assistant's own disk).
+- `/media/<zim_path>/*.zim.part.json` — which byte ranges of a split
+  download have arrived. A `.part` without one is a plain sequential
+  download, which is how single-connection transfers are stored.
+- `/data/state.json`, `/data/library.xml`, `/data/downloads.json`,
+  `/data/settings.json` — which archives are served, the download list and
+  your in-app settings (a few kilobytes, on Home Assistant's own disk).
 
 ## Troubleshooting
 
@@ -147,6 +180,20 @@ credentials it is mounted with don't have write permission on that folder.
 
 **The reader is empty.** Nothing is selected to serve — use **Serve** on an
 archive in the Library tab.
+
+**A download says "waiting for the window".** It is outside the off-peak
+hours set in Settings. It will start on its own when the window opens, or
+press **Download now** to start it immediately.
+
+**A `.part` file is much bigger than the progress shown.** A split download
+writes to several places in the file at once, so its length runs ahead of
+how much has actually arrived. The progress figure (and the `.part.json`
+beside it) is the accurate one.
+
+**A download says it was interrupted and can't find its archive.** It was
+resumed from a `.part` file whose edition is no longer in the catalog - ZIM
+editions are replaced every month or two. Delete it and download the current
+edition; resuming into a different edition's file would corrupt it.
 
 **The catalog won't load.** Browsing needs internet access; archives already
 on the share keep working offline, which is rather the point.

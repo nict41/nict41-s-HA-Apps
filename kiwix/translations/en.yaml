@@ -27,5 +27,28 @@ configuration:
   max_concurrent_downloads:
     name: Concurrent downloads
     description: >-
-      How many ZIM downloads may run at once. ZIM files are large and
-      downloads are disk- and network-bound, so 1 is usually fastest.
+      How many archives may download at once. This is only the starting
+      value: change it in the app's Settings panel instead and it applies
+      immediately, without restarting the add-on (which would interrupt
+      anything in flight).
+  download_threads:
+    name: Connections per download
+    description: >-
+      How many parallel connections one archive is fetched over. Splitting a
+      download across ranges is usually much faster on a big archive. Also
+      changeable live in the app's Settings panel.
+  download_window_enabled:
+    name: Restrict downloads to off-peak hours
+    description: >-
+      Only transfer archives between the times below, so a 100 GB download
+      isn't competing with everything else on your connection during the day.
+      Running transfers pause when the window closes and resume when it
+      opens; nothing already downloaded is lost.
+  download_window_start:
+    name: Off-peak window starts
+    description: >-
+      24-hour local time (Home Assistant's timezone), e.g. 23:00.
+  download_window_end:
+    name: Off-peak window ends
+    description: >-
+      24-hour local time, e.g. 07:00. A window may cross midnight.

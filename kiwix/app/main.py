@@ -50,7 +50,11 @@ _filters_cache: dict = {"fetched_at": 0.0, "value": None}
 async def lifespan(app: FastAPI):
     settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
     library.prune_served()
+    # Order matters: the saved jobs come back first so that a `.part` they
+    # already own isn't adopted a second time as an orphan.
+    downloads.load_registry()
     downloads.adopt_partials()
+    downloads.start_scheduler()
     server.start_monitor()
     if server.enabled() and library.read_state()["served"]:
         await run_in_threadpool(server.start)
@@ -77,6 +81,19 @@ async def index(request: Request):
     return templates.TemplateResponse(request, "index.html")
 
 
+@app.get("/read", response_class=HTMLResponse)
+async def read(request: Request):
+    """The reader, wrapped in a bar that leads back to the library.
+
+    kiwix-serve's own pages have no idea they are inside an add-on panel, so
+    once you follow a link into an article there is otherwise no way back
+    short of the browser's back button (which, inside Home Assistant's
+    ingress iframe, is not where a reader's hand goes). Framing it under our
+    own header keeps the way out on screen at all times.
+    """
+    return templates.TemplateResponse(request, "read.html")
+
+
 @app.get("/api/state")
 async def api_state():
     def collect() -> dict:
@@ -84,12 +101,26 @@ async def api_state():
         return {
             "storage": storage,
             "options": settings.as_dict(),
+            "settings": settings.all_settings(),
+            "window": settings.window_state(),
             "server": server.status(),
             "library": library.list_zims(),
             "downloads": downloads.snapshot(),
         }
 
     return await run_in_threadpool(collect)
+
+
+@app.post("/api/settings")
+async def api_settings(payload: dict):
+    """Change a runtime setting.
+
+    These live here rather than only in the add-on options because saving an
+    add-on option restarts the add-on, which interrupts every download in
+    flight. Changes made here apply on the scheduler's next tick.
+    """
+    values = await run_in_threadpool(settings.set_many, payload)
+    return {"ok": True, "settings": values, "window": settings.window_state()}
 
 
 @app.get("/api/catalog")
@@ -99,10 +130,12 @@ async def api_catalog(
     category: str = "",
     start: int = 0,
     count: int = 30,
+    sort: str = "relevance",
 ):
     def collect() -> dict:
         result = catalog.search(
-            query=q, language=lang, category=category, start=start, count=min(count, 100)
+            query=q, language=lang, category=category, start=start,
+            count=min(count, 100), sort=sort,
         )
         return _annotate(result)
 
@@ -113,9 +146,9 @@ async def api_catalog(
 
 
 @app.get("/api/catalog/wikipedia")
-async def api_catalog_wikipedia(lang: str = ""):
+async def api_catalog_wikipedia(lang: str = "", sort: str = "size_desc"):
     def collect() -> dict:
-        return _annotate(catalog.wikipedia_variants(lang))
+        return _annotate(catalog.wikipedia_variants(lang, sort=sort))
 
     try:
         return await run_in_threadpool(collect)
@@ -169,7 +202,13 @@ async def api_download_start(payload: dict):
 
 @app.post("/api/downloads/{job_id}/{action}")
 async def api_download_action(job_id: str, action: str):
-    handlers = {"cancel": downloads.cancel, "resume": downloads.resume, "forget": downloads.forget}
+    handlers = {
+        "pause": downloads.pause,
+        "cancel": downloads.pause,
+        "resume": downloads.resume,
+        "forget": downloads.forget,
+        "now": downloads.download_now,
+    }
     handler = handlers.get(action)
     if handler is None:
         return JSONResponse({"error": f"Unknown action '{action}'."}, status_code=404)

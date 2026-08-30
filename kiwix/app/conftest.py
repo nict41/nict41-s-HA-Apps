@@ -27,12 +27,16 @@ def zim_dir(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clean_state():
-    """Each test starts with no served selection and no download jobs."""
+    """Each test starts with no served selection, jobs or saved settings."""
     import downloads
     import library
+    import settings
 
     library.state_file().unlink(missing_ok=True)
     library.library_xml().unlink(missing_ok=True)
+    downloads.registry_file().unlink(missing_ok=True)
+    (settings.DATA_DIR / "settings.json").unlink(missing_ok=True)
+    settings.reset_cache()
     with downloads._lock:
         downloads._jobs.clear()
     yield
