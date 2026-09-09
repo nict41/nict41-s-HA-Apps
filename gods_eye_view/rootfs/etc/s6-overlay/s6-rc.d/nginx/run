@@ -1,0 +1,7 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+
+bashio::net.wait_for 4173 127.0.0.1 300
+bashio::log.info "Starting nginx on port 8037"
+
+exec nginx -g "daemon off;"

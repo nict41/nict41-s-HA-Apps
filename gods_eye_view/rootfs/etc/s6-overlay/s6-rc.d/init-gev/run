@@ -1,0 +1,172 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+#
+# Prepare everything the dev server and nginx need before either starts:
+# persistent state under /data, provider keys from the add-on options, the
+# ingress base path, the generated nginx server block, and the shim that
+# nginx injects into index.html.
+
+set -e
+
+readonly GEV_HOME="/opt/gods-eye-view"
+readonly RUN_DIR="/run/gev"
+readonly WWW_DIR="${RUN_DIR}/www"
+readonly ENV_FILE="${RUN_DIR}/gev.env"
+readonly VITE_PORT=4173
+readonly LISTEN_PORT=8037
+
+mkdir -p "${RUN_DIR}" "${WWW_DIR}" /etc/nginx/servers /data/cache /data/logs
+# nginx workers drop to an unprivileged user, so the generated shim has to sit
+# on a path they can traverse and read.
+chmod 755 "${RUN_DIR}" "${WWW_DIR}"
+
+# ── Persistent app state ─────────────────────────────────────────────────────
+# The app writes three things next to its own checkout, all of which would be
+# lost on every add-on update if left in the image:
+#   .env        keys saved by the in-app POWER UP panel
+#   .gev-cache  CelesTrak / FIRMS / TomTom / terrain response caches
+#   .gev-logs   voice + realtime debug logs
+if [ ! -f /data/.env ]; then
+    printf '# Provider keys added from inside God'"'"'s Eye View.\n' > /data/.env
+fi
+chmod 600 /data/.env
+
+for link in .env:/data/.env .gev-cache:/data/cache .gev-logs:/data/logs; do
+    rm -rf "${GEV_HOME}/${link%%:*}"
+    ln -sfn "${link#*:}" "${GEV_HOME}/${link%%:*}"
+done
+
+# ── Ingress base path ────────────────────────────────────────────────────────
+# Home Assistant serves the add-on under /api/hassio_ingress/<token>/ and
+# strips that prefix before the request reaches us. Vite is started with it as
+# its --base so every URL it emits carries the prefix the browser needs.
+gev_base=""
+if ingress_entry="$(bashio::addon.ingress_entry 2>/dev/null)" \
+        && [ -n "${ingress_entry}" ] && [ "${ingress_entry}" != "null" ]; then
+    gev_base="${ingress_entry%/}"
+    bashio::log.info "Ingress path: ${gev_base}"
+else
+    bashio::log.warning "Could not read the ingress path from the Supervisor."
+    bashio::log.warning "The sidebar panel will not work; use direct access on port ${LISTEN_PORT}."
+fi
+printf '%s' "${gev_base}" > "${RUN_DIR}/base"
+
+# ── Provider keys and tuning ─────────────────────────────────────────────────
+: > "${ENV_FILE}"
+chmod 600 "${ENV_FILE}"
+
+# Only non-empty values are written. An exported-but-empty variable would stop
+# the app's own loadEnv from ever falling back to a key saved in /data/.env.
+write_env() {
+    local name="${1}"
+    local value="${2}"
+    [ -n "${value}" ] || return 0
+    printf "%s='%s'\n" "${name}" "$(printf '%s' "${value}" | sed "s/'/'\\\\''/g")" >> "${ENV_FILE}"
+}
+
+config_value() {
+    if bashio::config.has_value "${1}"; then
+        bashio::config "${1}"
+    fi
+}
+
+# HOST is what the upstream config reads to decide `allowedHosts`; setting it
+# to 0.0.0.0 accepts the Host header nginx forwards. The actual bind address
+# stays loopback-only — that is passed on the command line, which wins.
+write_env HOST "0.0.0.0"
+write_env PORT "${VITE_PORT}"
+
+write_env CESIUM_ION_TOKEN "$(config_value 'cesium_ion_token')"
+write_env GOOGLE_MAPS_API_KEY "$(config_value 'google_maps_api_key')"
+write_env OPENAI_API_KEY "$(config_value 'openai_api_key')"
+write_env AISSTREAM_API_KEY "$(config_value 'aisstream_api_key')"
+write_env FIRMS_MAP_KEY "$(config_value 'firms_map_key')"
+write_env TOMTOM_API_KEY "$(config_value 'tomtom_api_key')"
+write_env LL2_API_TOKEN "$(config_value 'll2_api_token')"
+
+opensky_id="$(config_value 'opensky_client_id')"
+opensky_secret="$(config_value 'opensky_client_secret')"
+write_env OPENSKY_CLIENT_ID "${opensky_id}"
+write_env OPENSKY_CLIENT_SECRET "${opensky_secret}"
+if [ -n "${opensky_id}" ] && [ -n "${opensky_secret}" ]; then
+    write_env OPENSKY_AUTH_MODE "oauth"
+fi
+
+# extra_env is the escape hatch for the ~30 further variables the upstream
+# .env.example documents (voice model, CCTV sources, rate limits, budgets).
+while IFS= read -r entry; do
+    [ -n "${entry}" ] || continue
+    write_env "${entry%%=*}" "${entry#*=}"
+done < <(jq -r '(.extra_env // [])[]' /data/options.json)
+
+key_count="$(grep -c '_API_KEY=\|_TOKEN=\|_KEY=\|_SECRET=' "${ENV_FILE}" || true)"
+bashio::log.info "Provider keys supplied by add-on options: ${key_count}"
+bashio::log.info "Keys set here appear as externally managed in the app's POWER UP panel."
+
+# ── Ingress shim ─────────────────────────────────────────────────────────────
+sed "s|__GEV_BASE__|${gev_base}|" /opt/gev-ha/ingress-shim.js > "${WWW_DIR}/ingress-shim.js"
+chmod 644 "${WWW_DIR}/ingress-shim.js"
+
+# ── nginx ────────────────────────────────────────────────────────────────────
+if [ -z "${gev_base}" ]; then
+    # No ingress path: the dev server runs at the root and nginx is a plain
+    # pass-through for direct port access.
+    cat > /etc/nginx/servers/gev.conf <<NGINX
+server {
+    listen ${LISTEN_PORT} default_server;
+    server_name _;
+    client_max_body_size 64m;
+
+    location / {
+        proxy_pass http://127.0.0.1:${VITE_PORT};
+        include /etc/nginx/gev-proxy.conf;
+    }
+}
+NGINX
+else
+    # Two callers reach this port with differently shaped URLs:
+    #
+    #   ingress  Home Assistant has already stripped the prefix, so requests
+    #            arrive unprefixed (/, /src/main.js, /api/opensky).
+    #   direct   the browser sends the prefixed URLs the app emits, because
+    #            Vite's --base put the prefix on them (/<base>/src/main.js).
+    #
+    # Normalise both to the unprefixed form, then put the prefix back on
+    # exactly what Vite expects to see it on. The app's own /api/* routes are
+    # the exception: those middlewares are registered ahead of Vite's base
+    # middleware, so they only ever match an unprefixed path.
+    cat > /etc/nginx/servers/gev.conf <<NGINX
+server {
+    listen ${LISTEN_PORT} default_server;
+    server_name _;
+    client_max_body_size 64m;
+
+    rewrite "^${gev_base}\$" / last;
+    rewrite "^${gev_base}(/.*)\$" \$1 last;
+
+    location = /__gev_ha/ingress-shim.js {
+        alias ${WWW_DIR}/ingress-shim.js;
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:${VITE_PORT};
+        include /etc/nginx/gev-proxy.conf;
+    }
+
+    location / {
+        proxy_pass http://127.0.0.1:${VITE_PORT}${gev_base}\$uri\$is_args\$args;
+        include /etc/nginx/gev-proxy.conf;
+
+        # sub_filter cannot rewrite a compressed body.
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once on;
+        sub_filter "</head>" "<script src=\"${gev_base}/__gev_ha/ingress-shim.js\"></script></head>";
+    }
+}
+NGINX
+fi
+
+nginx -t -q
+bashio::log.info "Configuration written; starting God's Eye View"
