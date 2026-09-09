@@ -106,11 +106,13 @@ depends on — OpenSky, CelesTrak, CCTV, FIRMS, TomTom, Overpass, GBFS, adsb.lol
 terrain — is registered as dev-server middleware. A production build would drop
 them.
 
-Practical effects: the image is around 400 MB, the first build after install
-takes several minutes while npm installs Cesium and friends, and the server
-idles at a few hundred MB of RAM. The globe itself is rendered by your
-**browser**, not by Home Assistant, so the machine you view it on needs the GPU,
-not the one running Home Assistant.
+Practical effects: the image lands around half a gigabyte, mostly Cesium. The
+build installs roughly 250 MB of dependencies — seconds on a fast x86 machine,
+a few minutes on a Pi with slow storage — and none of it compiles, so there is
+no long native build stage. The server then idles at a few hundred MB of RAM.
+
+The globe itself is rendered by your **browser**, not by Home Assistant, so the
+machine you view it on needs the GPU, not the one running Home Assistant.
 
 ## Storage
 
