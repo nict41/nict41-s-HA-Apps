@@ -111,11 +111,18 @@ bashio::log.info "Provider keys supplied by add-on options: ${key_count}"
 bashio::log.info "Keys set here appear as externally managed in the app's POWER UP panel."
 
 # ── Ingress shim ─────────────────────────────────────────────────────────────
-if bashio::config.true 'client_diagnostics'; then
+# Absent means on. An upgrade does not backfill new defaults into an existing
+# install's saved options, so a missing key here is the normal state for
+# anyone who installed before the option existed — and bashio::config.true
+# reports false for a key that simply is not there.
+# Read straight from options.json: it distinguishes all three states without
+# ambiguity — `null` when the key is absent, `false`, or `true`. Only an
+# explicit false turns diagnostics off.
+if [ "$(jq -r '.client_diagnostics' /data/options.json)" = "false" ]; then
+    diagnostics=0
+else
     diagnostics=1
     bashio::log.info "Client diagnostics on: browser errors and stalls are logged here as [client] lines"
-else
-    diagnostics=0
 fi
 
 sed -e "s|__GEV_BASE__|${gev_base}|" -e "s|__GEV_DIAG__|${diagnostics}|" \

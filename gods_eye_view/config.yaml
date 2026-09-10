@@ -1,5 +1,5 @@
 name: "God's Eye View"
-version: "0.2.1"
+version: "0.2.2"
 slug: "gods_eye_view"
 description: "Real-time intelligence console for planet Earth: photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, fires, traffic and public cameras"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/gods_eye_view"
@@ -44,7 +44,7 @@ schema:
   opensky_client_secret: password?
   extra_env:
     - match(^[A-Za-z_][A-Za-z0-9_]*=.*$)
-  client_diagnostics: bool
+  client_diagnostics: bool?
   auth_username: str?
   auth_password: password?
-  auth_session_days: int(1,365)
+  auth_session_days: int(1,365)?
