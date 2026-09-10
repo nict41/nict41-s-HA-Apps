@@ -297,7 +297,18 @@ const server = http.createServer(async (req, res) => {
       let originHost = null;
       try { originHost = new URL(origin).host; } catch { originHost = null; }
       if (originHost !== req.headers.host) {
-        send(res, 403, loginPage({ next: '/', message: 'Cross-origin sign-in refused.' }));
+        // A front proxy that rewrites Host (cloudflared's httpHostHeader, say)
+        // makes these disagree for an entirely legitimate request, and the
+        // refusal is otherwise indistinguishable from a wrong password. Say
+        // which two values failed to match.
+        console.log(
+          `Refused sign-in: Origin host "${originHost}" does not match Host "${req.headers.host}". `
+          + 'If a proxy in front rewrites the Host header, stop it doing so.',
+        );
+        send(res, 403, loginPage({
+          next: '/',
+          message: 'Sign-in refused: this request\'s origin does not match the address it arrived on.',
+        }));
         return;
       }
     }
