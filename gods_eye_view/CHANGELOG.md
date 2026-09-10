@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2
+
+- Fix "Missing option 'auth_session_days' in root" when saving the
+  configuration. `auth_session_days` and `client_diagnostics` were declared as
+  required, and updating an add-on does not backfill new defaults into an
+  existing install's saved options — so an install predating those options had
+  no value for them and every save was refused. Both are optional now.
+- A missing `client_diagnostics` means on, as its default always intended.
+  It was previously read in a way that treated absent as off.
+
 ## 0.2.1
 
 - Fix the login redirect being unreachable through a tunnel. nginx expands a
