@@ -1,0 +1,46 @@
+configuration:
+  cesium_ion_token:
+    name: Cesium ion token
+    description: >-
+      Unlocks Google photorealistic 3D tiles and world terrain. Free for
+      personal use from ion.cesium.com.
+  google_maps_api_key:
+    name: Google Maps API key
+    description: >-
+      Unlocks direct 3D tiles and place search. Metered — Google bills beyond
+      the free tier.
+  openai_api_key:
+    name: OpenAI API key
+    description: >-
+      Unlocks voice control and the AI HUD. Metered, roughly $0.01-0.05 per
+      minute of speech.
+  aisstream_api_key:
+    name: AISStream API key
+    description: Unlocks live ship positions worldwide. Free from aisstream.io.
+  firms_map_key:
+    name: NASA FIRMS map key
+    description: Unlocks live active-fire detections. Free from NASA FIRMS.
+  tomtom_api_key:
+    name: TomTom API key
+    description: Unlocks live traffic flow. Free tier available.
+  ll2_api_token:
+    name: Launch Library 2 token
+    description: >-
+      Optional. Raises the rate limit on rocket launch data; launches work
+      without it.
+  opensky_client_id:
+    name: OpenSky client ID
+    description: >-
+      Optional. Raises the aircraft polling rate. Set together with the client
+      secret to switch OpenSky to OAuth.
+  opensky_client_secret:
+    name: OpenSky client secret
+    description: The secret paired with the OpenSky client ID above.
+  extra_env:
+    name: Extra environment variables
+    description: >-
+      NAME=value entries for anything else upstream's .env.example documents,
+      such as OPENAI_REALTIME_VOICE, TOMTOM_DAILY_TILE_BUDGET or
+      CCTV_MAX_SOURCES.
+network:
+  8037/tcp: Web interface for direct access, bypassing the sidebar. Unauthenticated — leave it unmapped if Home Assistant is reachable from the internet.

@@ -36,6 +36,15 @@ Sets the host CPU cpufreq scaling governor (default performance) so CPU-bound jo
 
 Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
 
+### [God's Eye View](./gods_eye_view)
+
+![God's Eye View logo](gods_eye_view/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+A real-time intelligence console for planet Earth: photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, wildfires, traffic and public cameras, plus optional voice control.
+
 ### [Immich Machine Learning (OpenVINO)](./immich_ml)
 
 ![Immich Machine Learning logo](immich_ml/logo.png)

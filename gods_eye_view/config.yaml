@@ -1,0 +1,42 @@
+name: "God's Eye View"
+version: "0.1.0"
+slug: "gods_eye_view"
+description: "Real-time intelligence console for planet Earth: photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, fires, traffic and public cameras"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/gods_eye_view"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8037
+panel_icon: mdi:earth
+panel_title: "God's Eye View"
+ports:
+  8037/tcp: 8037
+ports_description:
+  8037/tcp: "God's Eye View web interface (direct access)"
+options:
+  cesium_ion_token: ""
+  google_maps_api_key: ""
+  openai_api_key: ""
+  aisstream_api_key: ""
+  firms_map_key: ""
+  tomtom_api_key: ""
+  ll2_api_token: ""
+  opensky_client_id: ""
+  opensky_client_secret: ""
+  extra_env: []
+schema:
+  cesium_ion_token: password?
+  google_maps_api_key: password?
+  openai_api_key: password?
+  aisstream_api_key: password?
+  firms_map_key: password?
+  tomtom_api_key: password?
+  ll2_api_token: password?
+  opensky_client_id: str?
+  opensky_client_secret: password?
+  extra_env:
+    - match(^[A-Za-z_][A-Za-z0-9_]*=.*$)

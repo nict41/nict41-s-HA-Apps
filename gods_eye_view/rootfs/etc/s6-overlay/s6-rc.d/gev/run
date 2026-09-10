@@ -1,0 +1,25 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+#
+# The God's Eye View dev server. It has to be the dev server rather than a
+# built bundle: every live-data proxy (OpenSky, CelesTrak, CCTV, FIRMS,
+# TomTom, Overpass, GBFS, adsb.lol, terrain) is registered as dev-server
+# middleware upstream, so `vite build` + `vite preview` would drop them.
+
+set -a
+# shellcheck disable=SC1091
+. /run/gev/gev.env
+set +a
+
+cd /opt/gods-eye-view || bashio::exit.nok "God's Eye View is not installed"
+
+base="$(cat /run/gev/base 2>/dev/null || true)"
+if [ -n "${base}" ]; then
+    bashio::log.info "Starting God's Eye View (port=4173, base=${base}/)"
+    exec node node_modules/vite/bin/vite.js \
+        --host 127.0.0.1 --port 4173 --strictPort --base "${base}/"
+fi
+
+bashio::log.info "Starting God's Eye View (port=4173)"
+exec node node_modules/vite/bin/vite.js \
+    --host 127.0.0.1 --port 4173 --strictPort

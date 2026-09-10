@@ -29,6 +29,12 @@ jobs:
           - app: kiwix
             arch: amd64
             platform: linux/amd64
+          - app: gods_eye_view
+            arch: aarch64
+            platform: linux/arm64
+          - app: gods_eye_view
+            arch: amd64
+            platform: linux/amd64
     steps:
       - uses: actions/checkout@v4
 
