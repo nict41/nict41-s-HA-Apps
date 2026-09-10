@@ -1,0 +1,21 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+
+declare exit_code=${1}
+declare signal=${2}
+
+if [[ "${exit_code}" -eq 256 && "${signal}" -eq 15 ]]; then
+    bashio::log.info "Session login stopped"
+    exit 0
+fi
+
+# Unlike the diagnostics sink, this one is load-bearing: if it dies, nginx
+# fails every authenticated request, so take the add-on down rather than
+# serve a login nobody can pass.
+if [[ "${exit_code}" -eq 256 ]]; then
+    exit_code=$((128 + signal))
+fi
+
+bashio::log.warning "Session login exited with code ${exit_code}, stopping add-on"
+echo "${exit_code}" > /run/s6-linux-init-container-results/exitcode
+exec /run/s6/basedir/bin/halt

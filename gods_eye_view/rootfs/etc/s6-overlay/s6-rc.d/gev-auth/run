@@ -1,0 +1,12 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+#
+# Session login for the published port. Credentials are kept in their own env
+# file rather than the app's, so the dev server process never carries them.
+
+set -a
+# shellcheck disable=SC1091
+. /run/gev/auth.env
+set +a
+
+exec node /opt/gev-ha/auth.mjs

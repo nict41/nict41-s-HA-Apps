@@ -1,5 +1,5 @@
 name: "God's Eye View"
-version: "0.1.2"
+version: "0.2.0"
 slug: "gods_eye_view"
 description: "Real-time intelligence console for planet Earth: photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, fires, traffic and public cameras"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/gods_eye_view"
@@ -10,13 +10,13 @@ init: false
 startup: application
 boot: auto
 ingress: true
-ingress_port: 8037
+ingress_port: 8099
 panel_icon: mdi:earth
 panel_title: "God's Eye View"
 ports:
   8037/tcp: 8037
 ports_description:
-  8037/tcp: "God's Eye View web interface (direct access)"
+  8037/tcp: "God's Eye View web interface (direct access; set auth_username and auth_password before exposing it)"
 options:
   cesium_ion_token: ""
   google_maps_api_key: ""
@@ -29,6 +29,9 @@ options:
   opensky_client_secret: ""
   extra_env: []
   client_diagnostics: true
+  auth_username: ""
+  auth_password: ""
+  auth_session_days: 7
 schema:
   cesium_ion_token: password?
   google_maps_api_key: password?
@@ -42,3 +45,6 @@ schema:
   extra_env:
     - match(^[A-Za-z_][A-Za-z0-9_]*=.*$)
   client_diagnostics: bool
+  auth_username: str?
+  auth_password: password?
+  auth_session_days: int(1,365)
