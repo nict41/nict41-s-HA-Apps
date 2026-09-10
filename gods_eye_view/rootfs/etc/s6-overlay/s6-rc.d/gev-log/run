@@ -1,0 +1,8 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+#
+# Sink for the diagnostics the ingress shim reports from the browser. Kept out
+# of the app's own process so a wedged or restarting dev server still has
+# somewhere to report to.
+
+exec node /opt/gev-ha/log-sink.mjs

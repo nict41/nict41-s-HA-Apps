@@ -42,5 +42,11 @@ configuration:
       NAME=value entries for anything else upstream's .env.example documents,
       such as OPENAI_REALTIME_VOICE, TOMTOM_DAILY_TILE_BUDGET or
       CCTV_MAX_SOURCES.
+  client_diagnostics:
+    name: Client diagnostics
+    description: >-
+      Report browser-side errors, stalls and boot progress into the add-on log
+      as [client] lines. Leave on unless the log noise bothers you; it is the
+      only way to see why the globe will not load.
 network:
   8037/tcp: Web interface for direct access, bypassing the sidebar. Unauthenticated — leave it unmapped if Home Assistant is reachable from the internet.

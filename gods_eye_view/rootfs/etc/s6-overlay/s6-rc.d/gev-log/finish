@@ -1,0 +1,6 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+
+# Diagnostics are not worth taking the add-on down for: log the exit and let
+# s6 restart the sink. Only `gev` and `nginx` halt the container.
+bashio::log.warning "Client diagnostics sink exited (${1}/${2}); restarting"

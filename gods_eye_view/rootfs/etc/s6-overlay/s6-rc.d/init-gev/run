@@ -13,6 +13,7 @@ readonly RUN_DIR="/run/gev"
 readonly WWW_DIR="${RUN_DIR}/www"
 readonly ENV_FILE="${RUN_DIR}/gev.env"
 readonly VITE_PORT=4173
+readonly LOG_PORT=4180
 readonly LISTEN_PORT=8037
 
 mkdir -p "${RUN_DIR}" "${WWW_DIR}" /etc/nginx/servers /data/cache /data/logs
@@ -104,7 +105,15 @@ bashio::log.info "Provider keys supplied by add-on options: ${key_count}"
 bashio::log.info "Keys set here appear as externally managed in the app's POWER UP panel."
 
 # ── Ingress shim ─────────────────────────────────────────────────────────────
-sed "s|__GEV_BASE__|${gev_base}|" /opt/gev-ha/ingress-shim.js > "${WWW_DIR}/ingress-shim.js"
+if bashio::config.true 'client_diagnostics'; then
+    diagnostics=1
+    bashio::log.info "Client diagnostics on: browser errors and stalls are logged here as [client] lines"
+else
+    diagnostics=0
+fi
+
+sed -e "s|__GEV_BASE__|${gev_base}|" -e "s|__GEV_DIAG__|${diagnostics}|" \
+    /opt/gev-ha/ingress-shim.js > "${WWW_DIR}/ingress-shim.js"
 chmod 644 "${WWW_DIR}/ingress-shim.js"
 
 # ── nginx ────────────────────────────────────────────────────────────────────
@@ -117,9 +126,26 @@ server {
     server_name _;
     client_max_body_size 64m;
 
+    location = /__gev_ha/ingress-shim.js {
+        alias ${WWW_DIR}/ingress-shim.js;
+        default_type application/javascript;
+        add_header Cache-Control "no-store" always;
+    }
+
+    # Diagnostics the shim reports from the browser, printed to the add-on log.
+    location = /__gev_ha/log {
+        proxy_pass http://127.0.0.1:${LOG_PORT};
+        proxy_http_version 1.1;
+        access_log off;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:${VITE_PORT};
         include /etc/nginx/gev-proxy.conf;
+
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once on;
+        sub_filter "</head>" "<script src=\"/__gev_ha/ingress-shim.js\"></script></head>";
     }
 }
 NGINX
@@ -150,6 +176,13 @@ server {
         add_header Cache-Control "no-store" always;
     }
 
+    # Diagnostics the shim reports from the browser, printed to the add-on log.
+    location = /__gev_ha/log {
+        proxy_pass http://127.0.0.1:${LOG_PORT};
+        proxy_http_version 1.1;
+        access_log off;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:${VITE_PORT};
         include /etc/nginx/gev-proxy.conf;
@@ -169,4 +202,25 @@ NGINX
 fi
 
 nginx -t -q
+
+# ── Outbound reachability ────────────────────────────────────────────────────
+# Logged once at start. A DNS sink or a firewall that DROPs rather than REJECTs
+# makes the app look like it is hanging, with nothing to distinguish it from a
+# bug in here — so say plainly whether this container can reach the outside.
+# Never fatal: the app is useful on cached and local data alone.
+probe() {
+    local label="${1}"
+    local url="${2}"
+    local code
+    if code="$(curl -sS -o /dev/null -m 8 -w '%{http_code}' "${url}" 2>/dev/null)" \
+            && [ "${code}" != "000" ]; then
+        bashio::log.info "Reachability: ${label} OK (HTTP ${code})"
+    else
+        bashio::log.warning "Reachability: ${label} FAILED — no response within 8s"
+    fi
+}
+
+probe "Esri basemap" "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer?f=pjson"
+probe "CelesTrak" "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=tle"
+
 bashio::log.info "Configuration written; starting God's Eye View"

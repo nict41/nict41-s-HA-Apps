@@ -46,6 +46,7 @@ metered.
 | `ll2_api_token` | Higher rate limits on rocket launch data | [Launch Library 2](https://thespacedevs.com) — optional |
 | `opensky_client_id` + `opensky_client_secret` | Higher-rate aircraft polling | [OpenSky](https://opensky-network.org) — free |
 | `extra_env` | Anything else upstream's `.env.example` documents | see below |
+| `client_diagnostics` | Browser-side errors and stalls in the add-on log (on by default) | — |
 
 Setting both OpenSky values also switches the app to OAuth automatically.
 
@@ -114,6 +115,47 @@ no long native build stage. The server then idles at a few hundred MB of RAM.
 The globe itself is rendered by your **browser**, not by Home Assistant, so the
 machine you view it on needs the GPU, not the one running Home Assistant.
 
+## When it will not load
+
+The globe runs in your browser, so a stall there used to leave nothing at all
+in the add-on log. It now reports what only the page can see. Open the add-on
+**Log** tab and look for `[client]` lines:
+
+```
+[client] 1.7s  phase: Initializing systems...
+[client] 14.5s console.warn: [MapStack] Esri World Imagery unavailable, falling back to OSM
+[client] 20.2s stalled: still on "Initializing systems..." after 20.2s; 13 request(s) open: GET https://tile.openstreetmap.org/...
+[client] 28.6s ready: globe ready after 28.6s
+```
+
+What to read from them:
+
+- **`phase:`** — which step the splash is on. The last one printed is where it
+  stopped.
+- **`stalled:`** — printed every 20 s while the splash is still up. It lists
+  what is still in flight, and says explicitly when **nothing** is in flight,
+  which means it is waiting on something that is not the network.
+- **`pending:` / `xhr-failed:` / `fetch-failed:`** — individual requests that
+  never came back. The host name is usually the whole diagnosis. Repeats from
+  one host are capped, so a `suppressed:` line means "more of the same".
+- **`ready:`** — how long the globe took.
+
+A normal cold start reaches `ready` in **under 30 seconds**, and it does so
+*even when every map provider is unreachable*: the app falls back Esri → OSM →
+flat terrain on its own, each after roughly a 12-second timeout. So a splash
+that never clears is not explained by blocked map tiles alone.
+
+The log also prints a one-off reachability check at start, which tells you
+whether the add-on container itself can get out:
+
+```
+Reachability: Esri basemap OK (HTTP 200)
+Reachability: CelesTrak FAILED — no response within 8s
+```
+
+Set `client_diagnostics: false` to turn the `[client]` reporting off. Path
+rewriting is unaffected — only the reporting stops.
+
 ## Storage
 
 Everything persistent lives in the app's own `/data`:
@@ -127,8 +169,8 @@ Everything persistent lives in the app's own `/data`:
 ## Troubleshooting
 
 **The sidebar panel is blank or stuck on "Initializing systems…"**
-The globe needs to reach map tile providers on the internet. Check the app log
-for proxy errors, and confirm Home Assistant itself has outbound access.
+See *When it will not load* above — the `[client]` log lines name what it is
+waiting on.
 
 **The log says it could not read the ingress path**
 The sidebar panel will not work, and the log says so. Direct access on port 8037
