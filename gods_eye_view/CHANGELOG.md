@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1
+
+- Report browser-side diagnostics into the add-on log as `[client]` lines: boot
+  phase, uncaught errors, console warnings, and requests that never finish.
+  The globe runs in the browser, so a stall there previously left no trace in
+  Home Assistant at all and could not be diagnosed from the Log tab.
+- Print a one-off outbound reachability check at start, so a DNS sink or a
+  firewall that drops rather than rejects is distinguishable from a bug here.
+- Add `client_diagnostics` to turn the `[client]` reporting off.
+
 ## 0.1.0
 
 - Initial release, packaging [God's Eye View](https://github.com/bilawalsidhu/gods-eye-view)
