@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0
+
+- Add a login screen for the published port, for exposing the app through a
+  tunnel: set `auth_username` and `auth_password`, and port 8037 serves a
+  styled login to anyone without a session. Sessions are signed cookies
+  (HttpOnly, SameSite=Lax, Secure over HTTPS), last `auth_session_days` days,
+  and are invalidated by changing either credential. Failed attempts back off
+  per address, one minute up to fifteen.
+- Ingress moves to its own unpublished listener (port 8099 inside the
+  container). The sidebar therefore never sees the login, and the login cannot
+  be bypassed by forging a header, because the separation is a socket rather
+  than a check. No user-visible change to the sidebar.
+- Left unconfigured, the published port stays open exactly as before, and the
+  log now says so at every start.
+- Note: a login does not protect the Google Maps key, which is embedded in the
+  page by design. Restrict it by HTTP referrer and cap its quota at Google —
+  see the docs.
+
 ## 0.1.2
 
 - Fix the app never getting past its loading screen under ingress. Home

@@ -48,5 +48,19 @@ configuration:
       Report browser-side errors, stalls and boot progress into the add-on log
       as [client] lines. Leave on unless the log noise bothers you; it is the
       only way to see why the globe will not load.
+  auth_username:
+    name: Login username
+    description: >-
+      Username for the login screen on the direct port. The sidebar is
+      unaffected - Home Assistant already authenticates it. Leave both this and
+      the password empty to leave the direct port open.
+  auth_password:
+    name: Login password
+    description: >-
+      Password for the login screen. Changing it signs out every existing
+      session. Set this before exposing the port through a tunnel.
+  auth_session_days:
+    name: Session length (days)
+    description: How long a successful login stays signed in for. Default 7.
 network:
   8037/tcp: Web interface for direct access, bypassing the sidebar. Unauthenticated — leave it unmapped if Home Assistant is reachable from the internet.

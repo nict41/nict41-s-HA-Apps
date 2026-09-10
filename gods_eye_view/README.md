@@ -21,10 +21,47 @@ The app is reachable two ways, and both serve the same instance:
 - **Direct** — `http://<your-ha-host>:8037`. Change or remove the port under
   the app's **Configuration → Network** tab.
 
-Direct access has **no authentication of its own**. Anyone who can reach that
-port can use the app, and therefore your provider keys and their quota. If your
-Home Assistant is reachable from the internet, leave the port unmapped and use
-the sidebar only.
+Direct access has no authentication until you give it some. Set `auth_username`
+and `auth_password` and that port gets a login screen; see *Exposing it beyond
+your LAN* below. Left unset, anyone who can reach the port can use the app, and
+your provider quota with it.
+
+## Exposing it beyond your LAN
+
+The sidebar is authenticated by Home Assistant. The published port is not, so
+0.2.0 adds a login for it — set `auth_username` and `auth_password` and port
+8037 serves a login screen to anyone without a session.
+
+The two are separate nginx listeners, not one listener with a check. Ingress
+gets its own unpublished port, so a tunnelled request cannot reach it by
+forging a header, and the sidebar never asks you to sign in twice. Sessions are
+signed cookies (`HttpOnly`, `SameSite=Lax`, and `Secure` when the request
+arrived over HTTPS), last `auth_session_days` days, and are invalidated wholesale
+by changing either credential. Repeated failures from one address back off, from
+one minute up to fifteen.
+
+Leaving both options empty keeps the port open, and the log says so at every
+start.
+
+### What the login does not protect
+
+Your Google Maps key is **embedded in the page by design** — the geocode call is
+made from the browser, so anyone who signs in can read the key out of devtools
+and use it elsewhere. The login stops anonymous use of your quota; it does not
+protect the key itself. Two things do:
+
+- **Restrict the key at Google** to an HTTP referrer matching the hostname you
+  serve from — your tunnel hostname, and your Home Assistant origin if you use
+  the sidebar too. A key restricted this way is useless to anyone who lifts it.
+- **Cap the quota** per API under *APIs & Services → Quotas* in Google Cloud
+  Console. That makes requests fail once you hit the cap rather than bill you.
+
+The same applies to `cesium_ion_token`. Every other key stays server-side.
+
+If you are already fronting this with Cloudflare, putting Cloudflare Access in
+front of the tunnel is stronger than this login and costs nothing at your scale
+— it authenticates at the edge, so unauthenticated traffic never reaches your
+machine at all. This login is there so the port is never open on its own.
 
 ## It works with no keys at all
 
@@ -47,6 +84,8 @@ metered.
 | `opensky_client_id` + `opensky_client_secret` | Higher-rate aircraft polling | [OpenSky](https://opensky-network.org) — free |
 | `extra_env` | Anything else upstream's `.env.example` documents | see below |
 | `client_diagnostics` | Browser-side errors and stalls in the add-on log (on by default) | — |
+| `auth_username` + `auth_password` | A login screen on the published port; leave empty to keep it open | — |
+| `auth_session_days` | How long a login lasts (default 7) | — |
 
 Setting both OpenSky values also switches the app to OAuth automatically.
 

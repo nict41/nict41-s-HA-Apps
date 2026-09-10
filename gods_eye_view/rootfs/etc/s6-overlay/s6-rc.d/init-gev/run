@@ -14,6 +14,11 @@ readonly WWW_DIR="${RUN_DIR}/www"
 readonly ENV_FILE="${RUN_DIR}/gev.env"
 readonly VITE_PORT=4173
 readonly LOG_PORT=4180
+readonly AUTH_PORT=4181
+readonly AUTH_ENV_FILE="${RUN_DIR}/auth.env"
+# Ingress gets its own listener so the published one can carry a login
+# without Home Assistant ever seeing it.
+readonly INGRESS_PORT=8099
 readonly LISTEN_PORT=8037
 
 mkdir -p "${RUN_DIR}" "${WWW_DIR}" /etc/nginx/servers /data/cache /data/logs
@@ -61,8 +66,9 @@ chmod 600 "${ENV_FILE}"
 write_env() {
     local name="${1}"
     local value="${2}"
+    local file="${3:-${ENV_FILE}}"
     [ -n "${value}" ] || return 0
-    printf "%s='%s'\n" "${name}" "$(printf '%s' "${value}" | sed "s/'/'\\\\''/g")" >> "${ENV_FILE}"
+    printf "%s='%s'\n" "${name}" "$(printf '%s' "${value}" | sed "s/'/'\\\\''/g")" >> "${file}"
 }
 
 config_value() {
@@ -116,60 +122,56 @@ sed -e "s|__GEV_BASE__|${gev_base}|" -e "s|__GEV_DIAG__|${diagnostics}|" \
     /opt/gev-ha/ingress-shim.js > "${WWW_DIR}/ingress-shim.js"
 chmod 644 "${WWW_DIR}/ingress-shim.js"
 
-# ── nginx ────────────────────────────────────────────────────────────────────
-if [ -z "${gev_base}" ]; then
-    # No ingress path: the dev server runs at the root and nginx is a plain
-    # pass-through for direct port access.
-    cat > /etc/nginx/servers/gev.conf <<NGINX
-server {
-    listen ${LISTEN_PORT} default_server;
-    server_name _;
-    client_max_body_size 64m;
+# ── Session login ────────────────────────────────────────────────────────────
+# Ingress is authenticated by Home Assistant, so a login there would only ask
+# the same person twice. It guards the PUBLISHED port instead — the one you
+# would put behind a tunnel. The two are separate nginx listeners rather than
+# one listener with a check, because any header a check could read is one a
+# public client can forge.
+auth_user="$(config_value 'auth_username')"
+auth_pass="$(config_value 'auth_password')"
+auth_enabled=false
 
-    location = /__gev_ha/ingress-shim.js {
-        alias ${WWW_DIR}/ingress-shim.js;
-        default_type application/javascript;
-        add_header Cache-Control "no-store" always;
-    }
+if [ -n "${auth_user}" ] && [ -n "${auth_pass}" ]; then
+    auth_enabled=true
 
-    # Diagnostics the shim reports from the browser, printed to the add-on log.
-    location = /__gev_ha/log {
-        proxy_pass http://127.0.0.1:${LOG_PORT};
-        proxy_http_version 1.1;
-        access_log off;
-    }
+    # Persistent signing key: sessions survive a restart. It is combined with
+    # the credentials at use, so changing either expires every session.
+    if [ ! -s /data/session.key ]; then
+        head -c 32 /dev/urandom > /data/session.key
+    fi
+    chmod 600 /data/session.key
 
-    location / {
-        proxy_pass http://127.0.0.1:${VITE_PORT}\$uri\$is_args\$gev_args;
-        include /etc/nginx/gev-proxy.conf;
+    : > "${AUTH_ENV_FILE}"
+    chmod 600 "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_USERNAME "${auth_user}" "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_PASSWORD "${auth_pass}" "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_SESSION_DAYS "$(config_value 'auth_session_days')" "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_PORT "${AUTH_PORT}" "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_KEY_FILE "/data/session.key" "${AUTH_ENV_FILE}"
 
-        proxy_set_header Accept-Encoding "";
-        sub_filter_once on;
-        sub_filter "</head>" "<script src=\"/__gev_ha/ingress-shim.js\"></script></head>";
-    }
-}
-NGINX
+    bashio::log.info "Session login enabled on port ${LISTEN_PORT} for user '${auth_user}'"
 else
-    # Two callers reach this port with differently shaped URLs:
-    #
-    #   ingress  Home Assistant has already stripped the prefix, so requests
-    #            arrive unprefixed (/, /src/main.js, /api/opensky).
-    #   direct   the browser sends the prefixed URLs the app emits, because
-    #            Vite's --base put the prefix on them (/<base>/src/main.js).
-    #
-    # Normalise both to the unprefixed form, then put the prefix back on
-    # exactly what Vite expects to see it on. The app's own /api/* routes are
-    # the exception: those middlewares are registered ahead of Vite's base
-    # middleware, so they only ever match an unprefixed path.
-    cat > /etc/nginx/servers/gev.conf <<NGINX
-server {
-    listen ${LISTEN_PORT} default_server;
-    server_name _;
-    client_max_body_size 64m;
+    : > "${AUTH_ENV_FILE}"
+    chmod 600 "${AUTH_ENV_FILE}"
+    write_env GEV_AUTH_PORT "${AUTH_PORT}" "${AUTH_ENV_FILE}"
+    bashio::log.warning "No login configured: port ${LISTEN_PORT} is open to anyone who can reach it."
+    bashio::log.warning "Set auth_username and auth_password before exposing it beyond your LAN."
+fi
 
-    rewrite "^${gev_base}\$" / last;
-    rewrite "^${gev_base}(/.*)\$" \$1 last;
+normalise_rewrites=""
+if [ -n "${gev_base}" ]; then
+    # Direct callers send the base-prefixed URLs the app emits; ingress has
+    # already stripped its own prefix. Reduce both to the unprefixed form.
+    normalise_rewrites="$(printf '    rewrite "^%s$" / last;\n    rewrite "^%s(/.*)$" $1 last;\n' "${gev_base}" "${gev_base}")"
+fi
 
+rm -f /etc/nginx/servers/gev.conf
+
+# ── nginx ────────────────────────────────────────────────────────────────────
+# One set of locations, served by both listeners.
+cat > "${RUN_DIR}/locations.conf" <<NGINX
+${normalise_rewrites}
     location = /__gev_ha/ingress-shim.js {
         alias ${WWW_DIR}/ingress-shim.js;
         default_type application/javascript;
@@ -183,6 +185,8 @@ server {
         access_log off;
     }
 
+    # The app's own API routes are registered on the dev server ahead of Vite's
+    # base middleware, so they must reach it without the base prefix.
     location /api/ {
         proxy_pass http://127.0.0.1:${VITE_PORT};
         include /etc/nginx/gev-proxy.conf;
@@ -197,9 +201,83 @@ server {
         sub_filter_once on;
         sub_filter "</head>" "<script src=\"${gev_base}/__gev_ha/ingress-shim.js\"></script></head>";
     }
+NGINX
+chmod 644 "${RUN_DIR}/locations.conf"
+
+# Ingress listener. Unpublished, reachable only by the Supervisor, and never
+# carrying the login — Home Assistant has already authenticated the caller.
+cat > /etc/nginx/servers/gev-ingress.conf <<NGINX
+server {
+    listen ${INGRESS_PORT};
+    server_name _;
+    client_max_body_size 64m;
+
+    include ${RUN_DIR}/locations.conf;
+}
+NGINX
+
+# Published listener.
+if [ "${auth_enabled}" = true ]; then
+    cat > /etc/nginx/servers/gev-public.conf <<NGINX
+upstream gev_auth {
+    server 127.0.0.1:${AUTH_PORT};
+    keepalive 8;
+}
+
+server {
+    listen ${LISTEN_PORT} default_server;
+    server_name _;
+    client_max_body_size 64m;
+
+    auth_request /__gev_ha/auth;
+    error_page 401 = @gev_login;
+
+    location @gev_login {
+        return 302 /__gev_ha/login?next=\$request_uri;
+    }
+
+    location = /__gev_ha/auth {
+        internal;
+        auth_request off;
+        proxy_pass http://gev_auth/verify;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+    }
+
+    location ^~ /__gev_ha/login {
+        auth_request off;
+        proxy_pass http://gev_auth;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$gev_proto;
+    }
+
+    location ^~ /__gev_ha/logout {
+        auth_request off;
+        proxy_pass http://gev_auth;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$http_host;
+        proxy_set_header X-Forwarded-Proto \$gev_proto;
+    }
+
+    include ${RUN_DIR}/locations.conf;
+}
+NGINX
+else
+    cat > /etc/nginx/servers/gev-public.conf <<NGINX
+server {
+    listen ${LISTEN_PORT} default_server;
+    server_name _;
+    client_max_body_size 64m;
+
+    include ${RUN_DIR}/locations.conf;
 }
 NGINX
 fi
+
 
 nginx -t -q
 
