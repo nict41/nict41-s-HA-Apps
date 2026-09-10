@@ -140,7 +140,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:${VITE_PORT};
+        proxy_pass http://127.0.0.1:${VITE_PORT}\$uri\$is_args\$gev_args;
         include /etc/nginx/gev-proxy.conf;
 
         proxy_set_header Accept-Encoding "";
@@ -189,7 +189,7 @@ server {
     }
 
     location / {
-        proxy_pass http://127.0.0.1:${VITE_PORT}${gev_base}\$uri\$is_args\$args;
+        proxy_pass http://127.0.0.1:${VITE_PORT}${gev_base}\$uri\$is_args\$gev_args;
         include /etc/nginx/gev-proxy.conf;
 
         # sub_filter cannot rewrite a compressed body.

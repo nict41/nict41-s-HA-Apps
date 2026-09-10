@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2
+
+- Fix the app never getting past its loading screen under ingress. Home
+  Assistant proxies ingress with aiohttp `params=request.query`, which parses
+  the query into a MultiDict and re-encodes it — so Vite's valueless module
+  markers arrive rewritten, `?import&url` becoming `?import=&url=`. Vite then
+  no longer recognises a `?url` asset import and serves the raw file where the
+  browser expects a JS module, killing the module graph on a syntax error
+  before `main.js` ever runs. nginx now restores the markers before proxying.
+- This was the original hang: two `.geojsonl` layers are imported that way, so
+  the failure was total, and the splash sat on its initial text forever with
+  nothing in the log to explain it.
+
 ## 0.1.1
 
 - Report browser-side diagnostics into the add-on log as `[client]` lines: boot

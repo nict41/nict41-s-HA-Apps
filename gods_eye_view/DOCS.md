@@ -93,6 +93,14 @@ as its `--base`, an internal nginx normalises prefixed and unprefixed requests
 so both entry points reach the same server, and a small injected script prefixes
 the root-absolute URLs the app builds at runtime (`/api/...`, `/models/*.glb`).
 
+There is one more piece, and it is the reason the app would not load at all
+before 0.1.2. Home Assistant proxies ingress with aiohttp
+`params=request.query`, which parses the query string into a MultiDict and
+re-encodes it. Valueless parameters do not survive that round trip:
+`?import&url` — how Vite marks a `?url` asset import — arrives as
+`?import=&url=`, and Vite then serves the raw file instead of the JS module
+the browser is importing. nginx restores those markers before proxying.
+
 Two consequences worth knowing:
 
 - Direct access on port 8037 serves the page at `/`, but its assets are fetched
