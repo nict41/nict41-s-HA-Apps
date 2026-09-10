@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Fix the login redirect being unreachable through a tunnel. nginx expands a
+  relative redirect using its own scheme, host and port, so a client arriving
+  at `https://your-host/` was sent to `http://your-host:8037/__gev_ha/login` —
+  a port the tunnel does not publish and a scheme it does not serve. Redirects
+  are now relative, and the browser resolves them against wherever it actually
+  is. Ingress benefits from the same fix.
+
 ## 0.2.0
 
 - Add a login screen for the published port, for exposing the app through a
