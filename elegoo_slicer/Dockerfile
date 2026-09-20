@@ -10,10 +10,18 @@ FROM ${BUILD_FROM}
 # no FUSE and no privileges to mount it.
 ARG ELEGOO_VERSION=1.5.3.5
 
+# START_DOCKER=false is load-bearing. The base ships Docker-in-Docker and its
+# service starts dockerd whenever /dev/cpu_dma_latency exists — which it does
+# here, as a side effect of the device access granted for the iGPU. dockerd
+# then fails in an unprivileged add-on (no modprobe, cannot mount
+# /sys/kernel/security), s6 restarts it, and the add-on log fills with the
+# same twelve lines forever. Nothing here wants Docker; with this set false the
+# service parks on sleep infinity instead.
 ENV TITLE="ElegooSlicer" \
     HOME=/config \
     PUID=0 \
-    PGID=0
+    PGID=0 \
+    START_DOCKER=false
 
 # The AppImage bundles only ten libraries and links against thirty-five more.
 # This list is not a guess: every DT_NEEDED entry in the payload was read,
