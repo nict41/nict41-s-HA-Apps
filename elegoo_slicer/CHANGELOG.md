@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+- Fix the startup script exiting silently when it found no options file. It
+  bailed before doing any work, so a password set in the UI was never applied
+  and the GPU/software-rendering report never printed — the log said only
+  "exited 0", which was true, useless, and indistinguishable from working.
+- Graphics detection now runs regardless of the options file, and every path
+  through the script logs what it did and why.
+
 ## 0.1.0
 
 - Initial release, packaging [ElegooSlicer](https://github.com/ELEGOO-3D/ElegooSlicer)

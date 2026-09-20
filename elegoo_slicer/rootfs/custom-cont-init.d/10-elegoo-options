@@ -4,39 +4,65 @@
 # Turn the add-on's options into the environment the base image reads. It runs
 # before any service starts, which is the only point where that environment is
 # still writable.
+#
+# Structured so that nothing here can exit silently. An earlier version bailed
+# with `exit 0` when the options file was missing, which took the GPU report
+# down with it and left a log saying only "exited 0" — true, useless, and
+# indistinguishable from working.
 
-set -e
+set -uo pipefail
 
 OPTIONS=/data/options.json
-[ -f "${OPTIONS}" ] || exit 0
+ENV_DIR=/run/s6/container_environment
+
+log() { echo "[elegoo] $*"; }
 
 put() {
-    printf '%s' "${2}" > "/run/s6/container_environment/${1}"
+    mkdir -p "${ENV_DIR}"
+    printf '%s' "${2}" > "${ENV_DIR}/${1}"
 }
 
-web_user="$(jq -r '.web_username // ""' "${OPTIONS}")"
-web_pass="$(jq -r '.web_password // ""' "${OPTIONS}")"
+# ── Options ──────────────────────────────────────────────────────────────────
+web_user=""
+web_pass=""
 
-# Both are needed for a login to mean anything: the base image treats an unset
-# password as "no authentication at all", so half-configuring it silently
-# leaves the interface open.
+if [ -f "${OPTIONS}" ]; then
+    if ! web_user="$(jq -r '.web_username // ""' "${OPTIONS}" 2>/dev/null)"; then
+        log "WARNING: could not parse ${OPTIONS}; treating all options as unset"
+        web_user=""
+    fi
+    web_pass="$(jq -r '.web_password // ""' "${OPTIONS}" 2>/dev/null || echo "")"
+else
+    # Not fatal — the defaults are a usable configuration — but say so, because
+    # it also means a password set in the UI is not being applied.
+    log "WARNING: no options file at ${OPTIONS}, so configured options are NOT applied."
+    log "         /data holds: $(ls -A /data 2>/dev/null | tr '\n' ' ' || echo '<unreadable>')"
+fi
+
 if [ -n "${web_pass}" ]; then
     put CUSTOM_USER "${web_user:-elegoo}"
     put PASSWORD "${web_pass}"
-    echo "[elegoo] Web interface password set for user '${web_user:-elegoo}'"
+    log "Web interface requires a login as '${web_user:-elegoo}'"
 else
     if [ -n "${web_user}" ]; then
-        echo "[elegoo] web_username is set but web_password is empty — no login will be required"
+        log "web_username is set but web_password is empty — no login will be required"
     fi
-    echo "[elegoo] No password configured. The sidebar is still authenticated by Home Assistant;"
-    echo "[elegoo] only map port 3000 once web_password is set."
+    log "No password configured. Home Assistant still authenticates the sidebar;"
+    log "only map port 3000 once web_password is set."
 fi
 
-# Hardware rendering when an Intel/AMD render node was passed through, software
-# rendering when it was not. Either way the slicer gets a working GL stack.
+# ── Graphics ─────────────────────────────────────────────────────────────────
+# Runs regardless of the options above, so the log always says which renderer
+# the slicer is about to get.
 if [ -e /dev/dri/renderD128 ]; then
     put DRINODE /dev/dri/renderD128
-    echo "[elegoo] GPU node /dev/dri/renderD128 present — using hardware rendering"
+    log "GPU node /dev/dri/renderD128 present — using hardware rendering"
+elif compgen -G "/dev/dri/renderD*" > /dev/null; then
+    node="$(compgen -G '/dev/dri/renderD*' | head -1)"
+    put DRINODE "${node}"
+    log "GPU node ${node} present — using hardware rendering"
 else
-    echo "[elegoo] No /dev/dri render node — falling back to software rendering (slower)"
+    log "No /dev/dri render node — falling back to software rendering (slower)"
 fi
+
+log "Startup configuration complete"
