@@ -1,5 +1,5 @@
 name: "ElegooSlicer"
-version: "0.1.1"
+version: "0.1.2"
 slug: "elegoo_slicer"
 description: "ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a desktop in your browser"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/elegoo_slicer"
@@ -9,7 +9,7 @@ init: false
 startup: application
 boot: auto
 ingress: true
-ingress_port: 3000
+ingress_port: 8099
 panel_icon: mdi:printer-3d-nozzle
 panel_title: "ElegooSlicer"
 ports:

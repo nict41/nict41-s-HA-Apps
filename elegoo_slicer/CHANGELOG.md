@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2
+
+- **Fix the sidebar, which never worked.** The Kasm web client builds its
+  websocket URL from the origin rather than the page location, so behind
+  ingress it asked Home Assistant's own root for `/websockify`, got nothing,
+  and died with `Cannot read properties of undefined (reading 'lastActiveAt')`.
+  Ingress now has its own listener that injects the correct path per request
+  from `X-Ingress-Path` and proxies the socket. Direct access on port 3000 is
+  unchanged.
+- A password no longer puts a second login in front of the sidebar. Home
+  Assistant already authenticates that listener, so `web_password` now guards
+  the direct port only, which is what it was for.
+
 ## 0.1.1
 
 - Fix the startup script exiting silently when it found no options file. It

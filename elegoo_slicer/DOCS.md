@@ -26,9 +26,36 @@ Upstream ships Linux as an AppImage only, pinned here at **v1.5.3.5**. Bump
 | `web_username` | Username for the web interface login (defaults to `elegoo` when a password is set) |
 | `web_password` | Password for the web interface. **Empty means no login at all** — the base image treats an unset password as open access |
 
-Both apply to the web interface itself, so they take effect on the sidebar too.
-Leave them empty while you are only using the sidebar; Home Assistant is
-already doing the authenticating there.
+These apply to the **direct port only**. The sidebar is served by a separate
+listener that Home Assistant has already authenticated, so setting a password
+does not put a second login in front of the panel. Leave both empty unless you
+are mapping port 3000.
+
+## How the sidebar works
+
+Worth knowing, because it is unusual. The Kasm web client builds its websocket
+URL from the page's **origin**, not from the page's location:
+
+```js
+url += '://' + host;
+if (port) { url += ':' + port; }
+url += '/' + path;          // `path` defaults to "websockify"
+```
+
+Behind ingress the panel lives at `/api/hassio_ingress/<token>/`, so that
+resolves to `ws://your-home-assistant/websockify` — Home Assistant's own root,
+which has no such endpoint. The socket never opens, the client discards its
+connection object, and its keep-alive timer then fails with
+`Cannot read properties of undefined (reading 'lastActiveAt')`. That error is
+the symptom; the unreachable socket is the cause.
+
+The client does accept an explicit path via its query string. That is how the
+base image supports reverse-proxy subfolders, but it expects a value fixed at
+build time and an ingress token is neither fixed nor knowable in advance. So
+the add-on runs its own listener on 8099 for ingress, which injects the right
+path per request from the `X-Ingress-Path` header and proxies the socket
+through. The base image's own listener on 3000 is untouched and still serves
+direct access.
 
 ## Printers
 
