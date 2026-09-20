@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.3
+
+- The sidebar fix in 0.1.2 did not resolve the error for at least one install.
+  Rather than guess again, this adds the instrumentation needed to tell the
+  remaining explanations apart: whether requests reach the ingress listener at
+  all, what Home Assistant actually sends as `X-Ingress-Path`, and whether the
+  client ever goes on to request the websocket.
+- The page and socket requests are logged to the add-on log. Opening
+  `<sidebar-url>/__elegoo` reports what the listener sees, including the
+  running version.
+- The path injection no longer depends on the exact quoting of the markup it
+  is rewriting.
+
 ## 0.1.2
 
 - **Fix the sidebar, which never worked.** The Kasm web client builds its
