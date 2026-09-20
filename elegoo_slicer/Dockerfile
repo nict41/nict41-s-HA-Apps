@@ -24,6 +24,16 @@ ENV TITLE="ElegooSlicer" \
 # webkit2gtk **4.1** / libsoup **3** pair, not 4.0 / libsoup2.4. Swapping those
 # for the older generation produces an image that builds cleanly and then fails
 # to start.
+
+# The base image carries a NodeSource node_18.x apt source that no longer
+# exists — it 404s, apt-get update exits non-zero on it, and the install behind
+# the && never runs. Nothing here wants Node, so drop any source pointing at it
+# rather than papering over a failing update with `|| true`, which would hide a
+# real apt failure later.
+RUN grep -rlZ 'deb\.nodesource\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null \
+        | xargs -0 -r rm -f \
+    && echo "Removed stale NodeSource apt source"
+
 RUN apt-get update \
     && apt-get install --no-install-recommends -y \
         ca-certificates \
