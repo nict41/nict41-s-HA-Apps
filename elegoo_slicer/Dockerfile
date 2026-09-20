@@ -2,7 +2,7 @@
 # the same images and rate-limits shared build infrastructure: it answered a CI
 # build with 429 before the base image was even resolved. Pulling the origin
 # avoids that here and on the machine Supervisor builds this on.
-ARG BUILD_FROM=ghcr.io/linuxserver/baseimage-kasmvnc:ubuntujammy
+ARG BUILD_FROM=ghcr.io/linuxserver/baseimage-kasmvnc:ubuntunoble
 FROM ${BUILD_FROM}
 
 # ElegooSlicer ships only a Linux AppImage — no repository, no container. It is
@@ -20,10 +20,14 @@ ENV TITLE="ElegooSlicer" \
 # those the bundle ships were subtracted, and each remaining soname was
 # resolved to its owning package through the Ubuntu Contents index. See DOCS.md.
 #
-# Worth noting for anyone tempted to "modernise" it: the binary wants the
-# webkit2gtk **4.1** / libsoup **3** pair, not 4.0 / libsoup2.4. Swapping those
-# for the older generation produces an image that builds cleanly and then fails
-# to start.
+# Two things constrain the base, both learned the hard way:
+#
+#   - The binary wants the webkit2gtk **4.1** / libsoup **3** pair, not
+#     4.0 / libsoup2.4. They are not interchangeable.
+#   - It requires GLIBC_2.38 and GLIBCXX_3.4.32. Ubuntu 22.04 has glibc 2.35
+#     and libstdc++ 12 (GLIBCXX_3.4.30) and therefore CANNOT run it, which is
+#     not fixable by installing anything. 24.04 has glibc 2.39 and libstdc++
+#     14. Hence ubuntunoble, and hence the t64-renamed package names below.
 
 # The base image carries a NodeSource node_18.x apt source that no longer
 # exists — it 404s, apt-get update exits non-zero on it, and the install behind
@@ -39,7 +43,7 @@ RUN apt-get update \
         ca-certificates \
         curl \
         jq \
-        libatk1.0-0 \
+        libatk1.0-0t64 \
         libcairo-gobject2 \
         libcairo2 \
         libdbus-1-3 \
@@ -48,12 +52,12 @@ RUN apt-get update \
         libgdk-pixbuf-2.0-0 \
         libgl1 \
         libgl1-mesa-dri \
-        libglib2.0-0 \
+        libglib2.0-0t64 \
         libglu1-mesa \
         libglx0 \
         libgstreamer-plugins-base1.0-0 \
         libgstreamer1.0-0 \
-        libgtk-3-0 \
+        libgtk-3-0t64 \
         libharfbuzz0b \
         libice6 \
         libjavascriptcoregtk-4.1-0 \
@@ -94,12 +98,18 @@ RUN curl -fsSL -o /tmp/ElegooSlicer.AppImage \
 # libagora_rtm_sdk, libaosl) ship inside the payload and its RUNPATH points at
 # the absolute paths of the machine upstream built on. A bare ldd reports those
 # as missing and would fail this build for no reason.
-RUN missing="$(LD_LIBRARY_PATH=/opt/elegoo-slicer/lib/orca-runtime:/opt/elegoo-slicer/bin \
-        ldd /opt/elegoo-slicer/bin/elegoo-slicer | awk '/not found/ {print $1}')" \
-    && if [ -n "${missing}" ]; then \
-         echo "Unresolved libraries in the image:"; echo "${missing}"; exit 1; \
+# Print whole ldd lines, not a field of them: ldd reports a missing library and
+# a missing SYMBOL VERSION in different shapes, and taking $1 turned the latter
+# into five copies of the binary's own path — a real failure reported so badly
+# it looked like a bug in the check.
+RUN out="$(LD_LIBRARY_PATH=/opt/elegoo-slicer/lib/orca-runtime:/opt/elegoo-slicer/bin \
+        ldd /opt/elegoo-slicer/bin/elegoo-slicer 2>&1)" \
+    && if printf '%s' "${out}" | grep -q 'not found'; then \
+         echo "Unresolved libraries or symbol versions:"; \
+         printf '%s\n' "${out}" | grep 'not found'; \
+         exit 1; \
        fi \
-    && echo "All libraries resolve"
+    && echo "All libraries and symbol versions resolve"
 
 # Upstream's launcher looks like it validates this itself — it has checks for a
 # host OpenGL and WebKitGTK 4.1 runtime and a helpful error naming the packages

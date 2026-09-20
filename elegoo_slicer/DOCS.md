@@ -78,7 +78,16 @@ Two results from that are worth keeping in mind:
 - The binary needs **webkit2gtk-4.1 with libsoup 3**, not the 4.0/libsoup2.4
   generation. They are not interchangeable, and picking the older pair yields
   an image that builds cleanly and then fails to launch.
-- Ubuntu 22.04 carries both, which is why this is built on `ubuntujammy`.
+- It also requires **GLIBC_2.38 and GLIBCXX_3.4.32**. Ubuntu 22.04 ships glibc
+  2.35 and libstdc++ 12 (GLIBCXX_3.4.30), so it cannot run this binary at all
+  — and that is not something a package install can fix, since glibc is the
+  floor the whole image stands on. Ubuntu 24.04 ships glibc 2.39 and
+  libstdc++ 14, which is why this is built on `ubuntunoble` and why several
+  package names below carry the `t64` suffix from that release's time_t
+  transition (`libgtk-3-0t64`, `libglib2.0-0t64`, `libatk1.0-0t64`).
+
+Both of those were found by the build gate rather than by reading, which is
+the argument for having it.
 
 The Dockerfile also runs `ldd` over the binary as a build step and fails the
 build on any unresolved library, so a future version bump that needs something
