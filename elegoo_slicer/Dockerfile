@@ -1,4 +1,8 @@
-ARG BUILD_FROM=lscr.io/linuxserver/baseimage-kasmvnc:ubuntujammy
+# ghcr.io rather than lscr.io deliberately. lscr.io is a redirector in front of
+# the same images and rate-limits shared build infrastructure: it answered a CI
+# build with 429 before the base image was even resolved. Pulling the origin
+# avoids that here and on the machine Supervisor builds this on.
+ARG BUILD_FROM=ghcr.io/linuxserver/baseimage-kasmvnc:ubuntujammy
 FROM ${BUILD_FROM}
 
 # ElegooSlicer ships only a Linux AppImage — no repository, no container. It is

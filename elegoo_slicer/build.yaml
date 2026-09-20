@@ -1,4 +1,4 @@
 build_from:
-  amd64: lscr.io/linuxserver/baseimage-kasmvnc:ubuntujammy
+  amd64: ghcr.io/linuxserver/baseimage-kasmvnc:ubuntujammy
 args:
   ELEGOO_VERSION: "1.5.3.5"
