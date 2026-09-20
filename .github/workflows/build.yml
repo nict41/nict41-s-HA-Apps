@@ -35,6 +35,9 @@ jobs:
           - app: gods_eye_view
             arch: amd64
             platform: linux/amd64
+          - app: elegoo_slicer
+            arch: amd64
+            platform: linux/amd64
     steps:
       - uses: actions/checkout@v4
 

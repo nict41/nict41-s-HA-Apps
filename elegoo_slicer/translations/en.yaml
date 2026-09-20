@@ -1,0 +1,14 @@
+configuration:
+  web_username:
+    name: Web username
+    description: >-
+      Username for the web interface login. Only used when a password is also
+      set; defaults to "elegoo".
+  web_password:
+    name: Web password
+    description: >-
+      Password for the web interface. Leaving this empty means no login is
+      required at all, so set it before mapping port 3000. The sidebar is
+      authenticated by Home Assistant either way.
+network:
+  3000/tcp: Desktop web interface for direct access, bypassing the sidebar. Unmapped by default - the desktop offers a file manager and a session on your Home Assistant host, so set a password before exposing it.

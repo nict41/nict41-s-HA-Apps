@@ -1,0 +1,6 @@
+#!/bin/bash
+# Launched by the desktop session once KasmVNC is up. The AppImage's own AppRun
+# sets the locale workaround and the GPU overrides upstream depends on, so it
+# is kept in the path rather than calling the binary directly.
+mkdir -p /config/Desktop
+exec /opt/elegoo-slicer/AppRun

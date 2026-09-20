@@ -1,0 +1,42 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# Turn the add-on's options into the environment the base image reads. It runs
+# before any service starts, which is the only point where that environment is
+# still writable.
+
+set -e
+
+OPTIONS=/data/options.json
+[ -f "${OPTIONS}" ] || exit 0
+
+put() {
+    printf '%s' "${2}" > "/run/s6/container_environment/${1}"
+}
+
+web_user="$(jq -r '.web_username // ""' "${OPTIONS}")"
+web_pass="$(jq -r '.web_password // ""' "${OPTIONS}")"
+
+# Both are needed for a login to mean anything: the base image treats an unset
+# password as "no authentication at all", so half-configuring it silently
+# leaves the interface open.
+if [ -n "${web_pass}" ]; then
+    put CUSTOM_USER "${web_user:-elegoo}"
+    put PASSWORD "${web_pass}"
+    echo "[elegoo] Web interface password set for user '${web_user:-elegoo}'"
+else
+    if [ -n "${web_user}" ]; then
+        echo "[elegoo] web_username is set but web_password is empty — no login will be required"
+    fi
+    echo "[elegoo] No password configured. The sidebar is still authenticated by Home Assistant;"
+    echo "[elegoo] only map port 3000 once web_password is set."
+fi
+
+# Hardware rendering when an Intel/AMD render node was passed through, software
+# rendering when it was not. Either way the slicer gets a working GL stack.
+if [ -e /dev/dri/renderD128 ]; then
+    put DRINODE /dev/dri/renderD128
+    echo "[elegoo] GPU node /dev/dri/renderD128 present — using hardware rendering"
+else
+    echo "[elegoo] No /dev/dri render node — falling back to software rendering (slower)"
+fi
