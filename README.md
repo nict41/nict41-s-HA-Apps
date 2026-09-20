@@ -26,6 +26,14 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 
 Sets the host CPU cpufreq scaling governor (default performance) so CPU-bound jobs get full clock speed instead of the powersave default, and re-applies it on every host boot.
 
+### [ElegooSlicer](./elegoo_slicer)
+
+![ElegooSlicer logo](elegoo_slicer/logo.png)
+
+![Supports amd64 Architecture][amd64-shield]
+
+ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a desktop in your browser so you can slice and send jobs from the sidebar.
+
 ### [Glance Dashboard](./glance)
 
 ![Glance logo](glance/logo.png)
