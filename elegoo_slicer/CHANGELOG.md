@@ -8,6 +8,11 @@
   "exited 0", which was true, useless, and indistinguishable from working.
 - Graphics detection now runs regardless of the options file, and every path
   through the script logs what it did and why.
+- Stop the base image's Docker-in-Docker service from restart-looping. It
+  starts dockerd whenever `/dev/cpu_dma_latency` is present — which it is, as a
+  side effect of the device access for the iGPU — and dockerd cannot run in an
+  unprivileged add-on, so the log filled with `modprobe: not found` and
+  `Could not mount /sys/kernel/security` on repeat. Nothing here wants Docker.
 
 ## 0.1.0
 
