@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.6
+
+- Fix 0.1.5's mobile default, which could never fire on the devices that
+  needed it. It applied only when no `resize` setting was stored, but the
+  client persists whatever it resolves — `initSetting()` ends with
+  `setSetting(name, val)` — so every visit made before 0.1.5 had already
+  written `resize: "remote"` into that browser. A phone that had opened the
+  panel even once was therefore skipped, and kept shrinking the desktop to
+  phone width. The default is now applied once per browser behind its own
+  marker key, regardless of what is already stored, and never again, so a
+  later explicit choice still survives.
+- Reproduced and verified against a real KasmVNC 1.3.3 server and the real
+  Kasm web client, driven by a real mobile browser: a browser carrying
+  `resize: "remote"` from an earlier session stays on Remote Resizing with the
+  old guard and moves to Local Scaling with the new one.
+
 ## 0.1.5
 
 - A phone now opens on a usable desktop. The client's default is Remote
