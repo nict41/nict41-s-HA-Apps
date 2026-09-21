@@ -116,8 +116,6 @@ anywhere else.
 Shortcuts are only ever appended, so if you reorder or delete one from inside
 the file chooser it stays that way.
 
-The desktop's home directory is the add-on's persistent volume, so printer
-profiles, filament presets and project files survive restarts and updates.
 
 ## Desktop and mobile
 
@@ -145,8 +143,8 @@ You can change it any time from the control bar (the tab on the left edge) under
 | **Remote Resizing** | desktop matches the window. Right on a desktop browser, a trap on a phone |
 
 That choice is stored per browser, so a phone and a laptop can differ. The
-add-on sets the touch default only when nothing is stored, so an explicit
-choice is never overridden.
+add-on applies its touch default once per browser and then never again, so a
+choice you make here is never overridden afterwards.
 
 **Pinch-to-zoom.** There are three different things called pinch here, and it
 is worth keeping them apart.

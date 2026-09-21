@@ -2,6 +2,15 @@
 
 ## 0.1.7
 
+- The `/__elegoo` diagnostic endpoint no longer reports a version. It carried
+  one as a literal and had therefore been insisting it was 0.1.3 through every
+  release since — a diagnostic that confidently reports the wrong thing is
+  worse than one that reports less. The version is on the add-on's Info tab.
+- Correct two documentation claims that had gone stale: the mobile default is
+  applied once per browser rather than "only when nothing is stored" (changed
+  in 0.1.6), and the line stating the home directory was a persistent volume is
+  gone, since that was exactly the assumption this release disproves.
+
 - **Settings actually persist now.** The base image declares `VOLUME /config`,
   so Docker placed an anonymous volume over the add-on's home directory — and
   Home Assistant discards and recreates those every time it rebuilds the
