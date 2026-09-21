@@ -137,20 +137,27 @@ That choice is stored per browser, so a phone and a laptop can differ. The
 add-on sets the touch default only when nothing is stored, so an explicit
 choice is never overridden.
 
-**On pinch-to-zoom, honestly.** There are two separate gestures and neither is
-a viewport zoom in the sidebar:
+**Pinch-to-zoom.** There are three different things called pinch here, and it
+is worth keeping them apart.
 
-- The **client's own pinch** forwards `Ctrl`+scroll to the slicer, so it zooms
-  the *model* in the 3D view. Useful, and it works.
-- **Browser pinch** would magnify the screen itself. The add-on allows it, but
-  a `viewport` meta only applies to the top-level document — and in the sidebar
-  this page runs inside Home Assistant's iframe, so Home Assistant's viewport
-  governs and the add-on's is ignored. Browser pinch therefore works on the
-  **published port**, not through the sidebar.
+1. **The client's own pinch** forwards `Ctrl`+scroll to the slicer, so it zooms
+   the *model* in the 3D view. Always available.
+2. **Page zoom** would magnify the screen. The add-on allows it, but a
+   `viewport` meta applies only to the top-level document — and in the sidebar
+   this page runs inside Home Assistant's iframe, so Home Assistant's viewport
+   governs and the add-on's is ignored. This works on the **published port**,
+   where the add-on *is* the top-level document.
+3. **WebView zoom**, which sits above the page and so is not subject to any of
+   that. In the Home Assistant **Android** app, turn on
+   **Settings → Companion App → Pinch-to-Zoom**. It zooms the whole app,
+   including this panel, and is the answer for the sidebar on Android.
 
-So in the sidebar, magnification is *None* mode plus the pan button, rather than
-pinching. If pinch-to-zoom specifically matters on a phone, map port 3000 and
-open the add-on directly.
+On a mobile browser rather than the app: Safari on iOS ignores `user-scalable=no`
+and pinches anyway; Chrome on Android honours it, but
+**Settings → Accessibility → Force enable zoom** overrides it.
+
+Failing all of that, *None* resize mode plus the pan button magnifies without
+any pinching at all.
 
 Set `resolution` to control how big the desktop is to begin with. The default,
 1440x900, is wide enough for the slicer's dialogs while still fitting a phone
