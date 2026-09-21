@@ -111,33 +111,50 @@ profiles, filament presets and project files survive restarts and updates.
 ## Desktop and mobile
 
 On a desktop browser the remote desktop resizes to match the window, so it is
-always the right size and pixel-sharp.
+always the right size and pixel-sharp. Nothing to configure.
 
-A phone is a different problem: the slicer's toolbars are laid out for a large
-screen, and a desktop shrunk to phone width is unusable. So two things differ
-from a stock KasmVNC install.
+A phone needs more thought, and the reason is worth stating plainly because it
+is the opposite of what you might expect.
 
-**Each device keeps its own sizing.** The client reads a setting from the page
-URL first and only then from the browser's own storage, and the stock page
-hardcodes `resize=remote` — which means a desktop and a phone cannot both be
-right, because the URL always wins. The add-on drops it, leaving the same
-default in place while letting a phone choose something else. Open the control
-bar on the left, go to **Settings → Resize**, and pick **Scale**: the whole
-desktop is then fitted to the screen, and the choice sticks for that browser
-only.
+**Sizing is the lever, not zooming.** The client's default is *Remote
+Resizing*: the desktop becomes the size of the browser window. On a phone that
+produces a desktop a few hundred pixels wide, and the slicer's own dialogs have
+minimum widths larger than that — so their buttons sit off the edge of a screen
+that cannot be scrolled. The add-on therefore sets **Local Scaling** as the
+starting mode on touch devices, which fits the whole desktop to the screen
+instead.
 
-**Pinch to zoom works.** The stock page ships `user-scalable=no`, which is fine
-on a desktop and wrong on a phone, where pinching is the only way to read a
-toolbar drawn for a bigger screen. The add-on allows it.
+You can change it any time from the control bar (the tab on the left edge) under
+**Settings → Resize**:
 
-Worth knowing they are two different gestures. Pinching *the page* magnifies
-the screen. The VNC client also has its own pinch handling, which forwards
-Ctrl+scroll to the slicer and so zooms the **model** rather than the screen —
-useful in the 3D view, and not a substitute for the other.
+| Mode | On a phone |
+|---|---|
+| **Local Scaling** | whole desktop fitted to the screen — everything visible, small. The default here |
+| **None** | desktop at full size, with a **pan button** in the control bar to drag around it. Best for reading |
+| **Remote Resizing** | desktop matches the window. Right on a desktop browser, a trap on a phone |
+
+That choice is stored per browser, so a phone and a laptop can differ. The
+add-on sets the touch default only when nothing is stored, so an explicit
+choice is never overridden.
+
+**On pinch-to-zoom, honestly.** There are two separate gestures and neither is
+a viewport zoom in the sidebar:
+
+- The **client's own pinch** forwards `Ctrl`+scroll to the slicer, so it zooms
+  the *model* in the 3D view. Useful, and it works.
+- **Browser pinch** would magnify the screen itself. The add-on allows it, but
+  a `viewport` meta only applies to the top-level document — and in the sidebar
+  this page runs inside Home Assistant's iframe, so Home Assistant's viewport
+  governs and the add-on's is ignored. Browser pinch therefore works on the
+  **published port**, not through the sidebar.
+
+So in the sidebar, magnification is *None* mode plus the pan button, rather than
+pinching. If pinch-to-zoom specifically matters on a phone, map port 3000 and
+open the add-on directly.
 
 Set `resolution` to control how big the desktop is to begin with. The default,
-1440x900, is comfortable to pinch around on a phone and fits the slicer's own
-toolbars; a desktop browser overrides it on connect anyway.
+1440x900, is wide enough for the slicer's dialogs while still fitting a phone
+screen once scaled; a desktop browser overrides it on connect anyway.
 
 Honest limitation: this is a desktop CAD-adjacent application streamed to a
 browser. On a phone it is genuinely usable for checking a slice or kicking off
