@@ -128,6 +128,15 @@ RUN out="$(LD_LIBRARY_PATH=/opt/elegoo-slicer/lib/orca-runtime:/opt/elegoo-slice
 # The ldd gate above is therefore the only thing standing between a missing
 # library and a desktop that opens to nothing.
 
+# The base hardcodes the Xvnc desktop size. Make it settable, and fail the build
+# if upstream ever changes that line rather than silently losing the option.
+# The service script runs under with-contenv, so the variable resolves at start.
+RUN grep -q -- '-geometry 1024x768' /etc/s6-overlay/s6-rc.d/svc-kasmvnc/run \
+    && sed -i 's|-geometry 1024x768|-geometry ${KASM_GEOMETRY:-1440x900}|' \
+        /etc/s6-overlay/s6-rc.d/svc-kasmvnc/run \
+    && grep -q 'KASM_GEOMETRY' /etc/s6-overlay/s6-rc.d/svc-kasmvnc/run \
+    && echo "Desktop size is now configurable"
+
 # The desktop's home is /config; point it at the add-on's persistent volume so
 # printer profiles and slicing presets survive a restart or an update.
 RUN rm -rf /config && ln -s /data /config
