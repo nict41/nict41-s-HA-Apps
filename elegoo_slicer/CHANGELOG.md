@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.5
+
+- A phone now opens on a usable desktop. The client's default is Remote
+  Resizing, which makes the desktop the size of the browser window; on a phone
+  that is a few hundred pixels wide, and the slicer's own dialogs are wider
+  than that, so their buttons sat off the edge of a screen that cannot scroll —
+  a dead end on first launch. Touch devices now start in Local Scaling, which
+  fits the whole desktop to the screen. Stored as a default rather than forced
+  in the URL, so anything chosen in the client's Settings panel still wins, and
+  only written when nothing is stored.
+- Correct the mobile documentation. 0.1.4 claimed the viewport change would
+  give pinch-to-zoom in the sidebar. It does not: a viewport meta applies only
+  to the top-level document, and in the sidebar the page runs inside Home
+  Assistant's iframe, so Home Assistant's viewport governs. Browser pinch works
+  on the published port only. In the sidebar, magnification is the client's
+  "None" resize mode plus its pan button. Documented as such, including the
+  distinction from the client's own pinch gesture, which zooms the model.
+
 ## 0.1.4
 
 - Network storage now shows up in the slicer's own file dialogs. Every mount
