@@ -1,5 +1,5 @@
 name: "ElegooSlicer"
-version: "0.1.3"
+version: "0.1.4"
 slug: "elegoo_slicer"
 description: "ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a desktop in your browser"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/elegoo_slicer"
@@ -26,6 +26,11 @@ map:
 options:
   web_username: ""
   web_password: ""
+  resolution: "1440x900"
+  extra_folders: []
 schema:
   web_username: str?
   web_password: password?
+  resolution: match(^[0-9]{3,5}x[0-9]{3,5}$)?
+  extra_folders:
+    - str?

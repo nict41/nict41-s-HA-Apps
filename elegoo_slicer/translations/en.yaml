@@ -10,5 +10,20 @@ configuration:
       Password for the web interface. Leaving this empty means no login is
       required at all, so set it before mapping port 3000. The sidebar is
       authenticated by Home Assistant either way.
+  resolution:
+    name: Desktop size
+    description: >-
+      Starting size of the desktop, as WIDTHxHEIGHT. A desktop browser asks the
+      server to match its window as soon as it connects, so this is mainly what
+      a phone or tablet sees — big enough that the slicer's toolbars fit, and
+      then pinch to zoom in. Default 1440x900.
+  extra_folders:
+    name: Extra folders for file dialogs
+    description: >-
+      Additional paths to offer down the side of the slicer's open/save
+      dialogs. Everything mounted under /share and /media is added
+      automatically, so a NAS attached in Settings > System > Storage already
+      appears by name; use this only for somewhere else inside the add-on.
+
 network:
   3000/tcp: Desktop web interface for direct access, bypassing the sidebar. Unmapped by default - the desktop offers a file manager and a session on your Home Assistant host, so set a password before exposing it.

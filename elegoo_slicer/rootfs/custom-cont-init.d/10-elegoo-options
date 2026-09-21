@@ -1,9 +1,10 @@
 #!/usr/bin/with-contenv bash
 # shellcheck shell=bash
 #
-# Turn the add-on's options into the environment the base image reads. It runs
-# before any service starts, which is the only point where that environment is
-# still writable.
+# Turn the add-on's options into the environment the base image reads, and
+# prepare the desktop session's view of the filesystem. It runs before any
+# service starts, which is the only point where that environment is still
+# writable.
 #
 # Structured so that nothing here can exit silently. An earlier version bailed
 # with `exit 0` when the options file was missing, which took the GPU report
@@ -14,6 +15,7 @@ set -uo pipefail
 
 OPTIONS=/data/options.json
 ENV_DIR=/run/s6/container_environment
+BOOKMARKS="${HOME:-/config}/.config/gtk-3.0/bookmarks"
 
 log() { echo "[elegoo] $*"; }
 
@@ -22,19 +24,23 @@ put() {
     printf '%s' "${2}" > "${ENV_DIR}/${1}"
 }
 
+opt() {
+    [ -f "${OPTIONS}" ] || { printf ''; return; }
+    jq -r "${1} // \"\"" "${OPTIONS}" 2>/dev/null || printf ''
+}
+
 # ── Options ──────────────────────────────────────────────────────────────────
 web_user=""
 web_pass=""
+resolution=""
 
 if [ -f "${OPTIONS}" ]; then
-    if ! web_user="$(jq -r '.web_username // ""' "${OPTIONS}" 2>/dev/null)"; then
-        log "WARNING: could not parse ${OPTIONS}; treating all options as unset"
-        web_user=""
-    fi
-    web_pass="$(jq -r '.web_password // ""' "${OPTIONS}" 2>/dev/null || echo "")"
+    web_user="$(opt '.web_username')"
+    web_pass="$(opt '.web_password')"
+    resolution="$(opt '.resolution')"
 else
     # Not fatal — the defaults are a usable configuration — but say so, because
-    # it also means a password set in the UI is not being applied.
+    # it also means options set in the UI are not being applied.
     log "WARNING: no options file at ${OPTIONS}, so configured options are NOT applied."
     log "         /data holds: $(ls -A /data 2>/dev/null | tr '\n' ' ' || echo '<unreadable>')"
 fi
@@ -51,6 +57,20 @@ else
     log "only map port 3000 once web_password is set."
 fi
 
+# ── Desktop size ─────────────────────────────────────────────────────────────
+# Only the starting size. A desktop browser asks the server to match the window
+# as soon as it connects; this is what a phone sees, and what the session falls
+# back to, so it wants to be big enough for the slicer's own toolbars.
+if [[ "${resolution}" =~ ^[0-9]{3,5}x[0-9]{3,5}$ ]]; then
+    put KASM_GEOMETRY "${resolution}"
+    log "Desktop starting size: ${resolution}"
+else
+    if [ -n "${resolution}" ]; then
+        log "WARNING: resolution '${resolution}' is not WIDTHxHEIGHT — ignoring it"
+    fi
+    log "Desktop starting size: 1440x900 (default)"
+fi
+
 # ── Graphics ─────────────────────────────────────────────────────────────────
 # Runs regardless of the options above, so the log always says which renderer
 # the slicer is about to get.
@@ -64,5 +84,62 @@ elif compgen -G "/dev/dri/renderD*" > /dev/null; then
 else
     log "No /dev/dri render node — falling back to software rendering (slower)"
 fi
+
+# ── File-dialog shortcuts ────────────────────────────────────────────────────
+# The slicer is wxGTK, so its open/save dialogs are GTK file choosers and show
+# whatever is in this bookmarks file down the left-hand side. Network storage
+# mounted into Home Assistant appears under /media (or /share), so every mount
+# found there is offered by name — a NAS shows up as itself rather than as
+# something to be navigated to from the filesystem root every time.
+#
+# Appending only: a bookmark reordered or removed from inside the file chooser
+# stays that way, because this never rewrites lines it did not just add.
+mkdir -p "$(dirname "${BOOKMARKS}")"
+touch "${BOOKMARKS}"
+
+bookmark() {
+    local path="${1}" label="${2}" uri
+    [ -d "${path}" ] || return 0
+    uri="file://${path}"
+    # Already listed, under any label? Leave it alone.
+    if grep -qE "^${uri}( |$)" "${BOOKMARKS}" 2>/dev/null; then
+        return 0
+    fi
+    printf '%s %s\n' "${uri}" "${label}" >> "${BOOKMARKS}"
+    log "  file dialogs: added ${path}"
+    return 0
+}
+
+found_any=0
+for root in /share /media; do
+    [ -d "${root}" ] || continue
+    bookmark "${root}" "${root#/}"
+    # Each mount or top-level folder in its own right, so a NAS is one click.
+    for entry in "${root}"/*; do
+        [ -d "${entry}" ] || continue
+        bookmark "${entry}" "$(basename "${entry}")"
+        found_any=1
+    done
+done
+
+# Anything else the user named explicitly.
+if [ -f "${OPTIONS}" ]; then
+    while IFS= read -r extra; do
+        [ -n "${extra}" ] || continue
+        if [ -d "${extra}" ]; then
+            bookmark "${extra}" "$(basename "${extra}")"
+            found_any=1
+        else
+            log "WARNING: extra_folders entry '${extra}' is not a directory inside this add-on"
+        fi
+    done < <(jq -r '.extra_folders // [] | .[]' "${OPTIONS}" 2>/dev/null)
+fi
+
+if [ "${found_any}" -eq 0 ]; then
+    log "No mounts found under /share or /media. If a NAS should appear here, check"
+    log "it is attached in Settings > System > Storage, then restart this add-on."
+fi
+
+chown -R abc:abc "$(dirname "${BOOKMARKS}")" 2>/dev/null || true
 
 log "Startup configuration complete"

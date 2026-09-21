@@ -25,6 +25,8 @@ Upstream ships Linux as an AppImage only, pinned here at **v1.5.3.5**. Bump
 |---|---|
 | `web_username` | Username for the web interface login (defaults to `elegoo` when a password is set) |
 | `web_password` | Password for the web interface. **Empty means no login at all** — the base image treats an unset password as open access |
+| `resolution` | Starting desktop size, `WIDTHxHEIGHT`. Default `1440x900`. Mainly affects phones and tablets; a desktop browser resizes on connect |
+| `extra_folders` | Extra paths to offer in the slicer's file dialogs. `/share` and `/media` mounts are added automatically |
 
 These apply to the **direct port only**. The sidebar is served by a separate
 listener that Home Assistant has already authenticated, so setting a password
@@ -78,12 +80,68 @@ large model. The log says which it picked at startup:
 [elegoo] GPU node /dev/dri/renderD128 present — using hardware rendering
 ```
 
-## Storage
+## Files and network storage
+
+`/share` and `/media` are both mapped in, so anything attached to Home
+Assistant under **Settings → System → Storage** — a NAS, a USB disk — is
+visible to the slicer.
+
+You should not have to go looking for it. The slicer is a wxGTK application, so
+its open and save dialogs are GTK file choosers, and every mount found under
+`/media` and `/share` at startup is added to the shortcut list down the left of
+those dialogs, under its own name. A share called NAS1 appears as **NAS1**, one
+click from any open dialog.
+
+The add-on log says what it found:
+
+```
+[elegoo]   file dialogs: added /media/NAS1
+```
+
+If nothing is listed, the mount is not reaching the add-on — check it is
+attached in Settings → System → Storage, then restart. `extra_folders` adds
+anywhere else.
+
+Shortcuts are only ever appended, so if you reorder or delete one from inside
+the file chooser it stays that way.
 
 The desktop's home directory is the add-on's persistent volume, so printer
 profiles, filament presets and project files survive restarts and updates.
-`share` and `media` are mapped too, which is the easy way to get an STL in and
-a G-code file out.
+
+## Desktop and mobile
+
+On a desktop browser the remote desktop resizes to match the window, so it is
+always the right size and pixel-sharp.
+
+A phone is a different problem: the slicer's toolbars are laid out for a large
+screen, and a desktop shrunk to phone width is unusable. So two things differ
+from a stock KasmVNC install.
+
+**Each device keeps its own sizing.** The client reads a setting from the page
+URL first and only then from the browser's own storage, and the stock page
+hardcodes `resize=remote` — which means a desktop and a phone cannot both be
+right, because the URL always wins. The add-on drops it, leaving the same
+default in place while letting a phone choose something else. Open the control
+bar on the left, go to **Settings → Resize**, and pick **Scale**: the whole
+desktop is then fitted to the screen, and the choice sticks for that browser
+only.
+
+**Pinch to zoom works.** The stock page ships `user-scalable=no`, which is fine
+on a desktop and wrong on a phone, where pinching is the only way to read a
+toolbar drawn for a bigger screen. The add-on allows it.
+
+Worth knowing they are two different gestures. Pinching *the page* magnifies
+the screen. The VNC client also has its own pinch handling, which forwards
+Ctrl+scroll to the slicer and so zooms the **model** rather than the screen —
+useful in the 3D view, and not a substitute for the other.
+
+Set `resolution` to control how big the desktop is to begin with. The default,
+1440x900, is comfortable to pinch around on a phone and fits the slicer's own
+toolbars; a desktop browser overrides it on connect anyway.
+
+Honest limitation: this is a desktop CAD-adjacent application streamed to a
+browser. On a phone it is genuinely usable for checking a slice or kicking off
+a print, and genuinely awkward for laying out a plate.
 
 ## Architecture
 

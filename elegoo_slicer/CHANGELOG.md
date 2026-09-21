@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.4
+
+- Network storage now shows up in the slicer's own file dialogs. Every mount
+  under `/media` and `/share` is added to the GTK file chooser's shortcut list
+  at startup, so a NAS attached in Settings > System > Storage appears by name
+  — one click from any open or save dialog, rather than a walk down from the
+  filesystem root. `extra_folders` adds anywhere else. Shortcuts are appended
+  only, so reordering or deleting one in the file chooser sticks.
+- Each device keeps its own sizing. The page hardcoded `resize=remote`, and the
+  client reads the URL before its own stored settings, so a desktop and a phone
+  could not both be right. It is dropped from the URL — same default, but a
+  phone can now pick Scale in the client's Settings panel and have it stick.
+- Pinch to zoom works on phones. The page shipped `user-scalable=no`; the
+  add-on allows scaling, since pinching is the only way to read a toolbar drawn
+  for a larger screen. (Distinct from the client's own pinch gesture, which
+  forwards Ctrl+scroll and zooms the model rather than the screen.)
+- New `resolution` option for the starting desktop size, default 1440x900,
+  replacing the base image's hardcoded 1024x768. The build fails if upstream
+  ever moves that line, rather than silently dropping the option.
+
 ## 0.1.3
 
 - The sidebar fix in 0.1.2 did not resolve the error for at least one install.
