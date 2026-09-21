@@ -137,9 +137,29 @@ RUN grep -q -- '-geometry 1024x768' /etc/s6-overlay/s6-rc.d/svc-kasmvnc/run \
     && grep -q 'KASM_GEOMETRY' /etc/s6-overlay/s6-rc.d/svc-kasmvnc/run \
     && echo "Desktop size is now configurable"
 
-# The desktop's home is /config; point it at the add-on's persistent volume so
-# printer profiles and slicing presets survive a restart or an update.
-RUN rm -rf /config && ln -s /data /config
+# Do NOT symlink /config anywhere. The base image declares `VOLUME /config`, so
+# Docker puts an ANONYMOUS volume there — one that Home Assistant discards and
+# recreates empty every time it rebuilds the container, which it does on every
+# update and restart. A symlink to /data is simply masked by that mount, and
+# everything the slicer writes to its home directory goes into throwaway
+# storage: printer selection, presets, the lot, gone on each restart.
+#
+# The fix is `addon_config:rw` in config.yaml, which bind-mounts a real host
+# folder at /config. An explicit mount takes precedence over the image's
+# VOLUME, so the anonymous volume is never created. /config just needs to exist
+# as an ordinary directory for that to land on.
+RUN mkdir -p /config
+
+# Put the mobile page rewrites on the published port too. The ingress listener
+# has its own copy, but a viewport meta is ignored inside Home Assistant's
+# iframe and only does anything where this add-on is the top-level document —
+# which is precisely the published port, the one place the rewrite was NOT
+# being applied. init-nginx copies this file at startup and only substitutes
+# ports and SUBFOLDER, so patching it here survives that.
+RUN grep -q 'proxy_pass               http://127.0.0.1:6900;' /defaults/default.conf \
+    && sed -i 's|proxy_pass               http://127.0.0.1:6900;|proxy_pass               http://127.0.0.1:6900;\n    proxy_set_header         Accept-Encoding "";\n    sub_filter "maximum-scale=1.0, user-scalable=no" "maximum-scale=5.0, user-scalable=yes";\n    sub_filter_once on;|g' /defaults/default.conf \
+    && [ "$(grep -c 'user-scalable=yes' /defaults/default.conf)" = "2" ] \
+    && echo "Published port serves a zoomable page" 
 
 COPY rootfs /
 

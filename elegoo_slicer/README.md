@@ -80,6 +80,17 @@ large model. The log says which it picked at startup:
 [elegoo] GPU node /dev/dri/renderD128 present — using hardware rendering
 ```
 
+## Where settings live
+
+Printer selection, presets and the file-dialog shortcuts are kept in the
+add-on's own config folder, which Home Assistant stores outside the container
+at `/addon_configs/<slug>_elegoo_slicer` and mounts at `/config` inside it.
+They survive restarts, updates and rebuilds.
+
+They are removed if you **uninstall** the add-on — uninstalling deletes that
+folder. Updating never does, so there is no reason to uninstall and reinstall
+to pick up a new version; it would only throw your configuration away.
+
 ## Files and network storage
 
 `/share` and `/media` are both mapped in, so anything attached to Home

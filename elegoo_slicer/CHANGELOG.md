@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.7
+
+- **Settings actually persist now.** The base image declares `VOLUME /config`,
+  so Docker placed an anonymous volume over the add-on's home directory — and
+  Home Assistant discards and recreates those every time it rebuilds the
+  container, which it does on every update and restart. The `/config` symlink
+  to `/data` was masked by that mount, so the printer you selected, your
+  presets and the file-dialog shortcuts all went into throwaway storage and
+  vanished on each restart. `addon_config:rw` now bind-mounts a real host
+  folder at `/config`; an explicit mount takes precedence over the image's
+  VOLUME, so the anonymous volume is never created.
+- Serve the zoomable viewport on the published port, where it actually works.
+  It was only ever applied on the ingress listener — and a viewport meta is
+  ignored inside Home Assistant's iframe, so it was being applied in the one
+  place it could do nothing and omitted from the one place it could work.
+
 ## 0.1.6
 
 - Fix 0.1.5's mobile default, which could never fire on the devices that
