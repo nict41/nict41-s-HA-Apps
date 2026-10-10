@@ -9,6 +9,17 @@ configuration:
     description: >-
       Unlocks direct 3D tiles and place search. Metered — Google bills beyond
       the free tier.
+  google_maps_server_api_key:
+    name: Google Maps server API key
+    description: >-
+      Optional second Google key for the calls made server-side (place search,
+      Street View camera fallback). It never reaches the browser, so it can be
+      restricted by IP. Left empty, the key above is used for both.
+  mapillary_client_token:
+    name: Mapillary client token
+    description: >-
+      Unlocks the Street Level layer: street-level photos and 360s draped on
+      the globe. Free from mapillary.com/dashboard/developers.
   openai_api_key:
     name: OpenAI API key
     description: >-

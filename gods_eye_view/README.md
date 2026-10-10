@@ -56,7 +56,13 @@ protect the key itself. Two things do:
 - **Cap the quota** per API under *APIs & Services → Quotas* in Google Cloud
   Console. That makes requests fail once you hit the cap rather than bill you.
 
-The same applies to `cesium_ion_token`. Every other key stays server-side.
+The same applies to `cesium_ion_token` and `mapillary_client_token`. Every
+other key stays server-side.
+
+`google_maps_server_api_key` exists for exactly this problem: put a second,
+IP-restricted Google key there and the calls made from inside the container
+(place search, the Street View camera fallback) use it, leaving the key in the
+page scoped to tiles and geocoding alone.
 
 If you are already fronting this with Cloudflare, putting Cloudflare Access in
 front of the tunnel is stronger than this login and costs nothing at your scale
@@ -76,6 +82,8 @@ metered.
 |---|---|---|
 | `cesium_ion_token` | Google photorealistic 3D tiles and world terrain | [Cesium ion](https://ion.cesium.com/tokens) — free for personal use |
 | `google_maps_api_key` | Direct 3D tiles and place search (**metered**) | [Google Maps Platform](https://developers.google.com/maps/documentation/tile/get-api-key) |
+| `google_maps_server_api_key` | Optional second Google key for the server-side calls, so the browser-exposed one can stay narrow | same place — see above |
+| `mapillary_client_token` | The Street Level layer: street-level photos and 360s on the globe | [Mapillary](https://www.mapillary.com/dashboard/developers) — free |
 | `openai_api_key` | Voice control and the AI HUD (**metered**, roughly $0.01–0.05 per minute of speech) | [OpenAI](https://platform.openai.com/api-keys) |
 | `aisstream_api_key` | Live ship positions worldwide | [AISStream](https://aisstream.io) — free |
 | `firms_map_key` | Live active-fire detections | [NASA FIRMS](https://firms.modaps.eosdis.nasa.gov/api/map_key/) — free |
@@ -101,8 +109,18 @@ extra_env:
   - OPENAI_REALTIME_VOICE=marin
   - OPENAI_REALTIME_MODEL=gpt-realtime-2
   - TOMTOM_DAILY_TILE_BUDGET=2000
-  - CCTV_MAX_SOURCES=40
+  - CCTV_MAX_SOURCES=400
+  - CCTV_VEGVESEN_ENABLED=0
 ```
+
+Three upstream defaults changed under you in 0.3.0, and all three are
+overridable here: the OpenAI routes are now throttled to 30 requests per minute
+per client and the Google Places routes to 120, where both were unlimited
+(`GEV_RATELIMIT_OPENAI_PER_MIN`, `GEV_RATELIMIT_GOOGLE_PER_MIN`; `0` disables),
+and `TOMTOM_DAILY_TILE_BUDGET` fell from 40,000 to 6,000 so a 31-day month
+stays inside TomTom's free allowance. The CCTV packs also grew a lot — the
+catalog ceiling is now 4,000 cameras across a dozen countries, each pack with
+its own `CCTV_*_ENABLED` and `CCTV_*_MAX_SOURCES` switch.
 
 The full list, with explanations, is in
 [`.env.example`](https://github.com/bilawalsidhu/gods-eye-view/blob/main/.env.example)
@@ -114,11 +132,15 @@ The app has its own Provider Settings panel for pasting keys. In this app it is
 **read-only**: keys you set in the app options show up there as *externally
 managed*, which is the same state upstream uses for launcher-managed installs.
 
-That is deliberate on two counts. Upstream's panel only answers unproxied
-requests from the local machine, and everything here arrives through the app's
-internal proxy; and a writable credential form on port 8037 would be writable by
-anything on your network. Manage keys in **Configuration → Options** instead —
-they are stored by Home Assistant like any other app secret.
+That is deliberate: a writable credential form on port 8037 would be writable
+by anything that can reach the port. Manage keys in **Configuration → Options**
+instead — they are stored by Home Assistant like any other app secret.
+
+Until 0.3.0 this fell out of upstream's own gate, which refuses proxied
+requests and anything but a local `Host`. 0.3.0 has to present a local `Host`
+to get the metered routes working at all (see *Two ways in, one server*), so
+the panel's two endpoints are refused by the internal nginx instead. `/mcp`,
+upstream's local agent endpoint, is refused there for the same reason.
 
 Keys the panel did manage to save before (or that you place there yourself) live
 in `/data/.env` inside the app and survive restarts and updates. An app option
@@ -139,6 +161,27 @@ re-encodes it. Valueless parameters do not survive that round trip:
 `?import&url` — how Vite marks a `?url` asset import — arrives as
 `?import=&url=`, and Vite then serves the raw file instead of the JS module
 the browser is importing. nginx restores those markers before proxying.
+
+And one more, added in 0.3.0. Upstream now checks three things on its
+cost-bearing routes — place search, voice, the AI HUD, Street Level — and the
+add-on failed all three by passing the request on as the client had made it:
+
+- **Forwarding headers.** `X-Forwarded-For`, `X-Real-IP`, `Via` and
+  Cloudflare's `CF-Connecting-IP` among them, all read as proof a request came
+  from somewhere else and answered with 403. They are cleared rather than just
+  not set, so a tunnel that adds its own does not trip the gate either.
+- **`Origin`.** It has to equal the authority the app works out from its own
+  scheme and `Host`. The hop from nginx to the app is plain http, so a client
+  on https could never match.
+- **`Host`.** `HOST=0.0.0.0` used to mean "accept any `Host`". It no longer
+  does, and the `.local` suffix is no longer accepted by default either, so a
+  forwarded `homeassistant.local` is refused outright.
+
+So nginx now addresses the app as `127.0.0.1:4173`, with a matching `Origin`
+and no forwarding headers. Nothing is given up by this: the app listens on
+loopback inside the container and nginx is its only caller, so the `Host` it
+sees was never a boundary here. The boundary is the two listeners — ingress
+authenticated by Home Assistant, the published port with its optional login.
 
 Two consequences worth knowing:
 
