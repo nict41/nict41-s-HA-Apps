@@ -17,17 +17,20 @@ cd /opt/gods-eye-view || bashio::exit.nok "God's Eye View is not installed"
 # that does not swallow the app itself. Home Assistant's ingress path is an
 # /api path, so without this every request under the base answers
 # {"error":"Unknown API route"} — see the file for the whole story.
+# The CLI flag is `-c, --config <file>`. `configFile` is the name the JS API
+# uses for the same thing and is NOT a CLI option — passing it aborts Vite
+# before the server starts. The Dockerfile asserts the flag still exists.
 readonly CONFIG="/opt/gods-eye-view/vite.config.ha.mjs"
 
 base="$(cat /run/gev/base 2>/dev/null || true)"
 if [ -n "${base}" ]; then
     bashio::log.info "Starting God's Eye View (port=4173, base=${base}/)"
     exec node node_modules/vite/bin/vite.js \
-        --configFile "${CONFIG}" \
+        --config "${CONFIG}" \
         --host 127.0.0.1 --port 4173 --strictPort --base "${base}/"
 fi
 
 bashio::log.info "Starting God's Eye View (port=4173)"
 exec node node_modules/vite/bin/vite.js \
-    --configFile "${CONFIG}" \
+    --config "${CONFIG}" \
     --host 127.0.0.1 --port 4173 --strictPort

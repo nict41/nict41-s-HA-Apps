@@ -38,9 +38,16 @@ COPY rootfs /
 
 # The Home Assistant Vite config has to sit inside the checkout: it imports
 # upstream's own config relatively and resolves vite from the app's
-# node_modules. Fail the build if upstream's config is not where it expects.
+# node_modules. Then prove the wiring, because every way it can break leaves
+# the add-on dead on arrival: upstream's config must be where the wrapper
+# expects, the CLI flag that selects the wrapper must still exist (it is
+# `--config`; `configFile` is the JS API's name and aborts Vite), and the
+# resolved config must actually carry the replaced plugin.
 RUN test -f "${GEV_HOME}/vite.config.js" \
-    && cp /opt/gev-ha/vite.config.ha.mjs "${GEV_HOME}/vite.config.ha.mjs"
+    && cp /opt/gev-ha/vite.config.ha.mjs "${GEV_HOME}/vite.config.ha.mjs" \
+    && cd "${GEV_HOME}" \
+    && node node_modules/vite/bin/vite.js --help | grep -q -- '-c, --config' \
+    && node /opt/gev-ha/check-config.mjs "${GEV_HOME}/vite.config.ha.mjs"
 
 RUN chmod a+x \
         /etc/s6-overlay/s6-rc.d/init-gev/run \

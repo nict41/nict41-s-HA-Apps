@@ -52,6 +52,10 @@ function ingressAwareApiNotFound() {
   };
   return {
     name: API_NOT_FOUND,
+    // Vite ignores properties it does not know, and the image build asserts
+    // this one is present in the resolved config — so a wrapper that silently
+    // stops replacing anything fails the build instead of the add-on.
+    ingressAware: true,
     configureServer: install,
     configurePreviewServer: install,
   };
