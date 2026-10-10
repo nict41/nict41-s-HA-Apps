@@ -27,7 +27,19 @@ download_window_end=$(bashio::config 'download_window_end')
 # kiwix-serve builds absolute links from its --urlRootLocation, so it has to
 # know the Home Assistant ingress prefix its pages are reached through. The
 # manager appends its own /kiwix proxy path to this.
-ingress_entry=$(bashio::addon.ingress_entry 2>/dev/null) || ingress_entry=""
+# bashio 0.18 renamed every bashio::addon.* function to bashio::app.*. The old
+# names still work — they are generated at load time as aliases that warn on
+# stderr and delegate — but deprecated is not permanent, so ask for the new
+# name when the base image has it.
+ha_ingress_entry() {
+    if declare -F bashio::app.ingress_entry >/dev/null 2>&1; then
+        bashio::app.ingress_entry
+    else
+        bashio::addon.ingress_entry
+    fi
+}
+
+ingress_entry=$(ha_ingress_entry 2>/dev/null) || ingress_entry=""
 
 export ZIM_PATH="${zim_path}"
 export LIBRARY_SOURCE="${library_source}"

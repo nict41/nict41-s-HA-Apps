@@ -22,7 +22,19 @@ if [ -z "${PAGES}" ]; then
 fi
 
 # ── Ingress entry ──────────────────────────────────────────────────────────────
-INGRESS_ENTRY="$(bashio::addon.ingress_entry 2>/dev/null)" || true
+# bashio 0.18 renamed every bashio::addon.* function to bashio::app.*. The old
+# names still work — they are generated at load time as aliases that warn on
+# stderr and delegate — but deprecated is not permanent, so ask for the new
+# name when the base image has it.
+ha_ingress_entry() {
+    if declare -F bashio::app.ingress_entry >/dev/null 2>&1; then
+        bashio::app.ingress_entry
+    else
+        bashio::addon.ingress_entry
+    fi
+}
+
+INGRESS_ENTRY="$(ha_ingress_entry 2>/dev/null)" || true
 
 # ── Write runtime Glance configs ───────────────────────────────────────────────
 # glance.yml      → port 8080, base-url set  → used when accessed via HA ingress

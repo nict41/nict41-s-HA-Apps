@@ -46,8 +46,20 @@ done
 # Home Assistant serves the add-on under /api/hassio_ingress/<token>/ and
 # strips that prefix before the request reaches us. Vite is started with it as
 # its --base so every URL it emits carries the prefix the browser needs.
+# bashio 0.18 renamed every bashio::addon.* function to bashio::app.*. The old
+# names still work — they are generated at load time as aliases that warn on
+# stderr and delegate — but deprecated is not permanent, so ask for the new
+# name when the base image has it. Nothing to do when it does not.
+ha_ingress_entry() {
+    if declare -F bashio::app.ingress_entry >/dev/null 2>&1; then
+        bashio::app.ingress_entry
+    else
+        bashio::addon.ingress_entry
+    fi
+}
+
 gev_base=""
-if ingress_entry="$(bashio::addon.ingress_entry 2>/dev/null)" \
+if ingress_entry="$(ha_ingress_entry 2>/dev/null)" \
         && [ -n "${ingress_entry}" ] && [ "${ingress_entry}" != "null" ]; then
     gev_base="${ingress_entry%/}"
     bashio::log.info "Ingress path: ${gev_base}"
