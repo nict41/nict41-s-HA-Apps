@@ -177,6 +177,23 @@ add-on failed all three by passing the request on as the client had made it:
   does, and the `.local` suffix is no longer accepted by default either, so a
   forwarded `homeassistant.local` is refused outright.
 
+And one consequence of the ingress path's *shape*, fixed in 0.3.1. That path
+is itself an `/api` path, and upstream added a catch-all so an unmatched API
+route answers JSON rather than the page:
+
+```js
+server.middlewares.use('/api', () => 404 {"error":"Unknown API route"})
+```
+
+Because the app runs with the ingress path as its `--base`, every document,
+module and asset request reaches the dev server under `/api/` — and middleware
+a plugin registers runs ahead of Vite's own, so the catch-all answered all of
+them before the prefix had been stripped. The whole app became that one error.
+The add-on therefore starts the dev server against a wrapper config that
+replaces that plugin with one which steps aside for anything under the base.
+Real API calls reach it with the base already stripped, so they still get
+upstream's JSON 404.
+
 So nginx now addresses the app as `127.0.0.1:4173`, with a matching `Origin`
 and no forwarding headers. Nothing is given up by this: the app listens on
 loopback inside the container and nginx is its only caller, so the `Host` it

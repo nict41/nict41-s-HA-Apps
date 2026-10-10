@@ -36,6 +36,12 @@ RUN cd "${GEV_HOME}" \
 
 COPY rootfs /
 
+# The Home Assistant Vite config has to sit inside the checkout: it imports
+# upstream's own config relatively and resolves vite from the app's
+# node_modules. Fail the build if upstream's config is not where it expects.
+RUN test -f "${GEV_HOME}/vite.config.js" \
+    && cp /opt/gev-ha/vite.config.ha.mjs "${GEV_HOME}/vite.config.ha.mjs"
+
 RUN chmod a+x \
         /etc/s6-overlay/s6-rc.d/init-gev/run \
         /etc/s6-overlay/s6-rc.d/gev/run \
