@@ -118,11 +118,11 @@ app to match:
 
 1. Edit the `FROM` line's implicit version - this app's own **version**
    field in `config.yaml` is used directly as the upstream image tag
-   (e.g. `v3.0.2-openvino`). Bump it to match your Immich server's
+   (e.g. `v3.3.1-openvino`). Bump it to match your Immich server's
    version with `-openvino` appended.
 2. Update the app (Supervisor rebuilds from the new tag) and restart.
 
-This app currently tracks `v3.0.2-openvino`. Check the [Immich releases
+This app currently tracks `v3.3.1-openvino`. Check the [Immich releases
 page](https://github.com/immich-app/immich/releases) for the latest
 version, and the [immich-machine-learning package
 page](https://github.com/immich-app/immich/pkgs/container/immich-machine-learning)

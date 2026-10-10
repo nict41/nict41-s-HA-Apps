@@ -1,4 +1,4 @@
-FROM smp46/pingvin-share-x:v1.21.0
+FROM smp46/pingvin-share-x:v2.0.0
 
 ARG BASHIO_VERSION="0.17.5"
 
