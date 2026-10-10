@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.3.0
+
+- Move to upstream `591f299` (app version 0.2.1 plus unreleased work), 564
+  commits on from the previous pin. New since 0.2.2: a Street Level layer with
+  Mapillary photos and 360s, Norwegian road cameras and much larger CCTV packs
+  (Caltrans, TfL, Ontario, Fintraffic, DriveBC, TxDOT, NSW, Calgary, Tallinn
+  and others), a rewritten voice assistant that can be pointed at a target and
+  asked "what's that", portable and resizable CCTV and Street Level panels, and
+  traffic roads from OpenFreeMap vector tiles rather than public Overpass
+  instances.
+- Fix every cost-bearing route answering 403 on this new upstream. Three
+  separate gates landed upstream between the two pins, and the add-on tripped
+  all three because it proxied the request as the client had made it:
+  forwarding headers (`X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto`,
+  `Forwarded`, `Via` and Cloudflare's `CF-Connecting-IP`/`CF-Ray`) are now read
+  as proof a request came from elsewhere and refused; an `Origin` has
+  to match the authority the app computes from its own scheme and `Host`, which
+  a client on https never could across a plain-http hop; and `HOST=0.0.0.0` no
+  longer means "accept any Host", with the `.local` suffix dropped from the
+  defaults as well, so the forwarded Home Assistant hostname was refused
+  outright. nginx now addresses the app as `127.0.0.1:4173` with a matching
+  `Origin` and clears all nine forwarding headers — clears rather than simply
+  not setting them, because nginx passes an unknown request header through
+  verbatim, so a Cloudflare tunnel's own headers would trip the gate on the way
+  past. Place search, voice, the AI HUD and the whole Street Level layer depend
+  on this.
+- Keep Provider Settings read-only and `/mcp` unexposed. Both are gated
+  upstream on a loopback `Host`, which the change above now presents, so they
+  are refused in nginx instead — a credential-writing form and an MCP endpoint
+  on the published port are not what that change was for. Keys still belong in
+  the add-on options; nothing about this is new behaviour.
+- Add `mapillary_client_token` for the new Street Level layer, and
+  `google_maps_server_api_key` for the server-side Google calls (place search
+  and the Street View camera fallback). The second key never reaches the
+  browser, so it can be restricted by IP while the client-exposed key stays
+  scoped to tiles and geocoding. Both optional; left empty nothing changes.
+- Note two upstream default changes that now apply here: the OpenAI endpoints
+  are throttled to 30 requests per minute per client and the Google Places
+  endpoints to 120, where both were unlimited, and the TomTom daily tile budget
+  drops from 40,000 to 6,000 to keep a month inside the free allowance. All
+  three are still overridable through `extra_env`.
+
 ## 0.2.2
 
 - Fix "Missing option 'auth_session_days' in root" when saving the

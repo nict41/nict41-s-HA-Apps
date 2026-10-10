@@ -77,14 +77,21 @@ config_value() {
     fi
 }
 
-# HOST is what the upstream config reads to decide `allowedHosts`; setting it
-# to 0.0.0.0 accepts the Host header nginx forwards. The actual bind address
-# stays loopback-only — that is passed on the command line, which wins.
-write_env HOST "0.0.0.0"
+# HOST only feeds the upstream config's `server.host`; the bind address is
+# passed on the command line, which wins. It used to be 0.0.0.0 because that
+# switched `allowedHosts` to "any host" — upstream 0.2.1 removed that, so the
+# Host header nginx presents is what matters now (see gev-proxy.conf) and this
+# can state the truth: the dev server is reachable on loopback only.
+write_env HOST "127.0.0.1"
 write_env PORT "${VITE_PORT}"
 
 write_env CESIUM_ION_TOKEN "$(config_value 'cesium_ion_token')"
 write_env GOOGLE_MAPS_API_KEY "$(config_value 'google_maps_api_key')"
+# Server-side only, so it can be restricted by IP and scoped to Places and
+# Street View, leaving the browser-exposed key above narrow. Unset, upstream
+# falls back to GOOGLE_MAPS_API_KEY for these calls.
+write_env GOOGLE_MAPS_SERVER_API_KEY "$(config_value 'google_maps_server_api_key')"
+write_env MAPILLARY_CLIENT_TOKEN "$(config_value 'mapillary_client_token')"
 write_env OPENAI_API_KEY "$(config_value 'openai_api_key')"
 write_env AISSTREAM_API_KEY "$(config_value 'aisstream_api_key')"
 write_env FIRMS_MAP_KEY "$(config_value 'firms_map_key')"
@@ -190,6 +197,30 @@ ${normalise_rewrites}
         proxy_pass http://127.0.0.1:${LOG_PORT};
         proxy_http_version 1.1;
         access_log off;
+    }
+
+    # Provider Settings stays read-only, as it has been since 0.1.0. Upstream
+    # gates these two routes on a loopback socket and a local Host, and until
+    # now the forwarded Host failed that on its own. gev-proxy.conf presents a
+    # loopback Host to get the cost-bearing routes working, which would also
+    # unlock a credential-writing form on port 8037 — so refuse them here
+    # instead, where the decision is visible. Manage keys in add-on options.
+    location ^~ /api/setup/ {
+        default_type application/json;
+        return 403 '{"error":"Provider Settings is read-only in this add-on; set keys in the add-on options"}';
+    }
+
+    # Upstream's local MCP server, gated the same way and so unlocked the same
+    # way. It would answer unauthenticated callers on the published port
+    # whenever the ingress path is unavailable and no login is configured.
+    location = /mcp {
+        default_type application/json;
+        return 403 '{"error":"The MCP endpoint is not exposed by this add-on"}';
+    }
+
+    location ^~ /mcp/ {
+        default_type application/json;
+        return 403 '{"error":"The MCP endpoint is not exposed by this add-on"}';
     }
 
     # The app's own API routes are registered on the dev server ahead of Vite's

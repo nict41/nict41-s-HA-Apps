@@ -80,6 +80,17 @@ large model. The log says which it picked at startup:
 [elegoo] GPU node /dev/dri/renderD128 present — using hardware rendering
 ```
 
+## Where settings live
+
+Printer selection, presets and the file-dialog shortcuts are kept in the
+add-on's own config folder, which Home Assistant stores outside the container
+at `/addon_configs/<slug>_elegoo_slicer` and mounts at `/config` inside it.
+They survive restarts, updates and rebuilds.
+
+They are removed if you **uninstall** the add-on — uninstalling deletes that
+folder. Updating never does, so there is no reason to uninstall and reinstall
+to pick up a new version; it would only throw your configuration away.
+
 ## Files and network storage
 
 `/share` and `/media` are both mapped in, so anything attached to Home
@@ -105,8 +116,6 @@ anywhere else.
 Shortcuts are only ever appended, so if you reorder or delete one from inside
 the file chooser it stays that way.
 
-The desktop's home directory is the add-on's persistent volume, so printer
-profiles, filament presets and project files survive restarts and updates.
 
 ## Desktop and mobile
 
@@ -134,8 +143,8 @@ You can change it any time from the control bar (the tab on the left edge) under
 | **Remote Resizing** | desktop matches the window. Right on a desktop browser, a trap on a phone |
 
 That choice is stored per browser, so a phone and a laptop can differ. The
-add-on sets the touch default only when nothing is stored, so an explicit
-choice is never overridden.
+add-on applies its touch default once per browser and then never again, so a
+choice you make here is never overridden afterwards.
 
 **Pinch-to-zoom.** There are three different things called pinch here, and it
 is worth keeping them apart.

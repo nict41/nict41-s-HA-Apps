@@ -4,7 +4,7 @@ FROM ${BUILD_FROM}
 # God's Eye View has no release artefact and no published image, so the source
 # is fetched at a pinned commit and its dependencies are installed here. Bump
 # GEV_COMMIT (in build.yaml) to move to a newer upstream revision.
-ARG GEV_COMMIT=759652207fd1279ece97f0f19af566feb9a82146
+ARG GEV_COMMIT=591f299d11f38a612629a274463196d57ae3862e
 
 ENV GEV_HOME=/opt/gods-eye-view \
     PUPPETEER_SKIP_DOWNLOAD=1 \
@@ -12,8 +12,10 @@ ENV GEV_HOME=/opt/gods-eye-view \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false
 
-# Alpine 3.23 ships Node 24.18, which satisfies the app's ">=24.14 <25" engine
-# range. nginx must carry http_sub_module: the ingress shim is injected into
+# Alpine 3.23 ships Node 24.18, which satisfies the app's
+# ">=24.14.0 <25 || >=26 <27" engine range — and 24.14 is also the floor for
+# reading the bundled data packs as JSON, which upstream now relies on.
+# nginx must carry http_sub_module: the ingress shim is injected into
 # index.html with sub_filter, so a build without it would fail at runtime.
 RUN apk add --no-cache nodejs npm nginx \
     && node --version \
