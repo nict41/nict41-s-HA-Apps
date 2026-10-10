@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.5
+
+- Ask for the ingress path under whichever name the base image's bashio
+  provides. bashio 0.18 renamed every `bashio::addon.*` function to
+  `bashio::app.*`; the old names still work, generated at load time as
+  aliases that warn on stderr and delegate, so nothing is broken today.
+  Deprecated is not permanent though, and this one call is how the app
+  learns the path Home Assistant serves it from — losing it would not
+  crash anything, it would quietly disable the sidebar. Now it prefers
+  `bashio::app.ingress_entry` and falls back to the old name.
+- No behaviour change on any base image shipping bashio today. The helper
+  was exercised against all four cases: both names present (and no
+  deprecation warning emitted, since the new name is called directly),
+  only the old name, only the new name, and no ingress path at all.
+
 ## 0.2.4
 
 - Move to Glance v0.8.6, two patch releases on from v0.8.4.
