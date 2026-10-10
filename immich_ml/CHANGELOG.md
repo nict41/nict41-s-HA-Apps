@@ -2,6 +2,19 @@
 
 ## v3.3.1-openvino
 
+- **Vendored bashio moved from 0.17.5 to 0.19.0.** This app's version field
+  is the upstream image tag, so a change that does not move that tag cannot
+  bump the version and Supervisor will not offer it as an update. If
+  v3.3.1-openvino is already installed, rebuild the app to pick it up — see
+  *Applying repo changes that don't bump the version* in the docs.
+- 0.18.0 renamed every `bashio::addon.*` function to `bashio::app.*` with no
+  aliases left behind, which is the one way this bump could have bitten.
+  This app uses none of them — only `bashio::config`, `bashio::log.*` and
+  the exit constants, all still present at 0.19.0 and exercised against the
+  0.19.0 library to confirm. 0.19.0 also enables `inherit_errexit`; the
+  three `$(bashio::config ...)` calls here all return success, and the one
+  other substitution already carries `|| echo 0`.
+
 - Move to `ghcr.io/immich-app/immich-machine-learning:v3.3.1-openvino`,
   three minor releases on from v3.0.2.
 - **Update your Immich server to 3.3.1 as well.** Immich expects every

@@ -1,5 +1,5 @@
 name: Pingvin Share
-version: "1.1.0"
+version: "1.1.1"
 slug: pingvin_share
 description: Self-hosted file sharing platform (a WeTransfer alternative), powered by the community-maintained Pingvin Share X image
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pingvin_share"
