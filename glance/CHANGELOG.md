@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.4
+
+- Move to Glance v0.8.6, two patch releases on from v0.8.4.
+- Nothing in this add-on changed. The parts it depends on are unchanged
+  upstream: the binary is still at `/app/glance`, still takes `--config`,
+  and still listens on 8080. The bundled default dashboard and both
+  configurations this add-on generates — the ingress one carrying
+  `server.base-url` and the direct one without it — were each checked
+  against the v0.8.6 binary with its own `config:validate`, so a config
+  key moving under you would have shown up here rather than at start.
+- Your own `glance/glance.yml` in the Home Assistant config folder is
+  untouched, and only its `pages:` section is read, as before.
+
 ## 0.2.3
 
 - Fix the add-on showing as "Error" instead of "Stopped" after a normal

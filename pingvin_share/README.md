@@ -83,7 +83,11 @@ once you've signed in, not from add-on options:
 - **Authentication**: LDAP, and OAuth/OIDC login via GitHub, Google,
   Microsoft, Discord or a generic OIDC provider.
 - **Storage**: local disk (default, under this app's own `/data`) or S3 /
-  S3-compatible object storage.
+  S3-compatible object storage. Since upstream 2.0.0, S3 uploads and
+  downloads go directly between the browser and the bucket using presigned
+  URLs, so an S3 bucket needs CORS rules allowing your Pingvin origin —
+  the app's own S3 settings page links to what it needs. Local storage,
+  the default here, is unaffected.
 - **Legal**: optional imprint and privacy policy pages.
 - **Appearance** (Pingvin Share X only): theme color, radius, color scheme
   and custom CSS.
@@ -132,7 +136,7 @@ included in Home Assistant's normal app backups/snapshots.
 
 ## Updating the bundled Pingvin Share X version
 
-This app pins an exact image tag (e.g. `v1.21.0`) in its `Dockerfile` for
+This app pins an exact image tag (e.g. `v2.0.0`) in its `Dockerfile` for
 reproducibility rather than tracking `latest`. To pick up a newer release,
 edit the `FROM` line and rebuild - check the
 [release notes](https://github.com/smp46/pingvin-share-x/releases) first,

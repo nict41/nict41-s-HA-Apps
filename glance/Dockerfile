@@ -1,5 +1,5 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base:3.20
-FROM glanceapp/glance:v0.8.4 AS glance
+FROM glanceapp/glance:v0.8.6 AS glance
 
 FROM ${BUILD_FROM}
 

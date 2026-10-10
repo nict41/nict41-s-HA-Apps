@@ -1,5 +1,5 @@
 name: Immich Machine Learning (OpenVINO)
-version: "v3.0.2-openvino"
+version: "v3.3.1-openvino"
 slug: immich_ml
 description: >-
   Standalone Immich Machine Learning sidecar, hardware-accelerated with
