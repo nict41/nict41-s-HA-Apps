@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.1
+
+- Fix the app serving nothing but `{"error":"Unknown API route"}` after the
+  0.3.0 update. Upstream gained a catch-all so an unmatched API route answers
+  JSON instead of falling through to the page:
+  `server.middlewares.use('/api', ...)`. Home Assistant serves an add-on from
+  `/api/hassio_ingress/<token>/`, and the app runs with that path as Vite's
+  `--base`, so every document, module and asset request arrives under `/api/`
+  — and middleware a plugin adds in `configureServer` runs *ahead* of Vite's
+  own, so the catch-all answered each one before the base prefix had been
+  stripped. The collision was total: the splash screen never appeared, because
+  the HTML itself was the error.
+- The dev server now starts against a wrapper config that replaces that one
+  plugin with an equivalent which steps aside for anything addressed under the
+  base. Real API calls are untouched — nginx sends those with the base already
+  stripped — so an unmatched route still answers upstream's JSON 404. It is a
+  wrapper rather than an edit to upstream's file so that bumping `GEV_COMMIT`
+  cannot quietly drop it; if upstream renames or removes the plugin, the
+  add-on log says so at start.
+
 ## 0.3.0
 
 - Move to upstream `591f299` (app version 0.2.1 plus unreleased work), 564
