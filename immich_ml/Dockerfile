@@ -1,7 +1,7 @@
 ARG BUILD_VERSION
 FROM ghcr.io/immich-app/immich-machine-learning:${BUILD_VERSION}
 
-ARG BASHIO_VERSION="0.17.5"
+ARG BASHIO_VERSION="0.19.0"
 
 # This only adds bashio, so the entrypoint can read Home Assistant's
 # options.json and translate it into the upstream image's own

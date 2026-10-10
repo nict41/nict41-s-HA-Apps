@@ -1,6 +1,6 @@
 FROM wordpress:php8.3-apache
 
-ARG BASHIO_VERSION="0.17.5"
+ARG BASHIO_VERSION="0.19.0"
 
 # Install the MariaDB server (used when no external db_host is configured,
 # making the add-on fully self-contained) and its client tools, and fetch

@@ -1,6 +1,6 @@
 FROM smp46/pingvin-share-x:v2.0.0
 
-ARG BASHIO_VERSION="0.17.5"
+ARG BASHIO_VERSION="0.19.0"
 
 # Pingvin Share X's own image is Alpine-based and doesn't ship bash, so
 # bashio (needed to read this add-on's options.json) is vendored from

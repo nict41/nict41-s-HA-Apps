@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.7
+
+- Move the vendored bashio from 0.17.5 to 0.19.0.
+- 0.18.0 renamed every `bashio::addon.*` function to `bashio::app.*` with
+  no aliases left behind, which is the one way this bump could have bitten.
+  This app uses none of them — only `bashio::config`,
+  `bashio::config.has_value`, `bashio::config.true`, `bashio::log.*` and `bashio::exit.nok`,
+  all of which still exist at 0.19.0 and were loaded and called from the
+  0.19.0 library to confirm it.
+- 0.19.0 also turns on `inherit_errexit`, so a failing command inside a
+  `$(...)` now aborts the script rather than passing an empty value along.
+  Every command substitution here was checked against that: the
+  `bashio::config` calls all return success, and the pipelines that can
+  fail already carry their own `|| true`.
+- The install itself is unchanged — the release still ships a `lib/`
+  directory with the `bashio` entry script, which is what the Dockerfile
+  moves into place.
+
 ## 1.1.6
 
 - `config_extra` now applies on every restart, not just when the site is
