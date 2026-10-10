@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.2
+
+- Fix the add-on failing to start at all: `CACError: Unknown option
+  '--configFile'`, then `exited with code 1, stopping add-on`. 0.3.1 selected
+  its Vite configuration with `--configFile`, which is the name the JS API
+  uses for that setting and is not a CLI option; the flag is `-c, --config`.
+  Vite rejects an unknown option before the server starts, so the app never
+  came up.
+- Assert the wiring while building the image, since every way it can break
+  leaves the add-on dead on arrival rather than degraded. The build now fails
+  unless Vite's CLI still accepts `--config`, the wrapper config and
+  upstream's own config both load, and the resolved config really carries the
+  replaced plugin — the last checked through a marker on it, so a wrapper that
+  quietly stops replacing anything cannot pass.
+
 ## 0.3.1
 
 - Fix the app serving nothing but `{"error":"Unknown API route"}` after the
