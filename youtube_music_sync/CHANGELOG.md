@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.2.0
+
+- Stop re-checking videos YouTube says are unavailable on every cycle. A
+  playlist with a dozen private, removed, members-only, geo-blocked or
+  age-restricted entries was spending a dozen of its
+  `max_downloads_per_cycle` slots, and a dozen requests against the rate
+  limit, re-learning the same thing every hour.
+- A failed download is now classified before it is recorded. One that means
+  the *video* cannot be fetched escalates through a backoff — 6 hours, a day,
+  3 days, a week, then `recheck_unavailable_days` (default 30) — and is
+  skipped in the meantime, before the plan is built, so it costs no download
+  slot and no request. The cycle summary reports them as
+  `skipped as unavailable`.
+- Transient failures are deliberately untouched. A captcha, an HTTP 429 or
+  403, `aria2c exited with code 22`, a dropped connection or a timeout still
+  retries on the very next cycle, and a transient failure clears any backoff
+  an earlier one had set. Anything unrecognised counts as transient, so a
+  message nobody has seen before costs one retry rather than silently
+  retiring a track.
+- The classifier is careful about one case in particular: "Sign in to confirm
+  you're not a bot" reads like an age gate but is a rate-limit challenge, and
+  must never retire a track. It is checked before the age-restriction rules
+  and is covered by its own test.
+- A backoff rather than a blacklist, because unavailable is not always
+  permanent: a private video can be made public again, a geo-block can lift,
+  a copyright claim can be resolved, and an age-restricted video starts
+  working the moment `cookies_file` is set. Set `recheck_unavailable_days` to
+  `0` to retire them outright instead.
+- The extractor and video id are stripped from yt-dlp's message before it is
+  classified. A YouTube id is eleven characters of `[A-Za-z0-9_-]`, so it can
+  legitimately contain `403`, `429` or `timeout`; matching against the id
+  would have read a dead video as a retryable one and looped on it forever,
+  which is the bug this release exists to end. Confirmed against real ids
+  from a live run and against ids crafted to collide.
+- New option `recheck_unavailable_days` (0-365, default 30).
+- Databases from 0.1.x are migrated in place; `CREATE TABLE IF NOT EXISTS`
+  would have left the new columns off an existing install, so they are added
+  explicitly on open. Covered by a test that opens a hand-built 0.1.x
+  database.
+
 ## 0.1.1
 
 - Fix options silently reverting to their defaults. The reported symptoms —

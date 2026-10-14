@@ -90,6 +90,7 @@ is set to.
 | `min_duration_seconds` | `60` | Skip anything shorter - shorts, stings, trailers. `0` disables. |
 | `max_duration_seconds` | `0` | Skip anything longer - hour-long mixes, full albums. `0` disables. |
 | `max_downloads_per_cycle` | `20` | Cap per cycle; the rest waits for the next one. |
+| `recheck_unavailable_days` | `30` | How long before re-checking a video YouTube says is unavailable. It backs off 6h → 1d → 3d → 1w → this, instead of retrying every cycle. `0` retires it for good. |
 | `sleep_between_downloads` | `5` | Seconds between downloads. Raise it if YouTube starts challenging requests. |
 | `rate_limit` | `""` | Bandwidth cap, e.g. `1M`. Empty is unlimited. |
 
@@ -177,6 +178,20 @@ add-on now refuses to start on, rather than running with its own defaults.
 Before 0.1.1 that substitution was silent, and showed up as `use_aria2c`
 turning itself off, playlists going missing, or a cycle quietly doing nothing
 because `dry_run` had reverted to true.
+
+**Unavailable videos eating the per-cycle budget**
+Videos that are private, removed, members-only, geo-blocked or age-restricted
+used to be retried every single cycle, each one consuming a
+`max_downloads_per_cycle` slot and a request. Since 0.2.0 a failure that says
+the *video* cannot be fetched is backed off — 6 hours, a day, 3 days, a week,
+then `recheck_unavailable_days` — and the cycle summary counts them as
+`skipped as unavailable`. Captchas, rate limits, `aria2c exited with code 22`
+and network errors are untouched and still retry on the next cycle.
+
+Not a blacklist, deliberately: a private video can be made public again, a
+geo-block can lift, a copyright claim can be resolved, and an age-restricted
+one starts working the moment you set `cookies_file`. If you would rather it
+never asked again, set `recheck_unavailable_days` to `0`.
 
 **Starting over**
 Delete the add-on's `/data/state.db` (uninstall/reinstall) to clear the

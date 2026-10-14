@@ -97,3 +97,95 @@ def test_meta_survives_reopen(tmp_path):
     reopened = Store(path)
     assert reopened.get_meta("last_run") == "2026-01-02T00:00:00+00:00"
     assert reopened.get_meta("nothing", "fallback") == "fallback"
+
+
+# ------------------------------------------------- unavailable-video backoff
+
+def _fail(store, video_id="vid00000001", permanent=True, cap_days=30, error="Video unavailable"):
+    return store.record_failure(video_id, playlist="p", title="T", uploader="U",
+                                duration=None, permanent=permanent, error=error,
+                                cap_days=cap_days)
+
+
+def test_unavailable_failures_back_off_further_each_time(tmp_path):
+    store = make_store(tmp_path)
+    seen = []
+    for _ in range(6):
+        attempts, retry_after = _fail(store)
+        seen.append((attempts, retry_after))
+    # Attempts climb, and each re-check is no earlier than the last.
+    assert [a for a, _ in seen] == [1, 2, 3, 4, 5, 6]
+    stamps = [r for _, r in seen]
+    assert all(stamps[i] <= stamps[i + 1] for i in range(len(stamps) - 1))
+    # ...and it plateaus at the cap rather than growing forever.
+    assert stamps[-1] == stamps[-2]
+
+
+def test_a_deferred_video_is_not_offered_again_yet(tmp_path):
+    store = make_store(tmp_path)
+    _fail(store)
+    assert "vid00000001" in store.deferred_ids()
+    assert store.retired_ids() == set()
+
+
+def test_a_transient_failure_keeps_retrying_next_cycle(tmp_path):
+    store = make_store(tmp_path)
+    _fail(store, permanent=False, error="HTTP Error 429: Too Many Requests")
+    assert store.deferred_ids() == {}
+    assert store.retired_ids() == set()
+    # Still absent from downloaded_ids, i.e. still due for another attempt.
+    assert "vid00000001" not in store.downloaded_ids()
+
+
+def test_a_transient_failure_clears_an_earlier_backoff(tmp_path):
+    store = make_store(tmp_path)
+    _fail(store)
+    _fail(store)
+    assert store.deferred_ids()
+    _fail(store, permanent=False, error="Connection reset by peer")
+    assert store.deferred_ids() == {}
+
+
+def test_cap_of_zero_retires_the_video(tmp_path):
+    store = make_store(tmp_path)
+    attempts, retry_after = _fail(store, cap_days=0)
+    assert attempts == 1 and retry_after is None
+    assert store.retired_ids() == {"vid00000001"}
+    assert store.deferred_ids() == {}
+
+
+def test_a_later_success_clears_the_backoff(tmp_path):
+    store = make_store(tmp_path)
+    _fail(store)
+    store.record_download("vid00000001", playlist="p", title="T", uploader="U",
+                          duration=200.0, path="/m/T.opus", status=STATUS_OK)
+    assert store.deferred_ids() == {}
+    assert store.retired_ids() == set()
+    assert "vid00000001" in store.downloaded_ids()
+
+
+def test_a_database_from_an_earlier_version_is_migrated(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(str(path))
+    old.executescript("""
+        CREATE TABLE downloads (
+            video_id      TEXT PRIMARY KEY,
+            playlist      TEXT,
+            title         TEXT,
+            uploader      TEXT,
+            duration      REAL,
+            path          TEXT,
+            status        TEXT NOT NULL,
+            downloaded_at TEXT NOT NULL
+        );
+        INSERT INTO downloads VALUES ('old00000001','p','T','U',1.0,'/m/T.opus','ok','2026-01-01T00:00:00+00:00');
+    """)
+    old.commit()
+    old.close()
+
+    store = Store(str(path))  # must not raise on the missing columns
+    assert "old00000001" in store.downloaded_ids()
+    assert store.deferred_ids() == {}
+    _fail(store)
+    assert "vid00000001" in store.deferred_ids()
