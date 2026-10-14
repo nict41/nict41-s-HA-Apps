@@ -67,6 +67,10 @@ def _fast_timers(monkeypatch):
     monkeypatch.setattr(settings, "STALL_SECONDS", 0.25)
     monkeypatch.setattr(settings, "BACKOFF_START_SECONDS", 0.05)
     monkeypatch.setattr(settings, "BACKOFF_MAX_SECONDS", 0.4)
+    # Shutdown's safety bound. It gets hit for real in this suite - cancelling
+    # a reader mid-request is exactly what wedges httpx's pool - so leaving it
+    # at the production 5s costs the suite seconds of real waiting.
+    monkeypatch.setattr(settings, "CLOSE_SECONDS", 0.1)
     yield
 
 

@@ -17,9 +17,10 @@ configuration:
     name: Frames per second
     description: >-
       The most frames each viewer is sent per second, and the rate asked of
-      Home Assistant. 5 is plenty for watching a print; lower it if the page
-      is being watched over a slow connection. This is a cap, not a
-      guarantee - the printer's camera sets the real rate.
+      Home Assistant. 5 is plenty for watching a print. Capped at 10 as a
+      camera-safety limit rather than a bandwidth one - raise it only after
+      a full idle test has passed on the real printer. This is a ceiling,
+      not a guarantee: the printer's camera sets the real rate.
   access_key:
     name: Access key
     description: >-
@@ -37,6 +38,8 @@ configuration:
       connection no matter how many people are watching.
 network:
   8099/tcp: >-
-    The public camera page. Point your Cloudflare tunnel's public hostname
-    at http://<your Home Assistant LAN IP>:8096 (or whichever host port you
-    map here). Nothing else needs forwarding.
+    The public camera page. Whatever host port you set here is what your
+    Cloudflare tunnel's public hostname must point at -
+    http://<your Home Assistant LAN IP>:<this port> - so read it here rather
+    than assuming the default. The app prints the same address in its log at
+    startup. Nothing else needs forwarding.

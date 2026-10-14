@@ -80,11 +80,15 @@ async def lifespan(app: FastAPI):
               "max %d viewers", settings.camera_entity(), settings.fps(),
               settings.max_viewers())
     if not settings.auth_required():
-        _LOG.warning(
-            "No access key is set. This page is published through a tunnel, so "
-            "anyone who learns the hostname can watch the camera - set the "
-            "'access_key' option unless that is really what you want."
-        )
+        # Three lines rather than one: a single warning scrolls past in a
+        # busy app log, and this is the one that decides whether the camera
+        # is public to anyone who learns the hostname.
+        _LOG.warning("=" * 72)
+        _LOG.warning("NO ACCESS KEY IS SET - anyone who reaches this port can "
+                     "watch the camera.")
+        _LOG.warning("Set the 'access_key' option BEFORE pointing a Cloudflare "
+                     "tunnel at this app.")
+        _LOG.warning("=" * 72)
     if not settings.supervisor_token():
         _LOG.error("No SUPERVISOR_TOKEN in the environment - the app cannot "
                    "reach the Home Assistant API and will show the camera as "

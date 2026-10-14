@@ -41,7 +41,32 @@ else
     bashio::log.warning "No access key set - anyone who reaches this port can watch the camera"
 fi
 
-bashio::log.info "Starting Camera Share on port 8099..."
+# The host port is whatever the Network tab says, which is NOT necessarily
+# the default in config.yaml: an app that already existed on this machine
+# (a local copy with the same slug, say) keeps the port mapping it already
+# had, and anyone can change it. Getting this wrong means a Cloudflare
+# tunnel pointed at a port nothing is listening on, so the app reports the
+# real one rather than letting the docs be the source of truth.
+#
+# bashio 0.18 renamed every bashio::addon.* function to bashio::app.*, so
+# both spellings are tried; if neither is available the app still starts
+# and just says where to look instead.
+declare host_port=""
+declare fn
+for fn in bashio::app.ports bashio::addon.ports; do
+    if declare -F "${fn}" >/dev/null 2>&1; then
+        host_port=$("${fn}" 2>/dev/null | jq -r '."8099/tcp" // empty' 2>/dev/null) || host_port=""
+        bashio::var.has_value "${host_port}" && break
+    fi
+done
+
+if bashio::var.has_value "${host_port}"; then
+    bashio::log.info "Point the Cloudflare tunnel at http://<Home Assistant LAN IP>:${host_port}"
+else
+    bashio::log.info "Point the Cloudflare tunnel at the host port shown on this app's Network tab"
+fi
+
+bashio::log.info "Starting Camera Share on container port 8099..."
 
 cd /app || bashio::exit.nok "Could not change to /app directory"
 exec python3 -m uvicorn main:app --host 0.0.0.0 --port 8099
