@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.2
+
+- Fix "Failed to save: Missing option 'download_timeout_minutes' in root".
+  The options added in 0.2.0 and 0.2.1 were declared required, and updating
+  an add-on does not backfill new defaults into an existing install's saved
+  options - so on any install that predates them the values were simply
+  absent, and Home Assistant refused *every* save, including the one that
+  would have supplied them. Changing any unrelated setting, such as turning
+  `use_aria2c` off, failed with this.
+- Every scalar option is optional now, not only the new ones, so adding
+  another in future cannot do this again. Nothing is lost by it: both the
+  startup script and `settings.py` already substitute a default for an
+  absent option, and the checks that matter - a playlist being configured, a
+  `music_dir` under /media or /share - are made at runtime where a real error
+  message can be given.
+- A test asserts it, reading `config.yaml` directly: every option has a
+  schema entry and vice versa, and no scalar rule is required. It names any
+  offender, so the next person to add an option gets told rather than a user
+  getting an unsaveable configuration.
+- If you are stuck on 0.2.1 and cannot save: Configuration tab, the ⋮ menu,
+  *Edit in YAML*, and add `recheck_unavailable_days: 30`,
+  `download_timeout_minutes: 120` and `progress_interval_seconds: 30`.
+
 ## 0.2.1
 
 - Log progress while a track downloads. yt-dlp was run with `--no-progress`

@@ -1,5 +1,5 @@
 name: "YouTube Music Sync"
-version: "0.2.1"
+version: "0.2.2"
 slug: "youtube_music_sync"
 description: >-
   Watches public YouTube playlists and mirrors each video's audio into your
@@ -56,27 +56,27 @@ options:
 schema:
   playlists:
     - str
-  music_dir: str
-  poll_interval_minutes: int(5,1440)
-  dry_run: bool
-  audio_format: "list(best|m4a|opus|mp3|flac|vorbis)"
-  output_template: str
-  sponsorblock_remove_offtopic: bool
-  embed_thumbnail: bool
-  crop_thumbnail_square: bool
-  duration_tolerance_seconds: int(0,120)
-  title_similarity: float(0.5,1.0)
-  on_duplicate: "list(quarantine|delete|keep)"
-  min_duration_seconds: int(0,3600)
-  max_duration_seconds: int(0,86400)
-  max_downloads_per_cycle: int(1,500)
-  recheck_unavailable_days: int(0,365)
-  download_timeout_minutes: int(5,1440)
-  progress_interval_seconds: int(0,600)
-  sleep_between_downloads: int(0,300)
+  music_dir: str?
+  poll_interval_minutes: int(5,1440)?
+  dry_run: bool?
+  audio_format: "list(best|m4a|opus|mp3|flac|vorbis)?"
+  output_template: str?
+  sponsorblock_remove_offtopic: bool?
+  embed_thumbnail: bool?
+  crop_thumbnail_square: bool?
+  duration_tolerance_seconds: int(0,120)?
+  title_similarity: float(0.5,1.0)?
+  on_duplicate: "list(quarantine|delete|keep)?"
+  min_duration_seconds: int(0,3600)?
+  max_duration_seconds: int(0,86400)?
+  max_downloads_per_cycle: int(1,500)?
+  recheck_unavailable_days: int(0,365)?
+  download_timeout_minutes: int(5,1440)?
+  progress_interval_seconds: int(0,600)?
+  sleep_between_downloads: int(0,300)?
   rate_limit: "str?"
   cookies_file: "str?"
-  use_aria2c: bool
-  auto_update_ytdlp: bool
+  use_aria2c: bool?
+  auto_update_ytdlp: bool?
   extra_args: "str?"
-  log_level: "list(trace|debug|info|notice|warning|error|fatal)"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)?"

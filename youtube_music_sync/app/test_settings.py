@@ -69,3 +69,65 @@ def test_problems_flag_missing_cookies_file(tmp_path):
     cfg = settings.Config(playlists=("u",), music_dir="/media/nas1/Music",
                           cookies_file=str(tmp_path / "nope.txt"))
     assert any("cookies_file does not exist" in p for p in cfg.problems())
+
+
+# ------------------------------------------------------- add-on schema shape
+
+def _config_yaml_sections():
+    """Parse config.yaml's options/schema blocks without needing PyYAML.
+
+    The test suite's only dependency is pytest, and this needs to run in CI,
+    so the two flat blocks are read by hand rather than pulling in a parser.
+    """
+    import os
+    import re
+
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config.yaml")
+    with open(path, "r", encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
+
+    sections: dict[str, dict[str, str]] = {"options": {}, "schema": {}}
+    current = None
+    for line in lines:
+        if line.rstrip() in ("options:", "schema:"):
+            current = line.rstrip().rstrip(":")
+            continue
+        if current is None:
+            continue
+        if line and not line.startswith(" "):
+            current = None
+            continue
+        match = re.match(r"^  ([a-z0-9_]+):\s*(.*?)\s*$", line)
+        if match:
+            sections[current][match.group(1)] = match.group(2)
+    return sections["options"], sections["schema"]
+
+
+def test_every_option_has_a_schema_entry_and_the_reverse():
+    options, schema = _config_yaml_sections()
+    assert options and schema
+    assert set(options) == set(schema)
+
+
+def test_every_scalar_option_is_optional():
+    """Home Assistant refuses to save when a required option has no value.
+
+    Updating an add-on does not backfill new defaults into an install's saved
+    options, so an option added in a later version is simply absent on every
+    existing install. Declared required, that makes *every* save fail with
+    "Missing option '<name>' in root" - including the save that would have
+    supplied it. Both the startup script and settings.py already substitute a
+    default for an absent option, so nothing here needs to be mandatory.
+    """
+    _options, schema = _config_yaml_sections()
+    required = {
+        name: rule
+        for name, rule in schema.items()
+        # A list option ("playlists") has its type on the following line and
+        # is not a scalar rule; it is not subject to this.
+        if rule and not rule.strip('"').endswith("?")
+    }
+    assert required == {}, (
+        "these options are required and will break saving for anyone whose "
+        f"install predates them: {sorted(required)}"
+    )
