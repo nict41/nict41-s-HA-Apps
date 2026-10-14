@@ -195,3 +195,22 @@ def test_unavailable_messages_are_classified_permanent(message):
 ])
 def test_transient_and_unknown_messages_are_retried(message):
     assert downloader.classify_failure(message) == downloader.FAILURE_TRANSIENT
+
+
+@pytest.mark.parametrize("video_id", [
+    # Real ids from a live run.
+    "0K4T8JactHo", "QD1X7hosw4w", "mBiNBORoMjQ", "-ON8ot_fMKQ", "Yb3oA39uxTA",
+    # Ids that happen to contain an HTTP status code or a transient keyword.
+    # yt-dlp puts the id in the message, so matching it would read a dead
+    # video as a retryable one and loop on it forever.
+    "aB403cdEfGh", "xY429zabcDe", "q503mnopQRs", "abtimeoutxy", "x_network1",
+])
+def test_the_video_id_never_decides_the_classification(video_id):
+    message = f"ERROR: [youtube] {video_id}: Video unavailable"
+    assert downloader.classify_failure(message) == downloader.FAILURE_UNAVAILABLE
+
+
+def test_a_bot_challenge_behind_an_id_prefix_is_still_transient():
+    message = ("ERROR: [youtube] aB403cdEfGh: Sign in to confirm you're not a bot. "
+               "Use --cookies-from-browser or --cookies")
+    assert downloader.classify_failure(message) == downloader.FAILURE_TRANSIENT

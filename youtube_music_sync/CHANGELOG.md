@@ -28,6 +28,12 @@
   a copyright claim can be resolved, and an age-restricted video starts
   working the moment `cookies_file` is set. Set `recheck_unavailable_days` to
   `0` to retire them outright instead.
+- The extractor and video id are stripped from yt-dlp's message before it is
+  classified. A YouTube id is eleven characters of `[A-Za-z0-9_-]`, so it can
+  legitimately contain `403`, `429` or `timeout`; matching against the id
+  would have read a dead video as a retryable one and looped on it forever,
+  which is the bug this release exists to end. Confirmed against real ids
+  from a live run and against ids crafted to collide.
 - New option `recheck_unavailable_days` (0-365, default 30).
 - Databases from 0.1.x are migrated in place; `CREATE TABLE IF NOT EXISTS`
   would have left the new columns off an existing install, so they are added

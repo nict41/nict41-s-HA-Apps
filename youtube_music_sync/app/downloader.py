@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -36,11 +37,11 @@ _TRANSIENT_PATTERNS = (
     # "Sign in to confirm you're not a bot" is a rate-limit challenge, not an
     # age gate, and must never be allowed to retire a track.
     "not a bot",
-    "429",
+    "http error 429",
     "too many requests",
-    "403",
+    "http error 403",
     "forbidden",
-    "503",
+    "http error 503",
     "service unavailable",
     "aria2c exited",
     "unable to download webpage",
@@ -80,6 +81,21 @@ _UNAVAILABLE_PATTERNS = (
 )
 
 
+# yt-dlp prefixes a message with its extractor and the video id:
+#
+#     ERROR: [youtube] aB403cdEfGh: Video unavailable
+#
+# An 11-character YouTube id is drawn from [A-Za-z0-9_-], so it can perfectly
+# well contain "403", "429" or "timeout". Matching the patterns below against
+# the id would read a dead video as a transient failure and retry it forever -
+# precisely the bug this is here to end. The prefix is stripped first so only
+# YouTube's actual words are classified.
+_ERROR_PREFIX = re.compile(
+    r"^\s*(?:ERROR|WARNING)\s*:\s*(?:\[[^\]]+\]\s*)?(?:[\w-]+\s*:\s*)?",
+    re.IGNORECASE,
+)
+
+
 def classify_failure(error: str | None) -> str:
     """Decide whether a failed download is worth repeating next cycle.
 
@@ -87,7 +103,7 @@ def classify_failure(error: str | None) -> str:
     the video itself cannot be fetched. Everything else, including anything
     unrecognised, is FAILURE_TRANSIENT.
     """
-    text = (error or "").lower()
+    text = _ERROR_PREFIX.sub("", (error or "").strip()).lower()
     if not text:
         return FAILURE_TRANSIENT
     if any(pattern in text for pattern in _TRANSIENT_PATTERNS):
