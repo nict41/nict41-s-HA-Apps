@@ -109,6 +109,15 @@ Self-hosted file sharing platform (a WeTransfer alternative), built on the activ
 
 Self-hosted WordPress, built on the official docker-library/wordpress image.
 
+### [YouTube Music Sync](./youtube_music_sync)
+
+![YouTube Music Sync logo](youtube_music_sync/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Watches public YouTube playlists and mirrors each video's audio into your music library, using combined title and duration matching to skip tracks you already own.
+
 See each app's own README/DOCS for configuration options and setup steps.
 
 [aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg

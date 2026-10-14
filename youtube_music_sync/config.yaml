@@ -1,0 +1,76 @@
+name: "YouTube Music Sync"
+version: "0.1.0"
+slug: "youtube_music_sync"
+description: >-
+  Watches public YouTube playlists and mirrors each video's audio into your
+  music library, using combined title and duration matching to skip tracks
+  the library already has.
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/youtube_music_sync"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+panel_icon: mdi:playlist-music
+# media:rw is where Home Assistant network storage mounts added with usage
+# "Media" appear (/media/<mount name>); share:rw covers mounts added with
+# usage "Share" (/share/<mount name>). Both are mapped so music_dir can
+# point at either without a rebuild. addon_config gives this add-on its own
+# folder under /addon_configs (mounted at /config) for a cookies file.
+map:
+  - media:rw
+  - share:rw
+  - addon_config:rw
+# Supervisor injects broker host/port/credentials as a service, so no
+# password is ever hardcoded. "want": start even with no broker present and
+# wait for one at runtime - downloads still work without MQTT.
+services:
+  - mqtt:want
+options:
+  playlists: []
+  music_dir: "/media/nas1/Music"
+  poll_interval_minutes: 60
+  dry_run: true
+  audio_format: "best"
+  output_template: "%(title)s.%(ext)s"
+  sponsorblock_remove_offtopic: true
+  embed_thumbnail: true
+  crop_thumbnail_square: true
+  duration_tolerance_seconds: 5
+  title_similarity: 0.87
+  on_duplicate: "quarantine"
+  min_duration_seconds: 60
+  max_duration_seconds: 0
+  max_downloads_per_cycle: 20
+  sleep_between_downloads: 5
+  rate_limit: ""
+  cookies_file: ""
+  use_aria2c: false
+  auto_update_ytdlp: true
+  extra_args: ""
+  log_level: "info"
+schema:
+  playlists:
+    - str
+  music_dir: str
+  poll_interval_minutes: int(5,1440)
+  dry_run: bool
+  audio_format: "list(best|m4a|opus|mp3|flac|vorbis)"
+  output_template: str
+  sponsorblock_remove_offtopic: bool
+  embed_thumbnail: bool
+  crop_thumbnail_square: bool
+  duration_tolerance_seconds: int(0,120)
+  title_similarity: float(0.5,1.0)
+  on_duplicate: "list(quarantine|delete|keep)"
+  min_duration_seconds: int(0,3600)
+  max_duration_seconds: int(0,86400)
+  max_downloads_per_cycle: int(1,500)
+  sleep_between_downloads: int(0,300)
+  rate_limit: "str?"
+  cookies_file: "str?"
+  use_aria2c: bool
+  auto_update_ytdlp: bool
+  extra_args: "str?"
+  log_level: "list(trace|debug|info|notice|warning|error|fatal)"

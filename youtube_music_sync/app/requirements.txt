@@ -1,0 +1,6 @@
+# Pinned as the known-good baseline. yt-dlp extraction breaks whenever
+# YouTube changes, so the add-on upgrades this at startup when
+# auto_update_ytdlp is on - the pin is the floor, not the ceiling.
+yt-dlp==2026.8.19
+mutagen==1.48.1
+paho-mqtt==2.1.0
