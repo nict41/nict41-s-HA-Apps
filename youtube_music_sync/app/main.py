@@ -372,9 +372,16 @@ def main() -> int:
     signal.signal(signal.SIGINT, _handle_signal)
 
     _LOG.info("YouTube Music Sync starting.")
-    _LOG.info("Library: %s | playlists: %d | format: %s | every %d min | dry_run: %s",
+    # Every setting that has ever been reported as "not sticking" is named
+    # here. A configuration that silently reverted used to look identical in
+    # the log to one that was applied; now the two can be told apart.
+    _LOG.info("Library: %s | playlists: %d | format: %s | every %d min | "
+              "dry_run: %s | aria2c: %s | max/cycle: %d",
               cfg.music_dir, len(cfg.playlists), cfg.audio_format,
-              cfg.poll_interval_minutes, cfg.dry_run)
+              cfg.poll_interval_minutes, cfg.dry_run, cfg.use_aria2c,
+              cfg.max_downloads_per_cycle)
+    for url in cfg.playlists:
+        _LOG.info("  playlist: %s", url)
 
     problems = cfg.problems()
     publisher = Publisher(cfg)
