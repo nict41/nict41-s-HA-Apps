@@ -1,0 +1,47 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Camera Share
+#
+# Reads app options into the environment and starts the public camera page.
+#
+# Note there is deliberately no HA_URL here: that name collides with other
+# tooling in this stack. The app talks to Home Assistant over the Supervisor's
+# internal proxy (http://supervisor/core/api) using SUPERVISOR_TOKEN, which
+# the Supervisor injects because config.yaml asks for homeassistant_api.
+# HA_API exists only as an override for development and tests.
+# ==============================================================================
+
+declare camera_entity
+declare page_title
+declare fps
+declare access_key
+declare max_viewers
+
+camera_entity=$(bashio::config 'camera_entity')
+page_title=$(bashio::config 'page_title')
+fps=$(bashio::config 'fps')
+access_key=$(bashio::config 'access_key')
+max_viewers=$(bashio::config 'max_viewers')
+
+export CAMERA_ENTITY="${camera_entity}"
+export PAGE_TITLE="${page_title}"
+export FPS="${fps}"
+export ACCESS_KEY="${access_key}"
+export MAX_VIEWERS="${max_viewers}"
+
+bashio::log.info "Camera: ${camera_entity}"
+bashio::log.info "Frame rate: up to ${fps} fps per viewer, ${max_viewers} viewer(s) max"
+
+# Said here as well as in the app's own startup log, because this is the line
+# that lands in the app log before anything else and the page is about to be
+# published on the internet through a tunnel.
+if bashio::var.has_value "${access_key}"; then
+    bashio::log.info "Access key is set - the share link must carry ?key=<access key>"
+else
+    bashio::log.warning "No access key set - anyone who reaches this port can watch the camera"
+fi
+
+bashio::log.info "Starting Camera Share on port 8099..."
+
+cd /app || bashio::exit.nok "Could not change to /app directory"
+exec python3 -m uvicorn main:app --host 0.0.0.0 --port 8099

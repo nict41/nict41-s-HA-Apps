@@ -1,0 +1,42 @@
+configuration:
+  camera_entity:
+    name: Camera entity
+    description: >-
+      The one camera this page shows, e.g.
+      camera.centauri_carbon_2_chamber_camera. It is read through Home
+      Assistant, never from the printer directly, so the Elegoo
+      integration's frame hub stays the only thing connected to the
+      printer's camera. No other entity is ever reachable from this app.
+  page_title:
+    name: Page title
+    description: >-
+      The heading on the shared page and the browser tab title. Visible to
+      everyone you share the link with, so keep it anonymous if the page
+      will be public.
+  fps:
+    name: Frames per second
+    description: >-
+      The most frames each viewer is sent per second, and the rate asked of
+      Home Assistant. 5 is plenty for watching a print; lower it if the page
+      is being watched over a slow connection. This is a cap, not a
+      guarantee - the printer's camera sets the real rate.
+  access_key:
+    name: Access key
+    description: >-
+      A shared secret the page requires before it shows anything. Share the
+      link as https://<your hostname>/?key=<access key>; the browser then
+      remembers it in a cookie. Leave it blank and anyone who learns the
+      hostname can watch the camera, which is rarely what you want for a
+      page published through a tunnel.
+  max_viewers:
+    name: Maximum viewers
+    description: >-
+      How many people may watch at once. Extra viewers are turned away with
+      a "camera busy" page rather than being queued. Note this is purely to
+      limit this app's own bandwidth: the printer only ever sees one
+      connection no matter how many people are watching.
+network:
+  8099/tcp: >-
+    The public camera page. Point your Cloudflare tunnel's public hostname
+    at http://<your Home Assistant LAN IP>:8096 (or whichever host port you
+    map here). Nothing else needs forwarding.

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="referrer" content="no-referrer" />
+  <title>{{ page_title }}</title>
+  <!-- Inline so the page needs no second request: with a CSP of
+       default-src 'none' and one route per thing, a favicon file would be a
+       404 on every load. -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230c0e09'/><circle cx='8' cy='8' r='3.2' fill='none' stroke='%23c6f53c' stroke-width='1.4'/></svg>" />
+  <style>
+    /* The editorial-technical system the other apps in this repository use
+       (warm paper and near-black ink in light mode, near-black with a neon
+       lime signal accent in dark), cut down to what one page needs. Light
+       and dark follow the device. */
+    :root {
+      color-scheme: light dark;
+      --bg: #f0efe9; --surface: #f7f6f1; --border: #d7d5c9; --border-strong: #a9a698;
+      --text: #191b14; --text-muted: #565a4a; --text-faint: #828676;
+      --accent: #326f00; --accent-text: #2c5c04;
+      --warn: #8a5a00; --danger: #a1301f;
+      --font: "Helvetica Neue", Helvetica, "Arial Nova", Arial, "Segoe UI", Roboto, sans-serif;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, Consolas, monospace;
+      background: var(--bg);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c0e09; --surface: #12140d; --border: #262b1a; --border-strong: #414833;
+        --text: #e7ead9; --text-muted: #9ba189; --text-faint: #6e755c;
+        --accent: #c6f53c; --accent-text: #d1f764;
+        --warn: #e8c35a; --danger: #ff8a75;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100svh; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text);
+      font-family: var(--font); font-size: 15px; line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { width: 100%; max-width: 900px; margin: 0 auto; padding: 0 16px;
+      flex: 1; display: flex; flex-direction: column; }
+
+    /* Header: heavy bottom rule, uppercase title, monospace micro-label. */
+    header { padding: 18px 0 14px; border-bottom: 2px solid var(--text);
+      display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    h1 { margin: 0; font-size: 1rem; font-weight: 800; letter-spacing: 0.05em;
+      text-transform: uppercase; }
+    .status { margin-left: auto; display: inline-flex; align-items: center; gap: 0.5rem;
+      font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--text-muted); }
+    .dot { width: 9px; height: 9px; flex: none; background: var(--text-faint); }
+    .status[data-state="live"] { color: var(--accent-text); }
+    .status[data-state="live"] .dot { background: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+    .status[data-state="connecting"] { color: var(--warn); }
+    .status[data-state="connecting"] .dot { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+    .status[data-state="offline"], .status[data-state="busy"] { color: var(--danger); }
+    .status[data-state="offline"] .dot, .status[data-state="busy"] .dot { background: var(--danger); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+    @media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+
+    /* Viewport: fixed 4:3 frame so the page doesn't jump between the image
+       and the placeholder, and so a slow first frame doesn't reflow. */
+    .frame { position: relative; margin: 16px auto; width: 100%; background: var(--surface);
+      border: 1px solid var(--border); border-top: 2px solid var(--text);
+      aspect-ratio: 4 / 3; overflow: hidden;
+      /* Capping the width by the height left over keeps the 4:3 box whole and
+         the footer on screen on a laptop, without letterboxing on a phone. */
+      max-width: calc((100svh - 190px) * 4 / 3); }
+    .frame img { position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: contain; display: block; background: #000; }
+    .frame[data-show="placeholder"] img { visibility: hidden; }
+
+    .placeholder { position: absolute; inset: 0; display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 10px; padding: 24px; text-align: center; }
+    .frame[data-show="placeholder"] .placeholder { display: flex; }
+    .placeholder svg { width: 38px; height: 38px; color: var(--text-faint); }
+    .placeholder-title { font-family: var(--mono); font-size: 0.68rem;
+      letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-muted); }
+    .placeholder-note { font-size: 0.86rem; color: var(--text-faint); max-width: 24rem; margin: 0; }
+
+    footer { padding: 14px 0 22px; border-top: 1px solid var(--border);
+      display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline;
+      font-family: var(--mono); font-size: 0.62rem; letter-spacing: 0.14em;
+      text-transform: uppercase; color: var(--text-faint); }
+    footer .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>{{ page_title }}</h1>
+      <span class="status" id="status" data-state="connecting">
+        <span class="dot"></span><span id="status-text">Connecting</span>
+      </span>
+    </header>
+
+    <div class="frame" id="frame" data-show="stream">
+      <!-- No src in the markup on purpose: an MJPEG response never finishes,
+           so an <img> that starts with the page would keep the browser's
+           load event (and its loading spinner) pending forever. The script
+           attaches the stream once the page has finished loading. -->
+      <img id="stream" alt="Live camera view" />
+      <div class="placeholder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 3l18 18" />
+          <path d="M16 10.5V7a1 1 0 0 0-1-1H8.5" />
+          <path d="M5.5 6A1 1 0 0 0 5 7v10a1 1 0 0 0 1 1h9" />
+          <path d="M16 13.5l5 3.5V9l-2.5 1.75" />
+        </svg>
+        <div class="placeholder-title" id="placeholder-title">Camera offline</div>
+        <p class="placeholder-note" id="placeholder-note">
+          The printer's camera isn't sending anything right now. This page keeps
+          trying and will come back on its own.
+        </p>
+      </div>
+    </div>
+
+    <footer>
+      <span>Read-only view</span>
+      <span class="spacer"></span>
+      <span id="meta"></span>
+    </footer>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var STREAM_URL = {{ stream_url | tojson }};
+      var POLL_MS = 2000;
+      // The page's own retry, on top of the app's upstream backoff. Starts
+      // gently and doubles, so a camera that is off for an hour isn't being
+      // asked about every two seconds.
+      var RETRY_MIN_MS = 5000;
+      var RETRY_MAX_MS = 30000;
+      // Beyond this the newest frame is old news rather than a live view.
+      var STALE_S = 10;
+
+      var frame = document.getElementById("frame");
+      var img = document.getElementById("stream");
+      var statusEl = document.getElementById("status");
+      var statusText = document.getElementById("status-text");
+      var placeholderTitle = document.getElementById("placeholder-title");
+      var placeholderNote = document.getElementById("placeholder-note");
+      var meta = document.getElementById("meta");
+
+      var retryMs = RETRY_MIN_MS;
+      var lastAttach = Date.now();
+      var timer = null;
+
+      function setStatus(state, text) {
+        statusEl.setAttribute("data-state", state);
+        statusText.textContent = text;
+      }
+
+      function showStream() {
+        frame.setAttribute("data-show", "stream");
+      }
+
+      function showPlaceholder(title, note) {
+        frame.setAttribute("data-show", "placeholder");
+        placeholderTitle.textContent = title;
+        placeholderNote.textContent = note;
+      }
+
+      // Re-attaching the <img> is what re-opens the stream: the app only
+      // subscribes to the camera while at least one viewer is connected, so
+      // a page that has given up watching is a camera that is left alone.
+      function reattach() {
+        lastAttach = Date.now();
+        var sep = STREAM_URL.indexOf("?") === -1 ? "?" : "&";
+        img.src = STREAM_URL + sep + "t=" + Date.now();
+      }
+
+      function maybeReattach() {
+        if (Date.now() - lastAttach < retryMs) return;
+        retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+        reattach();
+      }
+
+      function poll() {
+        fetch("healthz", { cache: "no-store" })
+          .then(function (res) { return res.json(); })
+          .then(apply)
+          .catch(function () {
+            setStatus("offline", "No connection");
+            showPlaceholder(
+              "Can't reach the camera page",
+              "The connection to this page dropped. It will reconnect by itself."
+            );
+          });
+      }
+
+      function apply(data) {
+        var age = typeof data.last_frame_age === "number" ? data.last_frame_age : null;
+        var live = data.upstream === "live" && age !== null && age < STALE_S;
+
+        meta.textContent = data.viewers === 1
+          ? "1 watching"
+          : (data.viewers || 0) + " watching";
+
+        if (live) {
+          retryMs = RETRY_MIN_MS;
+          setStatus("live", "Live");
+          showStream();
+          return;
+        }
+
+        if (data.viewers >= data.max_viewers && !data.upstream_running) {
+          setStatus("busy", "Busy");
+          showPlaceholder(
+            "Camera busy",
+            "The maximum number of people are already watching. This page will "
+            + "join as soon as a slot frees up."
+          );
+          maybeReattach();
+          return;
+        }
+
+        if (data.upstream === "connecting" || (data.upstream === "idle" && !age)) {
+          setStatus("connecting", "Connecting");
+          showPlaceholder(
+            "Connecting",
+            "Waking the camera up. The first frame usually takes a few seconds."
+          );
+          maybeReattach();
+          return;
+        }
+
+        setStatus("offline", "Offline");
+        showPlaceholder(
+          "Camera offline",
+          "The printer's camera isn't sending anything right now. This page "
+          + "keeps trying and will come back on its own."
+        );
+        maybeReattach();
+      }
+
+      img.addEventListener("error", function () {
+        // A 401/403/503 on the stream, or the tunnel dropping. The next poll
+        // decides what to tell the visitor; the retry clock starts here.
+        lastAttach = Date.now();
+      });
+
+      // Nothing is watched while the tab is hidden: a phone in a pocket
+      // should not be holding a viewer slot, or the camera open.
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          clearInterval(timer);
+          timer = null;
+          img.removeAttribute("src");
+          setStatus("connecting", "Paused");
+          showPlaceholder(
+            "Paused",
+            "This tab is in the background, so it has let go of the camera. "
+            + "Come back to it and the view resumes."
+          );
+        } else if (timer === null) {
+          retryMs = RETRY_MIN_MS;
+          reattach();
+          timer = setInterval(poll, POLL_MS);
+          poll();
+        }
+      });
+
+      // Attaching the stream after `load` keeps the never-ending MJPEG
+      // response out of the page's own load, so the tab stops spinning even
+      // when the camera is down.
+      function start() {
+        reattach();
+        timer = setInterval(poll, POLL_MS);
+        poll();
+      }
+
+      if (document.readyState === "complete") {
+        start();
+      } else {
+        window.addEventListener("load", start);
+      }
+    })();
+  </script>
+</body>
+</html>
