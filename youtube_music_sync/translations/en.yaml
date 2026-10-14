@@ -93,6 +93,14 @@ configuration:
       Cap on how many tracks are fetched in one pass; the rest wait for the
       next cycle. Keeps the first run after adding a big playlist from looking
       like a scrape.
+  recheck_unavailable_days:
+    name: Re-check unavailable videos after (days)
+    description: >-
+      A video YouTube says is unavailable - private, removed, members-only,
+      geo-blocked or age-restricted - is retried less and less often instead
+      of every cycle: after 6 hours, a day, 3 days, a week, then at most this
+      many days. Set to 0 to stop re-checking it entirely. Captchas, rate
+      limits and network errors are unaffected and always retry next cycle.
   sleep_between_downloads:
     name: Pause between downloads (seconds)
     description: >-

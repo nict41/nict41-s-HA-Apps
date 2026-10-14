@@ -57,6 +57,7 @@ class CycleReport:
     collisions: int = 0
     failures: int = 0
     playlist_errors: int = 0
+    deferred: int = 0
     would_download: list[str] = field(default_factory=list)
 
     @property
@@ -113,11 +114,27 @@ def _plan_cycle(
     """Decide what to download, without downloading anything."""
     report = CycleReport()
     already = store.downloaded_ids()
+    # Videos YouTube has said are unavailable, backed off so they are not
+    # re-read every cycle. They are skipped before the plan is built, so they
+    # cost no max_downloads_per_cycle slot and no request.
+    deferred = store.deferred_ids()
+    retired = store.retired_ids()
     plan: list[tuple[downloader.PlaylistEntry, object]] = []
 
     for entry in entries:
         if entry.video_id in already:
             _LOG.debug("Already downloaded previously: %s", entry.title)
+            continue
+
+        if entry.video_id in retired:
+            _LOG.debug("Retired as unavailable, not re-checking: %s", entry.title)
+            report.deferred += 1
+            continue
+
+        if entry.video_id in deferred:
+            _LOG.debug("Unavailable last time, next check after %s: %s",
+                       deferred[entry.video_id], entry.title)
+            report.deferred += 1
             continue
 
         if cfg.min_duration and entry.duration and entry.duration < cfg.min_duration:
@@ -176,6 +193,31 @@ def _plan_cycle(
     return plan, report
 
 
+def _record_failure(cfg: Config, store: Store, entry, error: str) -> None:
+    """Record a failed download, backing off if the video itself is the problem.
+
+    A transient failure (captcha, rate limit, dropped connection) is retried
+    on the next cycle exactly as before. One that means the video cannot be
+    fetched escalates through a backoff, so a playlist full of dead entries
+    stops consuming the cycle's download budget.
+    """
+    kind = downloader.classify_failure(error)
+    permanent = kind == downloader.FAILURE_UNAVAILABLE
+    attempts, retry_after = store.record_failure(
+        entry.video_id, playlist=entry.playlist, title=entry.title,
+        uploader=entry.uploader, duration=entry.duration,
+        permanent=permanent, error=error, cap_days=cfg.recheck_unavailable_days,
+    )
+    if not permanent:
+        return
+    if retry_after:
+        _LOG.info("  %r looks unavailable (attempt %d) - not checking again until %s.",
+                  entry.title, attempts, retry_after)
+    else:
+        _LOG.info("  %r looks unavailable - retired, recheck_unavailable_days is 0.",
+                  entry.title)
+
+
 def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report: CycleReport) -> None:
     total = len(plan)
     for position, (entry, _pre_match) in enumerate(plan, start=1):
@@ -188,9 +230,7 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
             result = downloader.download(cfg, entry)
         except Exception as err:  # a crashed subprocess must not kill the loop
             _LOG.error("Download of %r raised %s", entry.title, err)
-            store.record_download(entry.video_id, playlist=entry.playlist, title=entry.title,
-                                  uploader=entry.uploader, duration=entry.duration,
-                                  path=None, status=STATUS_FAILED)
+            _record_failure(cfg, store, entry, str(err))
             report.failures += 1
             continue
 
@@ -204,9 +244,7 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
 
         if not result.ok or not result.path:
             _LOG.error("Download failed: %r - %s", entry.title, result.error)
-            store.record_download(entry.video_id, playlist=entry.playlist, title=entry.title,
-                                  uploader=entry.uploader, duration=entry.duration,
-                                  path=None, status=STATUS_FAILED)
+            _record_failure(cfg, store, entry, result.error or "")
             report.failures += 1
             continue
 
@@ -354,9 +392,10 @@ def run_cycle(cfg: Config, store: Store, publisher: Publisher) -> CycleReport:
 
     store.set_meta("last_run", _utc_now())
     _LOG.info("Cycle done: %d downloaded, %d already owned, %d near matches kept, "
-              "%d duplicates caught after download, %d failed.",
+              "%d duplicates caught after download, %d failed, "
+              "%d skipped as unavailable.",
               report.downloaded, report.duplicates, report.near_misses,
-              report.duplicates_after_download, report.failures)
+              report.duplicates_after_download, report.failures, report.deferred)
     _publish(cfg, store, publisher, "idle", report)
     return report
 

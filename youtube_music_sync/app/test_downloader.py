@@ -161,3 +161,37 @@ def test_fetch_playlist_raises_with_the_last_error_line(tmp_path, monkeypatch):
     monkeypatch.setattr(downloader, "_run", runner)
     with pytest.raises(RuntimeError, match="playlist is private"):
         downloader.fetch_playlist(cfg(), "URL")
+
+
+# --------------------------------------------------- failure classification
+
+@pytest.mark.parametrize("message", [
+    "ERROR: [youtube] abc: Video unavailable",
+    "ERROR: [youtube] abc: Private video. Sign in if you've been granted access to this video",
+    "ERROR: [youtube] abc: This video has been removed by the uploader",
+    "ERROR: [youtube] abc: Join this channel to get access to members-only content",
+    "ERROR: [youtube] abc: The uploader has not made this video available in your country",
+    "ERROR: [youtube] abc: This video is no longer available due to a copyright claim",
+    "ERROR: [youtube] abc: Sign in to confirm your age. This video may be inappropriate for some users.",
+    "ERROR: [youtube] abc: The account associated with this video has been terminated",
+])
+def test_unavailable_messages_are_classified_permanent(message):
+    assert downloader.classify_failure(message) == downloader.FAILURE_UNAVAILABLE
+
+
+@pytest.mark.parametrize("message", [
+    # The one that matters most: a bot challenge reads like an age gate but is
+    # a rate limit, and must never retire a track.
+    "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies-from-browser",
+    "ERROR: unable to download video data: HTTP Error 429: Too Many Requests",
+    "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+    "ERROR: aria2c exited with code 22",
+    "ERROR: [youtube] abc: Unable to download webpage: The read operation timed out",
+    "ERROR: [youtube] abc: HTTP Error 503: Service Unavailable",
+    "ERROR: Connection reset by peer",
+    "",
+    None,
+    "ERROR: something nobody has seen before",
+])
+def test_transient_and_unknown_messages_are_retried(message):
+    assert downloader.classify_failure(message) == downloader.FAILURE_TRANSIENT

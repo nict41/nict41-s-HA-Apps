@@ -19,6 +19,83 @@ UNAVAILABLE_TITLES = frozenset(
     {"[private video]", "[deleted video]", "[unavailable video]", "[age restricted]"}
 )
 
+FAILURE_TRANSIENT = "transient"
+FAILURE_UNAVAILABLE = "unavailable"
+
+# Failures meaning "this video cannot be downloaded", as opposed to "that
+# attempt did not work". Only the first kind is worth backing off from: the
+# second is a captcha, a rate limit or a flaky network, and retrying next
+# cycle is exactly right.
+#
+# These are matched against yt-dlp's own last line of output, so they track
+# its wording rather than YouTube's. Wording drifts; an unrecognised message
+# is treated as transient, which costs a retry rather than silently retiring
+# a track that was only briefly unreachable.
+_TRANSIENT_PATTERNS = (
+    # Checked FIRST, because some of these read like permanent failures.
+    # "Sign in to confirm you're not a bot" is a rate-limit challenge, not an
+    # age gate, and must never be allowed to retire a track.
+    "not a bot",
+    "429",
+    "too many requests",
+    "403",
+    "forbidden",
+    "503",
+    "service unavailable",
+    "aria2c exited",
+    "unable to download webpage",
+    "unable to download api page",
+    "temporary failure",
+    "timed out",
+    "timeout",
+    "connection",
+    "network",
+    "read error",
+    "incomplete",
+    "giving up after",
+)
+
+_UNAVAILABLE_PATTERNS = (
+    "video unavailable",
+    "this video is unavailable",
+    # Covers both "not available in your country" and yt-dlp's actual
+    # wording, "has not made this video available in your country", as well
+    # as "unavailable in your country".
+    "available in your country",
+    "private video",
+    "is private",
+    "has been removed",
+    "removed by the uploader",
+    "no longer available",
+    "account associated with this video has been terminated",
+    "members-only",
+    "members only",
+    "join this channel",
+    "not available from your location",
+    "who has blocked it in your country",
+    "copyright",
+    "age-restricted",
+    "confirm your age",
+    "inappropriate for some users",
+)
+
+
+def classify_failure(error: str | None) -> str:
+    """Decide whether a failed download is worth repeating next cycle.
+
+    Returns FAILURE_UNAVAILABLE only when YouTube said something that means
+    the video itself cannot be fetched. Everything else, including anything
+    unrecognised, is FAILURE_TRANSIENT.
+    """
+    text = (error or "").lower()
+    if not text:
+        return FAILURE_TRANSIENT
+    if any(pattern in text for pattern in _TRANSIENT_PATTERNS):
+        return FAILURE_TRANSIENT
+    if any(pattern in text for pattern in _UNAVAILABLE_PATTERNS):
+        return FAILURE_UNAVAILABLE
+    return FAILURE_TRANSIENT
+
 # Centre-crop the artwork to a square before embedding. YouTube thumbnails are
 # 16:9, which most music players letterbox or crop badly; album art is square.
 # The if() guards a portrait thumbnail, and the commas inside it are escaped

@@ -282,3 +282,90 @@ def test_report_problem_flag():
     assert main.CycleReport(failures=1).problem
     assert main.CycleReport(playlist_errors=1).problem
     assert not main.CycleReport(duplicates=5, near_misses=2).problem
+
+
+# ------------------------------------------- unavailable videos and the budget
+
+def test_an_unavailable_video_is_dropped_from_later_plans(tmp_path):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    store.record_failure("aaaaaaaaaaa", playlist="P", title="T", uploader="C",
+                         duration=None, permanent=True,
+                         error="ERROR: [youtube] aaaaaaaaaaa: Video unavailable",
+                         cap_days=config.recheck_unavailable_days)
+    plan, report = _plan(config, store, LibraryIndex(), [entry()])
+    assert plan == []
+    assert report.deferred == 1
+    assert report.planned == 0
+
+
+def test_a_transiently_failed_video_is_still_planned(tmp_path):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    store.record_failure("aaaaaaaaaaa", playlist="P", title="T", uploader="C",
+                         duration=None, permanent=False,
+                         error="ERROR: aria2c exited with code 22",
+                         cap_days=config.recheck_unavailable_days)
+    plan, report = _plan(config, store, LibraryIndex(), [entry()])
+    assert len(plan) == 1
+    assert report.deferred == 0
+
+
+def test_dead_entries_do_not_consume_the_per_cycle_budget(tmp_path):
+    """The actual complaint: dead videos were eating the download slots."""
+    config = cfg(tmp_path, max_downloads_per_cycle=3)
+    store = store_for(tmp_path)
+    dead = [entry(video_id=f"dead{i:07d}", title=f"Dead {i}") for i in range(5)]
+    live = [entry(video_id=f"live{i:07d}", title=f"Live Song {i}") for i in range(3)]
+    for e in dead:
+        store.record_failure(e.video_id, playlist="P", title=e.title, uploader="C",
+                             duration=None, permanent=True,
+                             error="ERROR: [youtube] x: Private video",
+                             cap_days=config.recheck_unavailable_days)
+
+    plan, report = _plan(config, store, LibraryIndex(), dead + live)
+
+    # All three slots go to downloadable tracks, not to the dead ones that
+    # happen to come first in the playlist.
+    assert len(plan) == 3
+    assert [e.video_id for e, _ in plan] == [e.video_id for e in live]
+    assert report.deferred == 5
+
+
+def test_a_retired_video_is_never_planned_again(tmp_path):
+    config = cfg(tmp_path, recheck_unavailable_days=0)
+    store = store_for(tmp_path)
+    store.record_failure("aaaaaaaaaaa", playlist="P", title="T", uploader="C",
+                         duration=None, permanent=True, error="Video unavailable",
+                         cap_days=0)
+    plan, report = _plan(config, store, LibraryIndex(), [entry()])
+    assert plan == [] and report.deferred == 1
+
+
+def test_an_unavailable_download_backs_itself_off(tmp_path, monkeypatch):
+    """End to end: the loop records the failure and the next plan skips it."""
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    monkeypatch.setattr(main.downloader, "download", lambda c, e: DownloadResult(
+        ok=False, error="ERROR: [youtube] aaaaaaaaaaa: Video unavailable"))
+    index = LibraryIndex()
+
+    plan, report = _plan(config, store, index, [entry()])
+    assert len(plan) == 1
+    main._run_downloads(config, store, index, plan, report)
+    assert report.failures == 1
+
+    # Same playlist, next cycle: now skipped rather than retried.
+    plan2, report2 = _plan(config, store, index, [entry()])
+    assert plan2 == [] and report2.deferred == 1
+
+
+def test_a_transient_download_failure_is_retried_next_cycle(tmp_path, monkeypatch):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    monkeypatch.setattr(main.downloader, "download", lambda c, e: DownloadResult(
+        ok=False, error="ERROR: aria2c exited with code 22"))
+    index = LibraryIndex()
+
+    plan, report = _plan(config, store, index, [entry()])
+    main._run_downloads(config, store, index, plan, report)
+    assert report.failures == 1
+
+    plan2, report2 = _plan(config, store, index, [entry()])
+    assert len(plan2) == 1 and report2.deferred == 0
