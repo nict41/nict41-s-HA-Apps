@@ -1,0 +1,85 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# YouTube Music Sync
+#
+# Reads add-on options, resolves the MQTT broker the Supervisor injected as a
+# service (optional - downloads work without it), optionally self-updates
+# yt-dlp, then hands over to the Python sync loop.
+# ==============================================================================
+
+bashio::log.level "$(bashio::config 'log_level')"
+
+# ---------------------------------------------------------------------------
+# Options -> environment. Lists are passed as JSON so Python parses them
+# without any shell-quoting games over playlist URLs.
+# ---------------------------------------------------------------------------
+# bashio::config on a list returns newline-separated values, which would
+# break on any URL containing whitespace; read the raw options JSON instead
+# so the array reaches Python exactly as entered.
+YMS_PLAYLISTS="$(bashio::addon.config | jq -c '.playlists // []')"
+export YMS_PLAYLISTS
+
+export YMS_MUSIC_DIR="$(bashio::config 'music_dir')"
+export YMS_POLL_INTERVAL_MINUTES="$(bashio::config 'poll_interval_minutes')"
+export YMS_DRY_RUN="$(bashio::config 'dry_run')"
+export YMS_AUDIO_FORMAT="$(bashio::config 'audio_format')"
+export YMS_OUTPUT_TEMPLATE="$(bashio::config 'output_template')"
+export YMS_SPONSORBLOCK="$(bashio::config 'sponsorblock_remove_offtopic')"
+export YMS_EMBED_THUMBNAIL="$(bashio::config 'embed_thumbnail')"
+export YMS_CROP_THUMBNAIL_SQUARE="$(bashio::config 'crop_thumbnail_square')"
+export YMS_DURATION_TOLERANCE="$(bashio::config 'duration_tolerance_seconds')"
+export YMS_TITLE_SIMILARITY="$(bashio::config 'title_similarity')"
+export YMS_ON_DUPLICATE="$(bashio::config 'on_duplicate')"
+export YMS_MIN_DURATION="$(bashio::config 'min_duration_seconds')"
+export YMS_MAX_DURATION="$(bashio::config 'max_duration_seconds')"
+export YMS_MAX_DOWNLOADS_PER_CYCLE="$(bashio::config 'max_downloads_per_cycle')"
+export YMS_SLEEP_BETWEEN_DOWNLOADS="$(bashio::config 'sleep_between_downloads')"
+export YMS_RATE_LIMIT="$(bashio::config 'rate_limit')"
+export YMS_COOKIES_FILE="$(bashio::config 'cookies_file')"
+export YMS_USE_ARIA2C="$(bashio::config 'use_aria2c')"
+export YMS_EXTRA_ARGS="$(bashio::config 'extra_args')"
+export YMS_LOG_LEVEL="$(bashio::config 'log_level')"
+export YMS_DATA_DIR="/data"
+
+# ---------------------------------------------------------------------------
+# MQTT is optional. mqtt:want means we can start before the broker exists -
+# give it a short grace period, then carry on regardless: sensors are a
+# nice-to-have, mirroring the playlists is the actual job.
+# ---------------------------------------------------------------------------
+for attempt in $(seq 1 15); do
+    if bashio::services.available "mqtt"; then
+        break
+    fi
+    bashio::log.debug "MQTT service not available yet (${attempt}/15)..."
+    sleep 2
+done
+
+if bashio::services.available "mqtt"; then
+    export YMS_MQTT_HOST="$(bashio::services mqtt 'host')"
+    export YMS_MQTT_PORT="$(bashio::services mqtt 'port')"
+    export YMS_MQTT_USER="$(bashio::services mqtt 'username')"
+    export YMS_MQTT_PASS="$(bashio::services mqtt 'password')"
+    bashio::log.info "MQTT broker at ${YMS_MQTT_HOST}:${YMS_MQTT_PORT} - sensors will be published."
+else
+    bashio::log.warning "No MQTT service available - running without Home Assistant sensors."
+    bashio::log.warning "Install/start the Mosquitto broker add-on to get them."
+fi
+
+# ---------------------------------------------------------------------------
+# yt-dlp self-update. YouTube breaks extraction every few weeks, so a version
+# pinned at image-build time goes stale and starts failing every download.
+# A failed update is not fatal: the pinned version in the image still runs.
+# ---------------------------------------------------------------------------
+if bashio::config.true 'auto_update_ytdlp'; then
+    bashio::log.info "Updating yt-dlp to the latest release..."
+    if pip3 install --no-cache-dir --break-system-packages --upgrade yt-dlp; then
+        bashio::log.info "yt-dlp is now $(yt-dlp --version 2>/dev/null || echo 'unknown')"
+    else
+        bashio::log.warning "yt-dlp update failed - continuing with the image's pinned version $(yt-dlp --version 2>/dev/null || echo 'unknown')."
+    fi
+else
+    bashio::log.info "yt-dlp self-update disabled; using pinned $(yt-dlp --version 2>/dev/null || echo 'unknown')."
+fi
+
+cd /app || bashio::exit.nok "Could not change to /app"
+exec python3 -u main.py

@@ -9,14 +9,14 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        app: [print_timelapse, parcel_tracker, kiwix]
+        app: [print_timelapse, parcel_tracker, kiwix, youtube_music_sync]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install ffmpeg
-        if: matrix.app == 'print_timelapse'
+        if: matrix.app == 'print_timelapse' || matrix.app == 'youtube_music_sync'
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Install dependencies
         working-directory: ${{ matrix.app }}/app

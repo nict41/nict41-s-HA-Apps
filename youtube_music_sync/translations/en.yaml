@@ -1,0 +1,134 @@
+configuration:
+  playlists:
+    name: Playlists
+    description: >-
+      Public YouTube playlist URLs to monitor. One per line. Every cycle each
+      playlist is listed and any entry the music library does not already have
+      is downloaded. The same track appearing on two playlists is downloaded
+      once.
+  music_dir:
+    name: Music folder
+    description: >-
+      Where downloaded tracks are written. Must be under /media or /share -
+      that is where Home Assistant network storage mounts appear (Settings >
+      System > Storage; a "Media" mount shows as /media/<mount name>, a "Share"
+      mount as /share/<mount name>). The whole folder, including subfolders, is
+      also what gets scanned for existing tracks.
+  poll_interval_minutes:
+    name: Check every (minutes)
+    description: >-
+      How often to re-read the playlists and download anything new. Default 60.
+      Listing a playlist is one cheap request, so hourly costs very little.
+  dry_run:
+    name: Dry run
+    description: >-
+      Report what would be downloaded and what is already owned, without
+      writing anything. On by default so the first run can be checked against
+      your library before files start landing in it. Turn off once the log
+      looks right.
+  audio_format:
+    name: Audio format
+    description: >-
+      "best" keeps YouTube's own audio stream (usually Opus or AAC) and only
+      remuxes it - no re-encode, best quality, smallest files. Choose mp3 only
+      if something in your chain cannot play Opus or M4A; it re-encodes lossy
+      audio into a different lossy format.
+  output_template:
+    name: Filename template
+    description: >-
+      yt-dlp output template for saved files. Default "%(title)s.%(ext)s".
+      Match whatever naming the rest of the library uses. Add %(id)s - e.g.
+      "%(title)s [%(id)s].%(ext)s" - if different tracks keep colliding on the
+      same filename.
+  sponsorblock_remove_offtopic:
+    name: Trim non-music segments
+    description: >-
+      Use SponsorBlock's "music_offtopic" category to cut the talking intro and
+      outro off music videos, so the saved track starts on the music. Shifts the
+      resulting duration slightly, which the duration tolerance allows for.
+  embed_thumbnail:
+    name: Embed artwork
+    description: >-
+      Embed the video thumbnail into the file as cover art.
+  crop_thumbnail_square:
+    name: Crop artwork square
+    description: >-
+      Centre-crop the thumbnail to a square before embedding it. YouTube
+      thumbnails are 16:9, which most music players letterbox or crop badly.
+  duration_tolerance_seconds:
+    name: Duration tolerance (seconds)
+    description: >-
+      How far two durations may differ and still count as the same recording.
+      Default 5. A matching title is never enough on its own - the duration has
+      to agree too. Raise it if tracks you own are being downloaded again;
+      lower it if different edits are being treated as duplicates.
+  title_similarity:
+    name: Title match threshold
+    description: >-
+      How close two titles must be before they are compared on duration at all
+      (0.5-1.0, default 0.87). 1.0 demands an exact match after normalization.
+      Raise it if things you wanted are being skipped; lower it if things you
+      own are being downloaded again.
+  on_duplicate:
+    name: When a duplicate slips through
+    description: >-
+      What to do with a track only revealed as a duplicate after it was
+      downloaded (which happens when the playlist listing had no duration).
+      "quarantine" moves it into a .yt_duplicates folder inside the music
+      folder, "delete" removes it, "keep" leaves it in the library. Duplicates
+      caught before downloading are always skipped outright.
+  min_duration_seconds:
+    name: Minimum length (seconds)
+    description: >-
+      Skip anything shorter than this - shorts, stings, trailers. Default 60.
+      Set to 0 to disable.
+  max_duration_seconds:
+    name: Maximum length (seconds)
+    description: >-
+      Skip anything longer than this - hour-long mixes, full album uploads. 0
+      (the default) disables the check.
+  max_downloads_per_cycle:
+    name: Max downloads per cycle
+    description: >-
+      Cap on how many tracks are fetched in one pass; the rest wait for the
+      next cycle. Keeps the first run after adding a big playlist from looking
+      like a scrape.
+  sleep_between_downloads:
+    name: Pause between downloads (seconds)
+    description: >-
+      Wait between downloads. Default 5. Raise it if YouTube starts challenging
+      requests with "Sign in to confirm you're not a bot".
+  rate_limit:
+    name: Bandwidth limit
+    description: >-
+      Cap the download rate, e.g. "1M" or "500K". Leave empty for unlimited.
+  cookies_file:
+    name: Cookies file
+    description: >-
+      Path to an exported cookies.txt, used to get past YouTube bot checks. A
+      bare filename is read from this add-on's own config folder
+      (/addon_configs/youtube_music_sync/). Leave empty if downloads work
+      without it.
+  use_aria2c:
+    name: Use aria2c
+    description: >-
+      Download with aria2c instead of yt-dlp's built-in downloader -
+      multi-connection and more robust on flaky fragments.
+  auto_update_ytdlp:
+    name: Update yt-dlp on start
+    description: >-
+      Upgrade yt-dlp to the latest release each time the add-on starts. Leave
+      this on: YouTube changes how extraction works every few weeks, and a
+      version frozen at image-build time eventually fails every download. A
+      failed update is not fatal - the version baked into the image still runs.
+  extra_args:
+    name: Extra yt-dlp arguments
+    description: >-
+      Extra command-line flags passed to yt-dlp, appended last so they override
+      everything above. Useful for carrying over flags already tuned elsewhere,
+      e.g. "--sleep-requests 1".
+  log_level:
+    name: Log level
+    description: >-
+      How much detail to log. "debug" logs every yt-dlp command line, which is
+      what to send if something needs diagnosing.
