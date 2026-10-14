@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.4
+
+- Fix the add-on showing "Error" after a normal stop. The stop handlers only
+  recognised a stop when a process died of SIGTERM outright, but neither main
+  process does: nginx treats SIGTERM as a fast shutdown and exits 0, and Vite
+  catches it and exits 143 (128 + SIGTERM). So both clean exits were read as
+  crashes, and the dev server's `exited with code 143, stopping add-on`
+  recorded 143 as the container's exit code. Those exits now count as a
+  requested stop and let s6-overlay finish shutting down with code 0. A real
+  crash (any other code, or another signal) still stops the add-on with its
+  code as before.
+- The session login handler treats a caught SIGTERM the same way, and the
+  diagnostics sink no longer logs a misleading "restarting" warning while the
+  add-on is stopping.
+
 ## 0.3.3
 
 - Ask for the ingress path under whichever name the base image's bashio
