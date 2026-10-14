@@ -4,10 +4,13 @@
 declare exit_code=${1}
 declare signal=${2}
 
-if [[ "${exit_code}" -eq 256 && "${signal}" -eq 15 ]]; then
-    # Killed by SIGTERM: a normal/requested stop, not a crash. Let s6-overlay's
-    # own shutdown finish with exit code 0 instead of forcing a halt here,
-    # which would make the add-on show as "Error" in the UI on a clean stop.
+# A requested stop arrives as SIGTERM. Node dies of it outright only when
+# nothing listens for it (256/15); Vite does listen, and answers by calling
+# process.exit(143) — 128 + SIGTERM — so that is the code a clean stop
+# actually produces. Neither is a crash. Let s6-overlay's own shutdown finish
+# with exit code 0 instead of forcing a halt here, which would make the add-on
+# show as "Error" in the UI on a clean stop.
+if [[ ( "${exit_code}" -eq 256 && "${signal}" -eq 15 ) || "${exit_code}" -eq 143 ]]; then
     bashio::log.info "God's Eye View stopped"
     exit 0
 fi
