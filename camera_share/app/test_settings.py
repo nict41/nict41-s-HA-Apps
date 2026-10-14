@@ -1,5 +1,7 @@
 """Options handling, and the safety constants that protect the printer."""
 
+from pathlib import Path
+
 import pytest
 
 import settings
@@ -36,13 +38,23 @@ def test_malformed_entity_ids_fall_back_to_the_default(monkeypatch, value):
 # ── Numbers ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("raw,expected", [
-    ("1", 1), ("5", 5), ("15", 15),
-    ("0", 1), ("99", 15),          # clamped to config.yaml's int(1,15)
-    ("", 5), ("banana", 5),        # unset or nonsense -> the default
+    ("1", 1), ("5", 5), ("10", 10),
+    ("0", 1), ("15", 10), ("99", 10),   # clamped to config.yaml's int(1,10)
+    ("", 5), ("banana", 5),             # unset or nonsense -> the default
 ])
 def test_fps_is_clamped_to_the_schema(monkeypatch, raw, expected):
     monkeypatch.setenv("FPS", raw)
     assert settings.fps() == expected
+
+
+def test_fps_is_capped_at_ten():
+    """A camera-safety limit, not a preference: it stays at 10 until a full
+    idle test has passed on the real printer. Both the schema and the
+    clamp have to agree, or one of them silently stops mattering."""
+    assert settings.FPS_BOUNDS == (1, 10)
+
+    config = (Path(__file__).resolve().parents[1] / "config.yaml").read_text()
+    assert "fps: int(1,10)" in config
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -125,6 +137,10 @@ def test_backoff_and_stall_values_are_sane():
     assert settings.BACKOFF_MAX_SECONDS <= 120.0
     assert settings.BACKOFF_JITTER > 0
     assert settings.STALL_SECONDS >= 5.0
+    # Headers have to be given longer than a frame: the hub answering slowly
+    # under load is not the hub being stuck.
+    assert settings.HEADERS_SECONDS > settings.STALL_SECONDS
+    assert settings.CONNECT_SECONDS > 0
     assert settings.IDLE_SHUTDOWN_SECONDS > 0
     # Shorter than the integration's own 60 s hub shutdown, so this app is
     # never the thing holding the printer's camera open.

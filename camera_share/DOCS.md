@@ -63,12 +63,30 @@ leaves the container.
 | `camera_entity` | `camera.centauri_carbon_2_chamber_camera` | The one camera to share. |
 | `page_title` | `3D Printer Cam` | Heading and tab title. Everyone you share the link with sees it. |
 | `access_key` | _(blank)_ | Shared secret the page demands. **Set this.** |
-| `fps` | `5` | Cap on frames per second, per viewer, and the rate asked of Home Assistant. |
+| `fps` | `5` | Cap on frames per second, per viewer, and the rate asked of Home Assistant. Limited to **10** — see below. |
 | `max_viewers` | `5` | How many people may watch at once. |
 
-The app listens on container port `8099`, mapped to host port **8096** by
-default (8095 is already taken by Pingvin Share). Change it on the app's
-**Network** tab if you need to.
+#### The host port is whatever the Network tab says
+
+The app listens on container port `8099`. The **host** port is what a
+Cloudflare tunnel has to point at, and the only place that is ever
+authoritative is this app's own **Network** tab.
+
+This app *ships* a default of **8096** (8095 is already taken by Pingvin
+Share), but a default only applies to a fresh install. An app that already
+existed on the machine under the same slug — a local copy you were running
+before, say — keeps the port mapping it already had, which is usually
+`8099 → 8099`. Anyone can also change it by hand.
+
+So: open **Network**, read the host port, use that. The app also logs it at
+startup:
+
+```
+Point the Cloudflare tunnel at http://<Home Assistant LAN IP>:8099
+```
+
+The rest of this page writes the port as **8096** because that is the
+default; substitute whatever your Network tab actually shows.
 
 ### 2. Set an access key
 
@@ -78,7 +96,19 @@ is blank, because the page is about to be published on the internet.
 
 Without a key, anyone who learns the hostname can watch your printer.
 
-### 3. Point a Cloudflare tunnel at it
+### 3. Leave `fps` alone until you have tested once
+
+`fps` is capped at **10**, not because 10 is a bandwidth limit but because
+this app's whole job is to be gentle with a camera whose firmware crashes
+when it is over-connected. The default of **5** is plenty for watching a
+print.
+
+Raise it only after a full idle test has passed on the real printer (open
+the page alone, then 2–3 viewers, and confirm the frame hub still shows one
+connection). Anything above 10 needs the limit in `config.yaml` changed
+first, which is deliberate.
+
+### 4. Point a Cloudflare tunnel at it
 
 In the **Cloudflare Zero Trust** dashboard, open **Networks → Tunnels**, pick
 the tunnel the Cloudflared app runs, and add a **public hostname**:
@@ -96,7 +126,7 @@ its own container and `localhost` there is not Home Assistant.
 Nothing else needs forwarding, and this app is the only thing behind that
 hostname: the tunnel never sees Home Assistant itself.
 
-### 4. Share the link
+### 5. Share the link
 
 ```
 https://printer.yourdomain.com/?key=<your access key>
@@ -110,7 +140,7 @@ URL, so it still works for anyone who blocks cookies outright.
 A wrong key gets `403`, a missing one `401`, and neither page says anything
 about what the key is.
 
-### 5. Optional: put Cloudflare Access in front of it
+### 6. Optional: put Cloudflare Access in front of it
 
 If you would rather hand out logins than a key, add a **Cloudflare Access**
 policy to that hostname (e.g. one-time PIN to a list of email addresses).
@@ -171,10 +201,31 @@ carry it; the printer sees one connection either way.
 - `No SUPERVISOR_TOKEN` — reinstall the app; it is granted the Home
   Assistant API by its own config.
 
+**"the frame hub is most likely stuck".** Home Assistant accepted the
+connection and then sent nothing at all — not even response headers — for
+20 seconds. That is the frame hub wedged rather than the camera being off:
+a camera that is merely down answers and then goes quiet, which is reported
+as "camera server has most likely stopped sending" instead.
+
+Reload the integration (**Settings → Devices & Services → Elegoo →
+Reload**). If that doesn't clear it, power-cycle the printer **while it is
+not printing**.
+
+**The app log says `Camera subscription failed: <SomeName>`.** The name is
+the diagnosis, and the common ones are:
+
+| Name | What it means |
+|---|---|
+| `ReadTimeout` | Covered above — see the specific message on the line, which says whether it was headers or mid-stream. |
+| `ConnectTimeout` / `ConnectError` | The app couldn't reach Home Assistant's own API. Unusual, since that is an internal Supervisor address. |
+| `RemoteProtocolError` | Home Assistant closed the stream mid-response. Normally harmless; the app reconnects. |
+
 **Nothing loads through the tunnel but the LAN address works.** The tunnel's
-public hostname is pointing somewhere else. It must be
-`http://<HA LAN IP>:8096`, not `https://`, not `localhost`, not Home
-Assistant's own port.
+public hostname is pointing somewhere else. It must be plain `http://`, the
+Home Assistant machine's **LAN IP** (not `localhost` — the tunnel runs in
+its own container), and **the host port from this app's Network tab**,
+which may not be the 8096 default. Check the app's startup log: it prints
+the address to use.
 
 **The link works once and then asks for the key again.** The cookie was
 refused (private browsing, or a cookie-blocking extension). Share the full

@@ -41,6 +41,21 @@ from mjpeg import MjpegError, MjpegParser, boundary_from_content_type
 
 _LOG = logging.getLogger("camera_share.upstream")
 
+
+def describe(exc: BaseException) -> str:
+    """An exception as a line worth logging: class name, then message.
+
+    `str(exc)` alone is useless for exactly the failures that matter here.
+    httpx's timeout exceptions carry an empty message, so a real stuck-hub
+    incident logged as "Camera subscription failed: " and hid that it was a
+    ReadTimeout. The class name is the diagnosis; the message, when there
+    is one, is the detail.
+    """
+    text = str(exc).strip()
+    name = type(exc).__name__
+    return f"{name}: {text}" if text else name
+
+
 IDLE = "idle"
 CONNECTING = "connecting"
 LIVE = "live"
@@ -177,18 +192,39 @@ class Upstream:
         if reader is not None and not reader.done():
             reader.cancel()
             try:
-                await reader
+                await asyncio.wait_for(reader, timeout=settings.CLOSE_SECONDS)
             except asyncio.CancelledError:
                 pass
+            except asyncio.TimeoutError:
+                # The reader is almost always cancelled in the middle of an
+                # HTTP request, and httpx's unwinding of one can block. Let
+                # it go rather than hold up a restart or the idle shutdown.
+                #
+                # This cannot turn into a second subscription: the task has
+                # been cancelled, so its loop is unwinding and will never
+                # open another request. The most it still holds is the one
+                # socket it was already closing.
+                _LOG.warning("The camera reader did not stop within %.0fs - "
+                             "carrying on without it", settings.CLOSE_SECONDS)
 
     async def aclose(self) -> None:
         idle, self._idle_task = self._idle_task, None
         if idle is not None:
             idle.cancel()
         await self.stop()
-        if self._client is not None:
-            await self._client.aclose()
-            self._client = None
+        client, self._client = self._client, None
+        if client is not None:
+            try:
+                await asyncio.wait_for(client.aclose(),
+                                       timeout=settings.CLOSE_SECONDS)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                # Same reason as above: the pool can refuse to drain after a
+                # cancelled request. The sockets go when the process does.
+                _LOG.warning("The HTTP client did not close within %.0fs - "
+                             "leaving it to the process exit",
+                             settings.CLOSE_SECONDS)
+            except Exception as exc:  # noqa: BLE001 - shutdown never raises
+                _LOG.warning("Closing the HTTP client failed: %s", describe(exc))
 
     # ── Frame delivery ──────────────────────────────────────────────────────
 
@@ -231,8 +267,8 @@ class Upstream:
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:  # noqa: BLE001 - every failure retries
-                    self._error = str(exc)
-                    _LOG.warning("Camera subscription failed: %s", exc)
+                    self._error = describe(exc)
+                    _LOG.warning("Camera subscription failed: %s", self._error)
 
                 self._state = OFFLINE
                 delay = backoff * (1.0 + random.uniform(0.0, settings.BACKOFF_JITTER))
@@ -249,8 +285,9 @@ class Upstream:
             # stay open. Silence is caught by the stall watchdog below, which
             # is explicit rather than left to the transport.
             self._client = httpx.AsyncClient(
-                timeout=httpx.Timeout(None, connect=10.0,
-                                      read=settings.STALL_SECONDS * 2),
+                timeout=httpx.Timeout(None,
+                                      connect=settings.CONNECT_SECONDS,
+                                      read=settings.HEADERS_SECONDS),
             )
         return self._client
 
@@ -275,62 +312,93 @@ class Upstream:
         _LOG.info("Subscribing to %s at up to %d fps (subscription #%d)",
                   entity, settings.fps(), self.connections)
 
-        async with self._http().stream(
-            "GET",
-            url,
-            params={"fps": settings.fps()},
-            headers={"Authorization": f"Bearer {token}"},
-        ) as response:
-            if response.status_code != 200:
-                await response.aread()
+        # Which phase a timeout happened in is the whole diagnosis, and httpx
+        # raises the same ReadTimeout either way, so the phase is tracked here
+        # rather than guessed from the exception.
+        headers_seen = False
+        try:
+            async with self._http().stream(
+                "GET",
+                url,
+                params={"fps": settings.fps()},
+                headers={"Authorization": f"Bearer {token}"},
+            ) as response:
+                headers_seen = True
+                return await self._pump(response, entity)
+        except httpx.ConnectTimeout as exc:
+            raise UpstreamError(
+                f"Home Assistant did not accept a connection within "
+                f"{settings.CONNECT_SECONDS:.0f}s - is Home Assistant itself up?"
+            ) from exc
+        except httpx.ReadTimeout as exc:
+            if not headers_seen:
                 raise UpstreamError(
-                    f"Home Assistant returned {response.status_code} for {entity} - "
-                    "check the camera entity id and that the Elegoo integration "
-                    "is at least 2.12.3.0"
-                )
+                    "Home Assistant accepted the stream but sent no headers in "
+                    f"{settings.HEADERS_SECONDS:.0f}s - the frame hub is most "
+                    "likely stuck. Reloading the Elegoo integration (Settings -> "
+                    "Devices & Services -> Elegoo -> Reload) usually clears it; "
+                    "if not, power-cycle the printer while it is idle"
+                ) from exc
+            raise UpstreamError(
+                "the camera stream went silent mid-response "
+                f"(no data for {settings.HEADERS_SECONDS:.0f}s)"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise UpstreamError(describe(exc)) from exc
 
-            boundary = boundary_from_content_type(response.headers.get("content-type"))
-            if boundary is None:
+    async def _pump(self, response: httpx.Response, entity: str) -> bool:
+        """Read frames off an open response until it ends or goes silent."""
+        produced = False
+        if response.status_code != 200:
+            await response.aread()
+            raise UpstreamError(
+                f"Home Assistant returned {response.status_code} for {entity} - "
+                "check the camera entity id and that the Elegoo integration "
+                "is at least 2.12.3.0"
+            )
+
+        boundary = boundary_from_content_type(response.headers.get("content-type"))
+        if boundary is None:
+            raise UpstreamError(
+                "the camera stream has no multipart boundary in its "
+                f"Content-Type ({response.headers.get('content-type')!r})"
+            )
+
+        parser = MjpegParser(boundary)
+        chunks = response.aiter_bytes().__aiter__()
+
+        while True:
+            try:
+                chunk = await asyncio.wait_for(
+                    chunks.__anext__(), timeout=settings.STALL_SECONDS
+                )
+            except StopAsyncIteration:
+                _LOG.info("Camera stream ended after %s frame(s)", self._seq)
+                return produced
+            except asyncio.TimeoutError as exc:
                 raise UpstreamError(
-                    "the camera stream has no multipart boundary in its "
-                    f"Content-Type ({response.headers.get('content-type')!r})"
+                    f"no data for {settings.STALL_SECONDS:.0f}s - the printer's "
+                    "camera server has most likely stopped sending"
+                ) from exc
+
+            try:
+                frames = parser.feed(chunk)
+            except MjpegError as exc:
+                raise UpstreamError(str(exc)) from exc
+
+            for frame in frames:
+                self._publish(frame)
+                produced = True
+                self._state = LIVE
+
+            if parser.closed:
+                return produced
+
+            # Data still arriving but no whole frame in STALL_SECONDS is
+            # also a stall - keepalive bytes from a dead camera count as
+            # silence, not as liveness.
+            age = self.frame_age()
+            if produced and age is not None and age > settings.STALL_SECONDS:
+                raise UpstreamError(
+                    f"no frame for {age:.0f}s despite an open stream"
                 )
-
-            parser = MjpegParser(boundary)
-            chunks = response.aiter_bytes().__aiter__()
-
-            while True:
-                try:
-                    chunk = await asyncio.wait_for(
-                        chunks.__anext__(), timeout=settings.STALL_SECONDS
-                    )
-                except StopAsyncIteration:
-                    _LOG.info("Camera stream ended after %s frame(s)", self._seq)
-                    return produced
-                except asyncio.TimeoutError as exc:
-                    raise UpstreamError(
-                        f"no data for {settings.STALL_SECONDS:.0f}s - the printer's "
-                        "camera server has most likely stopped sending"
-                    ) from exc
-
-                try:
-                    frames = parser.feed(chunk)
-                except MjpegError as exc:
-                    raise UpstreamError(str(exc)) from exc
-
-                for frame in frames:
-                    self._publish(frame)
-                    produced = True
-                    self._state = LIVE
-
-                if parser.closed:
-                    return produced
-
-                # Data still arriving but no whole frame in STALL_SECONDS is
-                # also a stall - keepalive bytes from a dead camera count as
-                # silence, not as liveness.
-                age = self.frame_age()
-                if produced and age is not None and age > settings.STALL_SECONDS:
-                    raise UpstreamError(
-                        f"no frame for {age:.0f}s despite an open stream"
-                    )

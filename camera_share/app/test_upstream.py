@@ -287,3 +287,111 @@ async def test_status_reports_without_starting_anything(make_upstream):
     assert status["viewers"] == 0
     assert status["last_frame_age"] is None
     assert status["camera_entity"] == "camera.centauri_carbon_2_chamber_camera"
+
+
+# ── Saying what actually went wrong ─────────────────────────────────────────
+
+def test_describe_names_the_exception_class():
+    """The failure that prompted this: httpx's timeouts carry an empty
+    message, so `str(exc)` alone logged "failed: " and hid a ReadTimeout."""
+    assert upstream_module.describe(httpx.ReadTimeout("")) == "ReadTimeout"
+    assert upstream_module.describe(httpx.ConnectTimeout("")) == "ConnectTimeout"
+    assert upstream_module.describe(ValueError("boom")) == "ValueError: boom"
+    # Whitespace-only is as useless as empty.
+    assert upstream_module.describe(httpx.ReadTimeout("   ")) == "ReadTimeout"
+
+
+async def test_a_timeout_waiting_for_headers_says_the_hub_is_stuck(make_upstream):
+    """The hub getting stuck looks like this from here: the connection is
+    accepted and then nothing at all arrives, not even headers."""
+    def responder(_attempt, request):
+        raise httpx.ReadTimeout("", request=request)
+
+    up, _ = make_upstream(responder)
+    up.acquire()
+    await _until(lambda: up.state == upstream_module.OFFLINE)
+
+    error = up._error or ""
+    assert "no headers" in error
+    assert "frame hub" in error
+    assert "stuck" in error
+    # And the bare class name never stands in for the explanation again.
+    assert error != "ReadTimeout"
+
+
+async def test_a_timeout_before_the_connection_says_so(make_upstream):
+    def responder(_attempt, request):
+        raise httpx.ConnectTimeout("", request=request)
+
+    up, _ = make_upstream(responder)
+    up.acquire()
+    await _until(lambda: up.state == upstream_module.OFFLINE)
+
+    assert "did not accept a connection" in (up._error or "")
+
+
+async def test_a_silent_stream_is_not_reported_as_a_stuck_hub(make_upstream):
+    """Headers arrived, so whatever went quiet afterwards is the camera, not
+    the hub refusing to answer at all."""
+    up, _ = make_upstream(_frames_then([JPEG], silence=30.0))
+    up.acquire()
+    await _until(lambda: up.state == upstream_module.OFFLINE, timeout=3.0)
+
+    error = up._error or ""
+    assert "frame hub" not in error
+    assert "camera server" in error
+
+
+async def test_an_empty_message_exception_still_logs_its_class(make_upstream, caplog):
+    def responder(_attempt, request):
+        raise httpx.ReadTimeout("", request=request)
+
+    up, _ = make_upstream(responder)
+    with caplog.at_level("WARNING"):
+        up.acquire()
+        await _until(lambda: up.state == upstream_module.OFFLINE)
+
+    failures = [r.getMessage() for r in caplog.records
+                if "Camera subscription failed" in r.getMessage()]
+    assert failures, "the failure was never logged"
+    # Never "Camera subscription failed: " with nothing after it.
+    assert not any(m.rstrip().endswith("failed:") for m in failures)
+
+
+async def test_shutdown_cannot_hang(make_upstream, monkeypatch):
+    """Closing always means cancelling a request that is in flight, and
+    httpx's pool can refuse to drain after that. A stop or restart that
+    hangs until the Supervisor kills the container is worse than a leaked
+    socket the exiting process takes with it anyway."""
+    up, _ = make_upstream(_frames_then([JPEG], silence=30.0))
+    up.acquire()
+    await _until(lambda: up.seq >= 1)
+    await up.stop()  # retire the real reader before wedging the shutdown
+
+    monkeypatch.setattr(settings, "CLOSE_SECONDS", 0.05)
+
+    # A reader that will not die on cancellation, and a client whose close
+    # never returns: both halves of the shutdown wedged at once.
+    release = asyncio.Event()
+
+    async def _stubborn():
+        while not release.is_set():
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                pass
+
+    async def _never_closes():
+        await asyncio.Event().wait()
+
+    stubborn = asyncio.create_task(_stubborn())
+    up._reader = stubborn
+    monkeypatch.setattr(up._client, "aclose", _never_closes)
+    await asyncio.sleep(0)  # let the stubborn reader actually start
+
+    # The assertion is simply that this returns at all.
+    await asyncio.wait_for(up.aclose(), timeout=3.0)
+    assert up.state == upstream_module.IDLE
+
+    release.set()
+    await asyncio.gather(stubborn, return_exceptions=True)

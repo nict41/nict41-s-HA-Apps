@@ -31,8 +31,11 @@ MAX_VIEWERS_DEFAULT = 5
 # Mirrors config.yaml's `match(^camera\.[a-z0-9_]+$)`.
 ENTITY_RE = re.compile(r"^camera\.[a-z0-9_]+$")
 
-# Inclusive bounds, mirroring config.yaml's schema.
-FPS_BOUNDS = (1, 15)
+# Inclusive bounds, mirroring config.yaml's schema. The fps ceiling is a
+# camera-safety limit, not a preference: it stays at 10 until a full idle
+# test has passed on the real printer. Raising it means raising it in
+# config.yaml too, and the schema would reject anything higher first.
+FPS_BOUNDS = (1, 10)
 MAX_VIEWERS_BOUNDS = (1, 20)
 
 # How the fan-out behaves. These are not options: they are properties of the
@@ -51,8 +54,22 @@ MAX_VIEWERS_BOUNDS = (1, 20)
 # BACKOFF_* - reconnect delay, doubling with jitter. Never a tight loop: a
 #   tight retry loop against a camera that allows exactly one connection is
 #   what takes the firmware down.
+# HEADERS_SECONDS - how long Home Assistant has to answer with response
+#   headers after accepting the connection. The frame hub getting stuck
+#   looks exactly like this: the TCP connection is accepted, and then
+#   nothing. Named rather than derived from STALL_SECONDS so the timeout
+#   and the message that reports it can never drift apart.
 IDLE_SHUTDOWN_SECONDS = 15.0
 STALL_SECONDS = 10.0
+CONNECT_SECONDS = 10.0
+# CLOSE_SECONDS - how long shutdown waits for the reader task and the HTTP
+#   client to unwind. Closing is always done by cancelling a request that is
+#   in flight, and httpx's connection pool can block indefinitely on that, so
+#   neither wait is allowed to be unbounded: a stop or restart that hangs
+#   until the Supervisor kills the container is worse than a leaked socket
+#   the exiting process takes with it anyway.
+CLOSE_SECONDS = 5.0
+HEADERS_SECONDS = 20.0
 BACKOFF_START_SECONDS = 2.0
 BACKOFF_MAX_SECONDS = 60.0
 BACKOFF_JITTER = 0.25

@@ -1,5 +1,5 @@
 name: "Camera Share"
-version: "1.0.0"
+version: "1.0.1"
 slug: "camera_share"
 description: "Shares one Home Assistant camera as a read-only public web page, for exposing a printer camera through a Cloudflare tunnel"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/camera_share"
@@ -28,6 +28,6 @@ options:
 schema:
   camera_entity: match(^camera\.[a-z0-9_]+$)
   page_title: str
-  fps: int(1,15)
+  fps: int(1,10)
   access_key: password?
   max_viewers: int(1,20)
