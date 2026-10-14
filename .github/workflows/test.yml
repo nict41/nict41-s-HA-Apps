@@ -1,15 +1,52 @@
 name: Test
 
+# Restricted to the default branch for the same reason as the build
+# workflow: a branch with an open pull request would otherwise run every
+# job twice, once per event.
 on:
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  select:
+    name: Select affected apps
+    runs-on: ubuntu-latest
+    outputs:
+      test: ${{ steps.select.outputs.test }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: select
+        name: Work out which apps changed
+        env:
+          SELECT_ALL: ${{ github.event_name != 'pull_request' }}
+        run: |
+          if [ "${SELECT_ALL}" = "true" ]; then
+            printf '' | .github/scripts/select-matrix.sh | tee -a "${GITHUB_OUTPUT}"
+          else
+            git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+              | tee /dev/stderr \
+              | .github/scripts/select-matrix.sh | tee -a "${GITHUB_OUTPUT}"
+          fi
+
   pytest:
+    name: Test ${{ matrix.app }}
+    needs: select
+    if: needs.select.outputs.test != '[]'
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        app: [print_timelapse, parcel_tracker, kiwix, youtube_music_sync, camera_share]
+        app: ${{ fromJSON(needs.select.outputs.test) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
