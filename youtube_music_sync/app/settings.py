@@ -84,6 +84,8 @@ class Config:
     max_duration: int = 0
     max_downloads_per_cycle: int = 20
     recheck_unavailable_days: int = 30
+    download_timeout_minutes: int = 120
+    progress_interval_seconds: int = 30
     sleep_between_downloads: int = 5
     rate_limit: str = ""
     cookies_file: str = ""
@@ -187,6 +189,8 @@ def load() -> Config:
         max_duration=_int("YMS_MAX_DURATION", 0),
         max_downloads_per_cycle=_int("YMS_MAX_DOWNLOADS_PER_CYCLE", 20),
         recheck_unavailable_days=_int("YMS_RECHECK_UNAVAILABLE_DAYS", 30),
+        download_timeout_minutes=_int("YMS_DOWNLOAD_TIMEOUT_MINUTES", 120),
+        progress_interval_seconds=_int("YMS_PROGRESS_INTERVAL_SECONDS", 30),
         sleep_between_downloads=_int("YMS_SLEEP_BETWEEN_DOWNLOADS", 5),
         rate_limit=_str("YMS_RATE_LIMIT"),
         cookies_file=_str("YMS_COOKIES_FILE"),

@@ -91,6 +91,8 @@ is set to.
 | `max_duration_seconds` | `0` | Skip anything longer - hour-long mixes, full albums. `0` disables. |
 | `max_downloads_per_cycle` | `20` | Cap per cycle; the rest waits for the next one. |
 | `recheck_unavailable_days` | `30` | How long before re-checking a video YouTube says is unavailable. It backs off 6h → 1d → 3d → 1w → this, instead of retrying every cycle. `0` retires it for good. |
+| `download_timeout_minutes` | `120` | Cap on one track's whole job - fetch, SponsorBlock trim, audio extract, thumbnail embed. Was a fixed 30 minutes before 0.2.1. |
+| `progress_interval_seconds` | `30` | How often to log progress for a track in flight. `0` is off. |
 | `sleep_between_downloads` | `5` | Seconds between downloads. Raise it if YouTube starts challenging requests. |
 | `rate_limit` | `""` | Bandwidth cap, e.g. `1M`. Empty is unlimited. |
 
@@ -192,6 +194,26 @@ Not a blacklist, deliberately: a private video can be made public again, a
 geo-block can lift, a copyright claim can be resolved, and an age-restricted
 one starts working the moment you set `cookies_file`. If you would rather it
 never asked again, set `recheck_unavailable_days` to `0`.
+
+**A long track looks like it has hung**
+Since 0.2.1 a download in flight logs its progress every
+`progress_interval_seconds`:
+
+```
+Downloading 7/60: Augustus Pablo - THE HEAVIEST DUBS
+  Augustus Pablo - THE HEAVIEST DUBS: 42.0% of 341.90MiB at 2.11MiB/s ETA 02:15
+```
+
+If the percentage is climbing it is working, however long it takes. If it
+stops climbing, the transfer has stalled rather than the add-on.
+
+Note that the timeout covers the *whole* job, not just the transfer. A long
+mix spends most of its time in ffmpeg - extracting audio, trimming
+SponsorBlock segments, embedding artwork - with no network activity at all.
+Before 0.2.1 the cap was a fixed 30 minutes, and a track that needed longer
+failed, was classed as a transient error, and was retried from scratch every
+cycle for ever. If a very long track still times out, raise
+`download_timeout_minutes`.
 
 **Starting over**
 Delete the add-on's `/data/state.db` (uninstall/reinstall) to clear the

@@ -193,6 +193,28 @@ def _plan_cycle(
     return plan, report
 
 
+def _progress_logger(cfg: Config, title: str):
+    """A callback that logs download progress, but not on every frame.
+
+    yt-dlp reports progress many times a second. Only one line every
+    `progress_interval_seconds` is logged, plus the final one, which is what
+    makes a three-hour track legible instead of thousands of lines.
+    """
+    if cfg.progress_interval_seconds <= 0:
+        return None
+    state = {"last": 0.0}
+
+    def report(text: str) -> None:
+        now = time.monotonic()
+        done = text.startswith("100") or "100.0%" in text
+        if not done and now - state["last"] < cfg.progress_interval_seconds:
+            return
+        state["last"] = now
+        _LOG.info("  %s: %s", title, text)
+
+    return report
+
+
 def _record_failure(cfg: Config, store: Store, entry, error: str) -> None:
     """Record a failed download, backing off if the video itself is the problem.
 
@@ -227,7 +249,9 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
 
         _LOG.info("Downloading %d/%d: %s", position, total, entry.title)
         try:
-            result = downloader.download(cfg, entry)
+            result = downloader.download(
+                cfg, entry, on_progress=_progress_logger(cfg, entry.title)
+            )
         except Exception as err:  # a crashed subprocess must not kill the loop
             _LOG.error("Download of %r raised %s", entry.title, err)
             _record_failure(cfg, store, entry, str(err))
