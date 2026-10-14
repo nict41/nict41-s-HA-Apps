@@ -8,6 +8,9 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from library import VIDEO_ID_TAG
@@ -142,8 +145,21 @@ class DownloadResult:
     skipped_existing: bool = False
 
 
-def _common_args(cfg: Config) -> list[str]:
-    args = ["--no-progress", "--newline", "--no-warnings", "--socket-timeout", "30"]
+# Marks the progress lines this add-on asks yt-dlp to emit, so they can be
+# told apart from everything else on the same stream and never mistaken for
+# the error tail.
+PROGRESS_PREFIX = "[yms-progress]"
+
+PROGRESS_TEMPLATE = (
+    f"download:{PROGRESS_PREFIX} %(progress._percent_str)s of "
+    "%(progress._total_bytes_str)s at %(progress._speed_str)s "
+    "ETA %(progress._eta_str)s"
+)
+
+
+def _common_args(cfg: Config, *, progress: bool = False) -> list[str]:
+    args = ["--newline", "--no-warnings", "--socket-timeout", "30"]
+    args.append("--progress" if progress else "--no-progress")
     cookies = cfg.resolved_cookies_file
     if cookies:
         args += ["--cookies", cookies]
@@ -170,7 +186,8 @@ def build_playlist_argv(cfg: Config, url: str) -> list[str]:
 def build_download_argv(cfg: Config, url: str, print_file: str) -> list[str]:
     argv = [
         "yt-dlp",
-        *_common_args(cfg),
+        *_common_args(cfg, progress=True),
+        "--progress-template", PROGRESS_TEMPLATE,
         "-f", "bestaudio/best",
         "--extract-audio",
         "--audio-format", cfg.audio_format,
@@ -223,6 +240,68 @@ def _run(argv: list[str], timeout: int) -> subprocess.CompletedProcess:
     return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
 
 
+# Lines of output kept for the error message. Only the tail is needed, and a
+# long download emits far too much to hold all of it.
+_TAIL_LINES = 30
+
+
+def _run_streaming(
+    argv: list[str],
+    timeout: int,
+    on_progress: Callable[[str], None] | None = None,
+) -> tuple[int, list[str]]:
+    """Run yt-dlp, reporting progress while it works.
+
+    subprocess.run captures everything and hands it over at the end, which is
+    fine for a three-minute track and useless for a three-hour one: the log
+    says nothing for however long it takes. Here the output is read as it
+    arrives, progress lines go to `on_progress`, and the rest is kept for the
+    error message.
+
+    stderr is merged into stdout so one reader drains both and cannot
+    deadlock on a full pipe. The reader runs on its own thread so the timeout
+    is enforced even while the process is silent - during a long ffmpeg
+    post-process, no output arrives at all.
+    """
+    _LOG.debug("running: %s", " ".join(argv))
+    proc = subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        errors="replace",
+    )
+    tail: deque[str] = deque(maxlen=_TAIL_LINES)
+
+    def read() -> None:
+        assert proc.stdout is not None
+        for raw in proc.stdout:
+            line = raw.rstrip()
+            if not line:
+                continue
+            if line.startswith(PROGRESS_PREFIX):
+                if on_progress is not None:
+                    on_progress(line[len(PROGRESS_PREFIX):].strip())
+                continue
+            tail.append(line)
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        # Let the reader drain what is left, but never hang on it.
+        reader.join(timeout=10)
+        if proc.stdout is not None:
+            proc.stdout.close()
+    return returncode, list(tail)
+
+
 def parse_playlist_json(payload: str, fallback_url: str = "") -> tuple[str, list[PlaylistEntry]]:
     """Pull usable entries out of yt-dlp's --dump-single-json output."""
     data = json.loads(payload)
@@ -264,13 +343,28 @@ def fetch_playlist(cfg: Config, url: str, timeout: int = 300) -> tuple[str, list
     return parse_playlist_json(result.stdout, fallback_url=url)
 
 
-def download(cfg: Config, entry: PlaylistEntry, timeout: int = 1800) -> DownloadResult:
-    """Download one entry's audio into the library."""
+def download(
+    cfg: Config,
+    entry: PlaylistEntry,
+    timeout: int | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> DownloadResult:
+    """Download one entry's audio into the library.
+
+    `timeout` covers the whole job - fetch, SponsorBlock trim, audio extract
+    and thumbnail embed - not just the transfer. A long track can spend far
+    more time in ffmpeg than on the wire, so it comes from the add-on's own
+    option rather than a constant.
+    """
+    if timeout is None:
+        timeout = max(cfg.download_timeout_minutes, 1) * 60
     os.makedirs(cfg.tmp_dir, exist_ok=True)
     handle, print_file = tempfile.mkstemp(prefix="yms-path-", dir=cfg.tmp_dir)
     os.close(handle)
     try:
-        result = _run(build_download_argv(cfg, entry.url, print_file), timeout)
+        returncode, tail = _run_streaming(
+            build_download_argv(cfg, entry.url, print_file), timeout, on_progress
+        )
         with open(print_file, "r", encoding="utf-8", errors="replace") as fh:
             printed = [line.strip() for line in fh if line.strip()]
     finally:
@@ -279,9 +373,8 @@ def download(cfg: Config, entry: PlaylistEntry, timeout: int = 1800) -> Download
         except OSError:
             pass
 
-    if result.returncode != 0:
-        tail = (result.stderr or result.stdout or "").strip().splitlines()
-        return DownloadResult(ok=False, error=tail[-1] if tail else f"yt-dlp exited {result.returncode}")
+    if returncode != 0:
+        return DownloadResult(ok=False, error=tail[-1] if tail else f"yt-dlp exited {returncode}")
 
     if not printed:
         # Exit 0 with nothing moved: --no-overwrites found a file of the same

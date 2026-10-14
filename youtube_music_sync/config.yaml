@@ -1,5 +1,5 @@
 name: "YouTube Music Sync"
-version: "0.2.0"
+version: "0.2.1"
 slug: "youtube_music_sync"
 description: >-
   Watches public YouTube playlists and mirrors each video's audio into your
@@ -44,6 +44,8 @@ options:
   max_duration_seconds: 0
   max_downloads_per_cycle: 20
   recheck_unavailable_days: 30
+  download_timeout_minutes: 120
+  progress_interval_seconds: 30
   sleep_between_downloads: 5
   rate_limit: ""
   cookies_file: ""
@@ -69,6 +71,8 @@ schema:
   max_duration_seconds: int(0,86400)
   max_downloads_per_cycle: int(1,500)
   recheck_unavailable_days: int(0,365)
+  download_timeout_minutes: int(5,1440)
+  progress_interval_seconds: int(0,600)
   sleep_between_downloads: int(0,300)
   rate_limit: "str?"
   cookies_file: "str?"

@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.1
+
+- Log progress while a track downloads. yt-dlp was run with `--no-progress`
+  and its output captured in one go, so the log said nothing at all between
+  "Downloading 7/60" and the result. Fine for a three-minute track, useless
+  for a three-hour one. Output is now read as it arrives and a progress line
+  is logged every `progress_interval_seconds` (default 30, `0` turns it off):
+  percentage, size, speed and ETA.
+- Fix a long track being retried for ever instead of finishing. The download
+  timeout was a hardcoded 30 minutes covering the *whole* job - fetch,
+  SponsorBlock trim, audio extract, thumbnail embed - and a long mix spends
+  most of that in ffmpeg rather than on the wire. Going over raised
+  `TimeoutExpired`, whose message reads "timed out after 1800 seconds", which
+  classifies as a transient failure, so the track was retried from scratch on
+  the next cycle, timed out again, and never completed. The cap is now
+  `download_timeout_minutes` (default 120).
+- The timeout is enforced from a separate thread rather than while reading
+  output, so it still applies during a long post-process, when yt-dlp prints
+  nothing for minutes at a time.
+- Progress lines are tagged, so they are never mistaken for the last line of
+  output that becomes the error message - a failure after thousands of
+  progress frames still reports what actually went wrong.
+- New options `download_timeout_minutes` (5-1440, default 120) and
+  `progress_interval_seconds` (0-600, default 30).
+
 ## 0.2.0
 
 - Stop re-checking videos YouTube says are unavailable on every cycle. A

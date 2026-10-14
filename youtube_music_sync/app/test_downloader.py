@@ -116,24 +116,25 @@ def _entry():
 
 
 def _fake_run(returncode=0, written=None, stderr=""):
-    def runner(argv, timeout):
+    """Stand in for the streaming runner download() uses."""
+    def runner(argv, timeout, on_progress=None):
         target = argv[argv.index("--print-to-file") + 2]
         if written is not None:
             with open(target, "w", encoding="utf-8") as fh:
                 fh.write(written)
-        return subprocess.CompletedProcess(argv, returncode, "", stderr)
+        return returncode, ([stderr] if stderr else [])
     return runner
 
 
 def test_download_returns_the_moved_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(downloader, "_run",
+    monkeypatch.setattr(downloader, "_run_streaming",
                         _fake_run(0, "/media/nas1/Music/A - B.m4a\n"))
     result = downloader.download(cfg(data_dir=str(tmp_path)), _entry())
     assert result.ok and result.path == "/media/nas1/Music/A - B.m4a"
 
 
 def test_download_reports_yt_dlp_failure(tmp_path, monkeypatch):
-    monkeypatch.setattr(downloader, "_run",
+    monkeypatch.setattr(downloader, "_run_streaming",
                         _fake_run(1, None, "ERROR: Sign in to confirm you're not a bot"))
     result = downloader.download(cfg(data_dir=str(tmp_path)), _entry())
     assert not result.ok and not result.skipped_existing
@@ -142,13 +143,13 @@ def test_download_reports_yt_dlp_failure(tmp_path, monkeypatch):
 
 def test_download_detects_an_existing_file_of_the_same_name(tmp_path, monkeypatch):
     # Exit 0 but nothing moved: --no-overwrites found the name taken.
-    monkeypatch.setattr(downloader, "_run", _fake_run(0, ""))
+    monkeypatch.setattr(downloader, "_run_streaming", _fake_run(0, ""))
     result = downloader.download(cfg(data_dir=str(tmp_path)), _entry())
     assert not result.ok and result.skipped_existing
 
 
 def test_download_cleans_up_its_temp_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(downloader, "_run", _fake_run(0, "/m/x.m4a\n"))
+    monkeypatch.setattr(downloader, "_run_streaming", _fake_run(0, "/m/x.m4a\n"))
     config = cfg(data_dir=str(tmp_path))
     downloader.download(config, _entry())
     leftovers = list((tmp_path / "tmp").glob("yms-path-*"))
@@ -214,3 +215,68 @@ def test_a_bot_challenge_behind_an_id_prefix_is_still_transient():
     message = ("ERROR: [youtube] aB403cdEfGh: Sign in to confirm you're not a bot. "
                "Use --cookies-from-browser or --cookies")
     assert downloader.classify_failure(message) == downloader.FAILURE_TRANSIENT
+
+
+# ------------------------------------------------------------------- progress
+
+def test_download_asks_for_progress_but_the_playlist_scan_does_not():
+    config = Config()
+    argv = build_download_argv(config, "http://x", "/tmp/p")
+    assert "--progress" in argv and "--no-progress" not in argv
+    assert "--progress-template" in argv
+    # The listing is a single cheap request; progress there is just noise.
+    assert "--no-progress" in build_playlist_argv(config, "http://x")
+
+
+def _script(tmp_path, body):
+    """A stand-in for yt-dlp that writes what we tell it to."""
+    path = tmp_path / "fake"
+    path.write_text("#!/usr/bin/env python3\n" + body)
+    path.chmod(0o755)
+    return [str(path)]
+
+
+def test_progress_lines_are_reported_as_they_arrive_not_at_the_end(tmp_path):
+    seen = []
+    argv = _script(tmp_path, f'''
+import sys, time
+for pct in ("10.0%", "50.0%", "100.0%"):
+    print("{downloader.PROGRESS_PREFIX} " + pct + " of 200MiB at 1MiB/s ETA 00:10", flush=True)
+    time.sleep(0.05)
+print("ordinary output line", flush=True)
+''')
+    rc, tail = downloader._run_streaming(argv, timeout=30, on_progress=seen.append)
+    assert rc == 0
+    assert [s.split()[0] for s in seen] == ["10.0%", "50.0%", "100.0%"]
+    # Progress never pollutes the text used for the error message.
+    assert tail == ["ordinary output line"]
+
+
+def test_the_error_tail_survives_a_flood_of_progress(tmp_path):
+    argv = _script(tmp_path, f'''
+import sys
+for i in range(500):
+    print("{downloader.PROGRESS_PREFIX} %d.0%% of 1MiB at 1MiB/s ETA 00:01" % (i % 100), flush=True)
+print("ERROR: [youtube] abc: Video unavailable", flush=True)
+sys.exit(1)
+''')
+    rc, tail = downloader._run_streaming(argv, timeout=30, on_progress=lambda _t: None)
+    assert rc == 1
+    assert tail[-1] == "ERROR: [youtube] abc: Video unavailable"
+
+
+def test_stderr_is_captured_too(tmp_path):
+    argv = _script(tmp_path, '''
+import sys
+print("ERROR: something on stderr", file=sys.stderr, flush=True)
+sys.exit(2)
+''')
+    rc, tail = downloader._run_streaming(argv, timeout=30)
+    assert rc == 2 and "ERROR: something on stderr" in tail
+
+
+def test_a_silent_process_still_hits_the_timeout(tmp_path):
+    """The timeout must not depend on output arriving - ffmpeg is quiet."""
+    argv = _script(tmp_path, "import time\ntime.sleep(30)\n")
+    with pytest.raises(subprocess.TimeoutExpired):
+        downloader._run_streaming(argv, timeout=1)

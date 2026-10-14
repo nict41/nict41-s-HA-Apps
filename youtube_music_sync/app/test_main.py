@@ -343,7 +343,7 @@ def test_a_retired_video_is_never_planned_again(tmp_path):
 def test_an_unavailable_download_backs_itself_off(tmp_path, monkeypatch):
     """End to end: the loop records the failure and the next plan skips it."""
     config, store = cfg(tmp_path), store_for(tmp_path)
-    monkeypatch.setattr(main.downloader, "download", lambda c, e: DownloadResult(
+    monkeypatch.setattr(main.downloader, "download", lambda c, e, **kw: DownloadResult(
         ok=False, error="ERROR: [youtube] aaaaaaaaaaa: Video unavailable"))
     index = LibraryIndex()
 
@@ -359,7 +359,7 @@ def test_an_unavailable_download_backs_itself_off(tmp_path, monkeypatch):
 
 def test_a_transient_download_failure_is_retried_next_cycle(tmp_path, monkeypatch):
     config, store = cfg(tmp_path), store_for(tmp_path)
-    monkeypatch.setattr(main.downloader, "download", lambda c, e: DownloadResult(
+    monkeypatch.setattr(main.downloader, "download", lambda c, e, **kw: DownloadResult(
         ok=False, error="ERROR: aria2c exited with code 22"))
     index = LibraryIndex()
 
@@ -369,3 +369,54 @@ def test_a_transient_download_failure_is_retried_next_cycle(tmp_path, monkeypatc
 
     plan2, report2 = _plan(config, store, index, [entry()])
     assert len(plan2) == 1 and report2.deferred == 0
+
+
+# ------------------------------------------------------------------- progress
+
+def test_progress_is_throttled_not_logged_every_frame(tmp_path):
+    config = cfg(tmp_path, progress_interval_seconds=30)
+    report = main._progress_logger(config, "Long Mix")
+    logged = []
+    import logging as _logging
+
+    class Capture(_logging.Handler):
+        def emit(self, record):
+            logged.append(record.getMessage())
+
+    handler = Capture()
+    previous = main._LOG.level
+    main._LOG.addHandler(handler)
+    main._LOG.setLevel(_logging.INFO)
+    try:
+        for _ in range(200):
+            report("12.3% of 200MiB at 1MiB/s ETA 02:30")
+        report("100.0% of 200MiB at 1MiB/s ETA 00:00")
+    finally:
+        main._LOG.removeHandler(handler)
+        main._LOG.setLevel(previous)
+
+    # One line for the burst, plus the completion line - not 201.
+    assert len(logged) == 2
+    assert "Long Mix" in logged[0]
+    assert "100.0%" in logged[-1]
+
+
+def test_progress_can_be_turned_off(tmp_path):
+    assert main._progress_logger(cfg(tmp_path, progress_interval_seconds=0), "T") is None
+
+
+def test_the_download_timeout_comes_from_the_options(tmp_path, monkeypatch):
+    config = cfg(tmp_path, download_timeout_minutes=180)
+    seen = {}
+
+    def fake_stream(argv, timeout, on_progress=None):
+        seen["timeout"] = timeout
+        target = argv[argv.index("--print-to-file") + 2]
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write(str(tmp_path / "out.opus") + "\n")
+        return 0, []
+
+    monkeypatch.setattr(main.downloader, "_run_streaming", fake_stream)
+    main.downloader.download(config, entry())
+    # Three hours of options, not the old fixed thirty minutes.
+    assert seen["timeout"] == 180 * 60
