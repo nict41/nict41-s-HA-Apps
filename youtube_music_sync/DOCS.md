@@ -168,6 +168,16 @@ different track that normalizes to the same filename under
 `output_template` - give the template more fields, e.g.
 `%(title)s [%(id)s].%(ext)s`.
 
+**Settings look like they did not stick**
+Every start now logs the configuration in force, as an `Options:` line from
+the startup script and a `Library: ... | dry_run: ... | aria2c: ...` line from
+the app, followed by each playlist URL. Compare those against the
+Configuration tab. If they disagree, the options were not read - which the
+add-on now refuses to start on, rather than running with its own defaults.
+Before 0.1.1 that substitution was silent, and showed up as `use_aria2c`
+turning itself off, playlists going missing, or a cycle quietly doing nothing
+because `dry_run` had reverted to true.
+
 **Starting over**
 Delete the add-on's `/data/state.db` (uninstall/reinstall) to clear the
 download history and library cache. Files already in the library are untouched

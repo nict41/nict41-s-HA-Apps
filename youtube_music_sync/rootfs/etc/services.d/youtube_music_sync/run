@@ -7,39 +7,120 @@
 # yt-dlp, then hands over to the Python sync loop.
 # ==============================================================================
 
-bashio::log.level "$(bashio::config 'log_level')"
-
 # ---------------------------------------------------------------------------
-# Options -> environment. Lists are passed as JSON so Python parses them
-# without any shell-quoting games over playlist URLs.
+# Options are read ONCE, from one place, and checked before anything uses them.
+#
+# This was previously a run of ~20 separate `bashio::config` calls. Each of
+# those resolves through the Supervisor API and its /tmp cache, and every
+# failure mode on that path is SILENT: a failed, empty or truncated read makes
+# jq emit nothing and exit 0, that becomes an empty string, and the Python side
+# reads an empty string as "option not set" and substitutes its own default.
+# The add-on then starts up looking perfectly healthy while running a
+# configuration nobody chose - dry_run back on, use_aria2c back off, music_dir
+# back to its default path, every playlist forgotten - and nothing in the log
+# says so.
+#
+# So: one read, verified, then nothing but local jq. If the options cannot be
+# read the add-on refuses to start, because coming up with silently substituted
+# defaults is worse than not coming up.
 # ---------------------------------------------------------------------------
-# bashio::config on a list returns newline-separated values, which would
-# break on any URL containing whitespace; read the raw options JSON instead
-# so the array reaches Python exactly as entered.
-YMS_PLAYLISTS="$(bashio::addon.config | jq -c '.playlists // []')"
-export YMS_PLAYLISTS
 
-export YMS_MUSIC_DIR="$(bashio::config 'music_dir')"
-export YMS_POLL_INTERVAL_MINUTES="$(bashio::config 'poll_interval_minutes')"
-export YMS_DRY_RUN="$(bashio::config 'dry_run')"
-export YMS_AUDIO_FORMAT="$(bashio::config 'audio_format')"
-export YMS_OUTPUT_TEMPLATE="$(bashio::config 'output_template')"
-export YMS_SPONSORBLOCK="$(bashio::config 'sponsorblock_remove_offtopic')"
-export YMS_EMBED_THUMBNAIL="$(bashio::config 'embed_thumbnail')"
-export YMS_CROP_THUMBNAIL_SQUARE="$(bashio::config 'crop_thumbnail_square')"
-export YMS_DURATION_TOLERANCE="$(bashio::config 'duration_tolerance_seconds')"
-export YMS_TITLE_SIMILARITY="$(bashio::config 'title_similarity')"
-export YMS_ON_DUPLICATE="$(bashio::config 'on_duplicate')"
-export YMS_MIN_DURATION="$(bashio::config 'min_duration_seconds')"
-export YMS_MAX_DURATION="$(bashio::config 'max_duration_seconds')"
-export YMS_MAX_DOWNLOADS_PER_CYCLE="$(bashio::config 'max_downloads_per_cycle')"
-export YMS_SLEEP_BETWEEN_DOWNLOADS="$(bashio::config 'sleep_between_downloads')"
-export YMS_RATE_LIMIT="$(bashio::config 'rate_limit')"
-export YMS_COOKIES_FILE="$(bashio::config 'cookies_file')"
-export YMS_USE_ARIA2C="$(bashio::config 'use_aria2c')"
-export YMS_EXTRA_ARGS="$(bashio::config 'extra_args')"
-export YMS_LOG_LEVEL="$(bashio::config 'log_level')"
+# bashio 0.18 renamed bashio::addon.* to bashio::app.*, keeping the old names
+# as deprecated aliases. Ask for whichever this base image actually ships.
+ha_addon_config() {
+    if declare -F bashio::app.config >/dev/null 2>&1; then
+        bashio::app.config
+    else
+        bashio::addon.config
+    fi
+}
+
+# Supervisor writes this add-on's options here. It is a plain local file: no
+# API call, no cache, nothing to go intermittently wrong. The Supervisor API
+# is kept only as a fallback for the case where the file is not there.
+OPTIONS_JSON=""
+if [ -s /data/options.json ]; then
+    OPTIONS_JSON="$(cat /data/options.json)"
+fi
+
+if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "${OPTIONS_JSON}"; then
+    bashio::log.warning "/data/options.json missing or unreadable - asking the Supervisor."
+    OPTIONS_JSON="$(ha_addon_config 2>/dev/null)" || OPTIONS_JSON=""
+fi
+
+# `playlists` is in the schema, so a configuration object that lacks it did not
+# come from Supervisor intact, however well-formed the JSON looks.
+if ! jq -e 'type == "object" and has("playlists")' >/dev/null 2>&1 <<< "${OPTIONS_JSON}"; then
+    bashio::log.fatal "Could not read this add-on's options."
+    bashio::log.fatal "Neither /data/options.json nor the Supervisor returned a usable"
+    bashio::log.fatal "configuration. Refusing to start, rather than fall back to defaults"
+    bashio::log.fatal "and quietly run with dry_run on, aria2c off, the default music_dir"
+    bashio::log.fatal "and no playlists at all."
+    bashio::log.fatal "Restart the add-on; if this persists, open the Configuration tab"
+    bashio::log.fatal "and save the options again."
+    bashio::exit.nok "Add-on options could not be read"
+fi
+
+# One option out of the snapshot, rendered the way the Python side expects:
+# booleans as true/false, lists as JSON, everything else as a plain string.
+#
+# jq's `//` is deliberately avoided here. It treats `false` the same as `null`,
+# so `.dry_run // "true"` on a stored `false` returns "true" - every boolean
+# option would be stuck on whatever its fallback says. `has()` is what tells
+# "absent" apart from "set to false".
+opt() {
+    local key="${1}"
+    local fallback="${2-}"
+    jq -r --arg key "${key}" --arg fallback "${fallback}" '
+        if has($key) and (.[$key] != null) then
+            .[$key]
+            | if type == "boolean" then (if . then "true" else "false" end)
+              elif type == "array" then tojson
+              else tostring end
+        else
+            $fallback
+        end
+    ' <<< "${OPTIONS_JSON}"
+}
+
+YMS_LOG_LEVEL="$(opt log_level info)"
+export YMS_LOG_LEVEL
+bashio::log.level "${YMS_LOG_LEVEL}"
+
+# Lists are passed as JSON so Python parses them without any shell-quoting
+# games over playlist URLs, which routinely carry '&' and '='.
+export YMS_PLAYLISTS="$(opt playlists '[]')"
+export YMS_MUSIC_DIR="$(opt music_dir '/media/nas1/Music')"
+export YMS_POLL_INTERVAL_MINUTES="$(opt poll_interval_minutes 60)"
+export YMS_DRY_RUN="$(opt dry_run true)"
+export YMS_AUDIO_FORMAT="$(opt audio_format best)"
+export YMS_OUTPUT_TEMPLATE="$(opt output_template '%(title)s.%(ext)s')"
+export YMS_SPONSORBLOCK="$(opt sponsorblock_remove_offtopic true)"
+export YMS_EMBED_THUMBNAIL="$(opt embed_thumbnail true)"
+export YMS_CROP_THUMBNAIL_SQUARE="$(opt crop_thumbnail_square true)"
+export YMS_DURATION_TOLERANCE="$(opt duration_tolerance_seconds 5)"
+export YMS_TITLE_SIMILARITY="$(opt title_similarity 0.87)"
+export YMS_ON_DUPLICATE="$(opt on_duplicate quarantine)"
+export YMS_MIN_DURATION="$(opt min_duration_seconds 60)"
+export YMS_MAX_DURATION="$(opt max_duration_seconds 0)"
+export YMS_MAX_DOWNLOADS_PER_CYCLE="$(opt max_downloads_per_cycle 20)"
+export YMS_SLEEP_BETWEEN_DOWNLOADS="$(opt sleep_between_downloads 5)"
+export YMS_RATE_LIMIT="$(opt rate_limit '')"
+export YMS_COOKIES_FILE="$(opt cookies_file '')"
+export YMS_USE_ARIA2C="$(opt use_aria2c false)"
+export YMS_EXTRA_ARGS="$(opt extra_args '')"
 export YMS_DATA_DIR="/data"
+
+# Say what actually took effect. The whole class of bug above was invisible
+# precisely because nothing ever reported the configuration in force.
+bashio::log.info "Options: $(jq -c '{
+    playlists: (.playlists | length),
+    music_dir,
+    dry_run,
+    use_aria2c,
+    audio_format,
+    poll_interval_minutes
+}' <<< "${OPTIONS_JSON}")"
 
 # ---------------------------------------------------------------------------
 # MQTT is optional. mqtt:want means we can start before the broker exists -
@@ -70,7 +151,7 @@ fi
 # pinned at image-build time goes stale and starts failing every download.
 # A failed update is not fatal: the pinned version in the image still runs.
 # ---------------------------------------------------------------------------
-if bashio::config.true 'auto_update_ytdlp'; then
+if [ "$(opt auto_update_ytdlp true)" = "true" ]; then
     bashio::log.info "Updating yt-dlp to the latest release..."
     if pip3 install --no-cache-dir --break-system-packages --upgrade yt-dlp; then
         bashio::log.info "yt-dlp is now $(yt-dlp --version 2>/dev/null || echo 'unknown')"

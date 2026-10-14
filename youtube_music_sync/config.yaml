@@ -1,5 +1,5 @@
 name: "YouTube Music Sync"
-version: "0.1.0"
+version: "0.1.1"
 slug: "youtube_music_sync"
 description: >-
   Watches public YouTube playlists and mirrors each video's audio into your
