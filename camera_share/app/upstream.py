@@ -191,11 +191,11 @@ class Upstream:
         reader, self._reader = self._reader, None
         if reader is not None and not reader.done():
             reader.cancel()
-            try:
-                await asyncio.wait_for(reader, timeout=settings.CLOSE_SECONDS)
-            except asyncio.CancelledError:
-                pass
-            except asyncio.TimeoutError:
+            # asyncio.wait, not wait_for: since Python 3.12 wait_for answers
+            # a timeout by cancelling again and then waiting for the task to
+            # finish, so a reader that won't unwind made the bound unbounded.
+            done, _ = await asyncio.wait({reader}, timeout=settings.CLOSE_SECONDS)
+            if not done:
                 # The reader is almost always cancelled in the middle of an
                 # HTTP request, and httpx's unwinding of one can block. Let
                 # it go rather than hold up a restart or the idle shutdown.
@@ -214,17 +214,20 @@ class Upstream:
         await self.stop()
         client, self._client = self._client, None
         if client is not None:
-            try:
-                await asyncio.wait_for(client.aclose(),
-                                       timeout=settings.CLOSE_SECONDS)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                # Same reason as above: the pool can refuse to drain after a
-                # cancelled request. The sockets go when the process does.
+            closing = asyncio.ensure_future(client.aclose())
+            done, _ = await asyncio.wait({closing}, timeout=settings.CLOSE_SECONDS)
+            if not done:
+                # Same reasons as above, both of them: the pool can refuse to
+                # drain after a cancelled request, and wait_for would wait on
+                # it anyway. The sockets go when the process does.
+                closing.cancel()
                 _LOG.warning("The HTTP client did not close within %.0fs - "
                              "leaving it to the process exit",
                              settings.CLOSE_SECONDS)
-            except Exception as exc:  # noqa: BLE001 - shutdown never raises
-                _LOG.warning("Closing the HTTP client failed: %s", describe(exc))
+            elif not closing.cancelled() and closing.exception() is not None:
+                # Shutdown never raises.
+                _LOG.warning("Closing the HTTP client failed: %s",
+                             describe(closing.exception()))
 
     # ── Frame delivery ──────────────────────────────────────────────────────
 
@@ -297,10 +300,12 @@ class Upstream:
         Returns True if at least one frame arrived (which resets the
         backoff). Raises UpstreamError on anything retryable.
         """
-        token = settings.supervisor_token()
+        token = settings.ha_token()
         if not token:
             raise UpstreamError(
-                "no SUPERVISOR_TOKEN - the app can't reach the Home Assistant API"
+                "no ha_token set - create a long-lived access token (your "
+                "Home Assistant profile -> Security) and paste it into this "
+                "app's ha_token option"
             )
 
         entity = settings.camera_entity()
@@ -312,6 +317,11 @@ class Upstream:
         _LOG.info("Subscribing to %s at up to %d fps (subscription #%d)",
                   entity, settings.fps(), self.connections)
 
+        # No query string. Home Assistant's only parameter on this endpoint is
+        # `interval`, and that swaps the camera's own stream for a slideshow
+        # of stills - each one of which the Elegoo integration would fetch
+        # from the printer. The fps cap is applied per viewer instead.
+        #
         # Which phase a timeout happened in is the whole diagnosis, and httpx
         # raises the same ReadTimeout either way, so the phase is tracked here
         # rather than guessed from the exception.
@@ -320,15 +330,21 @@ class Upstream:
             async with self._http().stream(
                 "GET",
                 url,
-                params={"fps": settings.fps()},
                 headers={"Authorization": f"Bearer {token}"},
             ) as response:
                 headers_seen = True
                 return await self._pump(response, entity)
         except httpx.ConnectTimeout as exc:
             raise UpstreamError(
-                f"Home Assistant did not accept a connection within "
-                f"{settings.CONNECT_SECONDS:.0f}s - is Home Assistant itself up?"
+                f"Home Assistant did not accept a connection at "
+                f"{settings.ha_api()} within {settings.CONNECT_SECONDS:.0f}s - "
+                "is Home Assistant itself up?"
+            ) from exc
+        except httpx.ConnectError as exc:
+            raise UpstreamError(
+                f"could not connect to Home Assistant at {settings.ha_api()} "
+                f"({describe(exc)}) - if it uses a port other than 8123 or "
+                "serves HTTPS, set the core_url option to match"
             ) from exc
         except httpx.ReadTimeout as exc:
             if not headers_seen:
@@ -349,6 +365,12 @@ class Upstream:
     async def _pump(self, response: httpx.Response, entity: str) -> bool:
         """Read frames off an open response until it ends or goes silent."""
         produced = False
+        if response.status_code == 401:
+            await response.aread()
+            raise UpstreamError(
+                "Home Assistant rejected ha_token (401) - it was revoked or "
+                "mistyped; create a new long-lived access token"
+            )
         if response.status_code != 200:
             await response.aread()
             raise UpstreamError(

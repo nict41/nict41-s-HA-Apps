@@ -404,7 +404,7 @@ def test_no_api_docs_are_exposed(client):
         assert client.get(path).status_code == 404
 
 
-def test_the_page_never_contains_the_supervisor_token(client, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "super-secret-token")
+def test_the_page_never_contains_the_ha_token(client, monkeypatch):
+    monkeypatch.setenv("HA_TOKEN", "super-secret-token")
     for path in ("/", "/healthz"):
         assert "super-secret-token" not in client.get(path).text

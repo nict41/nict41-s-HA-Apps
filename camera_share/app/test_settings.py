@@ -38,23 +38,23 @@ def test_malformed_entity_ids_fall_back_to_the_default(monkeypatch, value):
 # ── Numbers ─────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("raw,expected", [
-    ("1", 1), ("5", 5), ("10", 10),
-    ("0", 1), ("15", 10), ("99", 10),   # clamped to config.yaml's int(1,10)
-    ("", 5), ("banana", 5),             # unset or nonsense -> the default
+    ("1", 1), ("5", 5), ("20", 20),
+    ("0", 1), ("25", 20), ("99", 20),   # clamped to config.yaml's int(1,20)
+    ("", 20), ("banana", 20),           # unset or nonsense -> the default
 ])
 def test_fps_is_clamped_to_the_schema(monkeypatch, raw, expected):
     monkeypatch.setenv("FPS", raw)
     assert settings.fps() == expected
 
 
-def test_fps_is_capped_at_ten():
-    """A camera-safety limit, not a preference: it stays at 10 until a full
-    idle test has passed on the real printer. Both the schema and the
-    clamp have to agree, or one of them silently stops mattering."""
-    assert settings.FPS_BOUNDS == (1, 10)
+def test_fps_cap_matches_the_schema():
+    """Both the schema and the clamp have to agree, or one of them silently
+    stops mattering."""
+    assert settings.FPS_BOUNDS == (1, 20)
 
     config = (Path(__file__).resolve().parents[1] / "config.yaml").read_text()
-    assert "fps: int(1,10)" in config
+    assert "fps: int(1,20)" in config
+    assert "fps: 20" in config
 
 
 @pytest.mark.parametrize("raw,expected", [
@@ -72,9 +72,24 @@ def test_blank_page_title_falls_back(monkeypatch):
 
 # ── Home Assistant endpoint ─────────────────────────────────────────────────
 
-def test_ha_api_defaults_to_the_supervisor_proxy(monkeypatch):
+def test_ha_api_defaults_to_core_directly(monkeypatch):
+    """Never the Supervisor's proxy: it buffers whole responses, so a camera
+    stream through it never delivers a byte."""
     monkeypatch.delenv("HA_API", raising=False)
-    assert settings.ha_api() == "http://supervisor/core/api"
+    monkeypatch.delenv("CORE_URL", raising=False)
+    assert settings.ha_api() == "http://homeassistant:8123/api"
+
+
+def test_core_url_option_sets_the_api_base(monkeypatch):
+    monkeypatch.delenv("HA_API", raising=False)
+    monkeypatch.setenv("CORE_URL", "https://homeassistant:8443/")
+    assert settings.ha_api() == "https://homeassistant:8443/api"
+
+
+def test_config_no_longer_asks_for_the_supervisor_proxy():
+    config = (Path(__file__).resolve().parents[1] / "config.yaml").read_text()
+    assert "homeassistant_api" not in config
+    assert "ha_token: password?" in config
 
 
 def test_ha_api_override_is_normalised(monkeypatch):
@@ -86,8 +101,9 @@ def test_ha_url_is_ignored(monkeypatch):
     """HA_URL collides with other tooling on this stack, so it is deliberately
     not a name this app reads."""
     monkeypatch.delenv("HA_API", raising=False)
+    monkeypatch.delenv("CORE_URL", raising=False)
     monkeypatch.setenv("HA_URL", "http://somewhere-else.test")
-    assert settings.ha_api() == "http://supervisor/core/api"
+    assert settings.ha_api() == "http://homeassistant:8123/api"
 
 
 # ── Access key ──────────────────────────────────────────────────────────────

@@ -18,24 +18,40 @@ import hmac
 import os
 import re
 
-# Home Assistant Core API, reached through the Supervisor's internal proxy.
+# Home Assistant Core, reached directly on the Supervisor's internal network.
+#
+# Not through the Supervisor's `http://supervisor/core/api` proxy, which is
+# what every other app here uses: that proxy reads the whole upstream body
+# before it sends a single byte back (only text/event-stream is passed
+# through), so a camera_proxy_stream - a response that never ends - never
+# gets so much as its headers to this app. Worse, the proxy keeps the Core
+# request open for its own 300 s timeout after this app has given up, so
+# every retry left another camera stream running inside Home Assistant.
+#
+# Going direct means the Supervisor token is no use (Core doesn't know it),
+# hence the `ha_token` option: a long-lived access token from a Home
+# Assistant user. `core_url` is only for an instance that listens on another
+# port or serves HTTPS.
+#
 # Deliberately *not* called HA_URL: that name is already used by other
-# tooling on this stack and would collide. Override only for development.
-HA_API_DEFAULT = "http://supervisor/core/api"
+# tooling on this stack and would collide. HA_API overrides the whole API
+# base, for development and tests only.
+CORE_URL_DEFAULT = "http://homeassistant:8123"
 
 CAMERA_ENTITY_DEFAULT = "camera.centauri_carbon_2_chamber_camera"
 PAGE_TITLE_DEFAULT = "3D Printer Cam"
-FPS_DEFAULT = 5
+FPS_DEFAULT = 20
 MAX_VIEWERS_DEFAULT = 5
 
 # Mirrors config.yaml's `match(^camera\.[a-z0-9_]+$)`.
 ENTITY_RE = re.compile(r"^camera\.[a-z0-9_]+$")
 
-# Inclusive bounds, mirroring config.yaml's schema. The fps ceiling is a
-# camera-safety limit, not a preference: it stays at 10 until a full idle
-# test has passed on the real printer. Raising it means raising it in
-# config.yaml too, and the schema would reject anything higher first.
-FPS_BOUNDS = (1, 10)
+# Inclusive bounds, mirroring config.yaml's schema. The fps cap is purely
+# what this app sends each viewer: Home Assistant streams at whatever rate
+# the integration's frame hub produces, and the printer sees one connection
+# however this is set. 20 is the printer camera's own rate, so anything
+# higher would only repeat frames.
+FPS_BOUNDS = (1, 20)
 MAX_VIEWERS_BOUNDS = (1, 20)
 
 # How the fan-out behaves. These are not options: they are properties of the
@@ -88,12 +104,18 @@ def _env_int(name: str, fallback: int, bounds: tuple[int, int]) -> int:
     return max(low, min(high, value))
 
 
+def core_url() -> str:
+    return (os.environ.get("CORE_URL", "").strip() or CORE_URL_DEFAULT).rstrip("/")
+
+
 def ha_api() -> str:
-    return (os.environ.get("HA_API", "") or HA_API_DEFAULT).rstrip("/")
+    override = os.environ.get("HA_API", "").strip()
+    return (override or f"{core_url()}/api").rstrip("/")
 
 
-def supervisor_token() -> str:
-    return os.environ.get("SUPERVISOR_TOKEN", "").strip()
+def ha_token() -> str:
+    """The long-lived access token the camera stream is opened with."""
+    return os.environ.get("HA_TOKEN", "").strip()
 
 
 def camera_entity() -> str:
@@ -174,5 +196,6 @@ def as_dict() -> dict:
         "fps": fps(),
         "max_viewers": max_viewers(),
         "access_key_set": auth_required(),
+        "ha_token_set": bool(ha_token()),
         "ha_api": ha_api(),
     }

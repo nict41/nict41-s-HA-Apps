@@ -3,7 +3,7 @@
 Four routes and nothing else. This page is meant to be published on the
 internet through a Cloudflare tunnel, so every request is treated as hostile:
 nothing here proxies any other Home Assistant endpoint or entity, no request
-can name a different camera, and the Supervisor token never leaves the
+can name a different camera, and the Home Assistant token never leaves the
 container.
 
     GET /               the page
@@ -89,10 +89,12 @@ async def lifespan(app: FastAPI):
         _LOG.warning("Set the 'access_key' option BEFORE pointing a Cloudflare "
                      "tunnel at this app.")
         _LOG.warning("=" * 72)
-    if not settings.supervisor_token():
-        _LOG.error("No SUPERVISOR_TOKEN in the environment - the app cannot "
-                   "reach the Home Assistant API and will show the camera as "
-                   "offline. Is 'homeassistant_api: true' set?")
+    if not settings.ha_token():
+        _LOG.error("No ha_token set - the camera will show as offline. Create "
+                   "a long-lived access token (your Home Assistant profile -> "
+                   "Security -> Long-lived access tokens) and paste it into "
+                   "this app's ha_token option.")
+    _LOG.info("Home Assistant API: %s", settings.ha_api())
     yield
     await upstream.aclose()
 

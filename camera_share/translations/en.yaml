@@ -13,14 +13,27 @@ configuration:
       The heading on the shared page and the browser tab title. Visible to
       everyone you share the link with, so keep it anonymous if the page
       will be public.
+  ha_token:
+    name: Home Assistant token
+    description: >-
+      A long-lived access token, created on your Home Assistant profile
+      page under Security -> Long-lived access tokens. Required: the camera
+      stream is read from Home Assistant directly with it, because the
+      Supervisor's API proxy cannot pass a live stream through. A dedicated
+      non-admin user for it is a good idea. It never leaves this app.
+  core_url:
+    name: Home Assistant address
+    description: >-
+      Leave blank for http://homeassistant:8123. Set it only if Home
+      Assistant listens on another port or serves HTTPS.
   fps:
     name: Frames per second
     description: >-
-      The most frames each viewer is sent per second, and the rate asked of
-      Home Assistant. 5 is plenty for watching a print. Capped at 10 as a
-      camera-safety limit rather than a bandwidth one - raise it only after
-      a full idle test has passed on the real printer. This is a ceiling,
-      not a guarantee: the printer's camera sets the real rate.
+      The most frames each viewer is sent per second. This only affects the
+      bandwidth each viewer uses - the printer sees one connection whatever
+      it is set to. 20 matches the printer camera; lower it to save
+      bandwidth through the tunnel. A ceiling, not a guarantee: the camera
+      sets the real rate.
   access_key:
     name: Access key
     description: >-

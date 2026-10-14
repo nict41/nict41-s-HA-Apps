@@ -51,7 +51,7 @@ directly. Everything goes through Home Assistant.
 | `/healthz` | Status as JSON: upstream state, viewer count, age of the last frame. Needs no access key and starts nothing, so it is safe to point an uptime monitor at. |
 
 There are no other routes. The app cannot be made to proxy any other Home
-Assistant endpoint or any other entity, and the Supervisor token never
+Assistant endpoint or any other entity, and the Home Assistant token never
 leaves the container.
 
 ## Setup
@@ -62,8 +62,10 @@ leaves the container.
 |---|---|---|
 | `camera_entity` | `camera.centauri_carbon_2_chamber_camera` | The one camera to share. |
 | `page_title` | `3D Printer Cam` | Heading and tab title. Everyone you share the link with sees it. |
+| `ha_token` | _(blank)_ | Long-lived access token the camera is read with. **Required** — see below. |
+| `core_url` | _(blank)_ | Home Assistant's address, if not `http://homeassistant:8123`. |
 | `access_key` | _(blank)_ | Shared secret the page demands. **Set this.** |
-| `fps` | `5` | Cap on frames per second, per viewer, and the rate asked of Home Assistant. Limited to **10** — see below. |
+| `fps` | `20` | Cap on frames per second, per viewer. Bandwidth only — see below. |
 | `max_viewers` | `5` | How many people may watch at once. |
 
 #### The host port is whatever the Network tab says
@@ -88,7 +90,27 @@ Point the Cloudflare tunnel at http://<Home Assistant LAN IP>:8099
 The rest of this page writes the port as **8096** because that is the
 default; substitute whatever your Network tab actually shows.
 
-### 2. Set an access key
+### 2. Give it a Home Assistant token
+
+The app reads the camera straight from Home Assistant at
+`http://homeassistant:8123`, and that needs a token of its own:
+
+1. Ideally create a dedicated, **non-admin** Home Assistant user for it
+   (**Settings → People → Users**), and log in as that user once.
+2. On that user's profile page, open **Security → Long-lived access tokens
+   → Create token**, and copy it.
+3. Paste it into `ha_token`.
+
+Why not the Supervisor's token, like other apps? The Supervisor's API proxy
+holds back a response until it has the **whole** body, and a camera stream
+never ends — so through the proxy the app never received a single byte
+(1.0.1 and earlier failed exactly this way). Home Assistant itself has to be
+reached directly, and it doesn't accept the Supervisor's token.
+
+Only set `core_url` if Home Assistant listens on a port other than 8123 or
+serves HTTPS on it (e.g. `https://homeassistant:8443`).
+
+### 3. Set an access key
 
 Put something long and random in `access_key` - the output of
 `openssl rand -hex 16` is ideal. The app logs a **warning** at startup if it
@@ -96,19 +118,16 @@ is blank, because the page is about to be published on the internet.
 
 Without a key, anyone who learns the hostname can watch your printer.
 
-### 3. Leave `fps` alone until you have tested once
+### 4. Choose an `fps`
 
-`fps` is capped at **10**, not because 10 is a bandwidth limit but because
-this app's whole job is to be gentle with a camera whose firmware crashes
-when it is over-connected. The default of **5** is plenty for watching a
-print.
+`fps` only decides how many frames this app sends **each viewer** per
+second. Home Assistant streams at whatever rate the frame hub produces, and
+the printer sees one connection whatever this is set to — so it is a
+bandwidth knob, not a camera-safety one. The default of **20** matches the
+printer camera; drop it to 5–10 if your upload is tight or you expect
+several viewers at once.
 
-Raise it only after a full idle test has passed on the real printer (open
-the page alone, then 2–3 viewers, and confirm the frame hub still shows one
-connection). Anything above 10 needs the limit in `config.yaml` changed
-first, which is deliberate.
-
-### 4. Point a Cloudflare tunnel at it
+### 5. Point a Cloudflare tunnel at it
 
 In the **Cloudflare Zero Trust** dashboard, open **Networks → Tunnels**, pick
 the tunnel the Cloudflared app runs, and add a **public hostname**:
@@ -126,7 +145,7 @@ its own container and `localhost` there is not Home Assistant.
 Nothing else needs forwarding, and this app is the only thing behind that
 hostname: the tunnel never sees Home Assistant itself.
 
-### 5. Share the link
+### 6. Share the link
 
 ```
 https://printer.yourdomain.com/?key=<your access key>
@@ -198,14 +217,19 @@ carry it; the printer sees one connection either way.
   tools → States**.
 - `Home Assistant returned 500` or no boundary in the Content-Type — almost
   always an Elegoo integration older than 2.12.3.0, i.e. no frame hub.
-- `No SUPERVISOR_TOKEN` — reinstall the app; it is granted the Home
-  Assistant API by its own config.
+- `no ha_token set` — see step 2 of Setup.
+- `Home Assistant rejected ha_token (401)` — the token was revoked, or
+  pasted with a piece missing. Create a new one.
 
 **"the frame hub is most likely stuck".** Home Assistant accepted the
 connection and then sent nothing at all — not even response headers — for
 20 seconds. That is the frame hub wedged rather than the camera being off:
 a camera that is merely down answers and then goes quiet, which is reported
 as "camera server has most likely stopped sending" instead.
+
+(On 1.0.1 and earlier this message appeared **every** time, and was wrong:
+it was the Supervisor's API proxy holding the stream back. Update to 1.0.2
+and set `ha_token`.)
 
 Reload the integration (**Settings → Devices & Services → Elegoo →
 Reload**). If that doesn't clear it, power-cycle the printer **while it is
@@ -217,7 +241,7 @@ the diagnosis, and the common ones are:
 | Name | What it means |
 |---|---|
 | `ReadTimeout` | Covered above — see the specific message on the line, which says whether it was headers or mid-stream. |
-| `ConnectTimeout` / `ConnectError` | The app couldn't reach Home Assistant's own API. Unusual, since that is an internal Supervisor address. |
+| `ConnectTimeout` / `ConnectError` | The app couldn't reach Home Assistant at `http://homeassistant:8123`. If Home Assistant serves HTTPS or uses another port, set `core_url`. |
 | `RemoteProtocolError` | Home Assistant closed the stream mid-response. Normally harmless; the app reconnects. |
 
 **Nothing loads through the tunnel but the LAN address works.** The tunnel's
