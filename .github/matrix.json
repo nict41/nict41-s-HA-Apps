@@ -1,0 +1,30 @@
+{
+  "_comment": [
+    "Single source of truth for CI coverage, so the build and test workflows",
+    "and the change selector cannot drift apart.",
+    "",
+    "build: one entry per app/arch image that CI proves still builds.",
+    "test:  apps with a pytest suite under <app>/app.",
+    "",
+    "Adding an app means adding it here; .github/scripts/select-matrix.sh",
+    "filters these lists down to what a given change actually touched."
+  ],
+  "build": [
+    { "app": "kiwix", "arch": "aarch64", "platform": "linux/arm64" },
+    { "app": "kiwix", "arch": "amd64", "platform": "linux/amd64" },
+    { "app": "gods_eye_view", "arch": "aarch64", "platform": "linux/arm64" },
+    { "app": "gods_eye_view", "arch": "amd64", "platform": "linux/amd64" },
+    { "app": "elegoo_slicer", "arch": "amd64", "platform": "linux/amd64" },
+    { "app": "camera_share", "arch": "aarch64", "platform": "linux/arm64" },
+    { "app": "camera_share", "arch": "amd64", "platform": "linux/amd64" },
+    { "app": "youtube_music_sync", "arch": "aarch64", "platform": "linux/arm64" },
+    { "app": "youtube_music_sync", "arch": "amd64", "platform": "linux/amd64" }
+  ],
+  "test": [
+    "print_timelapse",
+    "parcel_tracker",
+    "kiwix",
+    "youtube_music_sync",
+    "camera_share"
+  ]
+}

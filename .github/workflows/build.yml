@@ -1,55 +1,60 @@
 name: Build
 
+# `push` is restricted to the default branch on purpose. Without that, a
+# branch with an open pull request fires this workflow twice - once for the
+# push and once for the pull request - and every check runs in duplicate.
 on:
   push:
-    paths:
-      - "*/Dockerfile"
-      - "*/build.yaml"
-      - "*/config.yaml"
-      - "*/rootfs/**"
-      - "*/app/**"
-      - ".github/workflows/build.yml"
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
+# Supersede a run when another push lands on the same pull request. Runs on
+# main are left alone: cancelling one would throw away the signal that the
+# default branch still builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # Which images this change can actually affect. A `paths:` filter cannot
+  # do this: it decides whether the workflow runs at all, not which matrix
+  # entries run, so one app's config.yaml used to rebuild all of them.
+  select:
+    name: Select affected apps
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.select.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: select
+        name: Work out which apps changed
+        env:
+          # A push to main and a manual run build everything: the point
+          # there is to prove the whole repository still works.
+          SELECT_ALL: ${{ github.event_name != 'pull_request' }}
+        run: |
+          if [ "${SELECT_ALL}" = "true" ]; then
+            printf '' | .github/scripts/select-matrix.sh | tee -a "${GITHUB_OUTPUT}"
+          else
+            git diff --name-only \
+              "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+              | tee /dev/stderr \
+              | .github/scripts/select-matrix.sh | tee -a "${GITHUB_OUTPUT}"
+          fi
+
   build:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
+    needs: select
+    if: needs.select.outputs.build != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      # Every combination is listed in full: an `include` that only adds keys
-      # missing from the base matrix merges into the first combination and
-      # then splits off as its own, which would silently drop `app`.
       matrix:
-        include:
-          - app: kiwix
-            arch: aarch64
-            platform: linux/arm64
-          - app: kiwix
-            arch: amd64
-            platform: linux/amd64
-          - app: gods_eye_view
-            arch: aarch64
-            platform: linux/arm64
-          - app: gods_eye_view
-            arch: amd64
-            platform: linux/amd64
-          - app: elegoo_slicer
-            arch: amd64
-            platform: linux/amd64
-          - app: camera_share
-            arch: aarch64
-            platform: linux/arm64
-          - app: camera_share
-            arch: amd64
-            platform: linux/amd64
-          - app: youtube_music_sync
-            arch: aarch64
-            platform: linux/arm64
-          - app: youtube_music_sync
-            arch: amd64
-            platform: linux/amd64
+        include: ${{ fromJSON(needs.select.outputs.build) }}
     steps:
       - uses: actions/checkout@v4
 
