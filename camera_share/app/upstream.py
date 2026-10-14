@@ -165,7 +165,14 @@ class Upstream:
         self._idle_task = None
 
     async def stop(self) -> None:
-        """Close the subscription now. Safe to call when nothing is running."""
+        """Close the subscription now. Safe to call when nothing is running.
+
+        The state goes first. `running` turns False the moment the reader is
+        detached, so setting the state afterwards leaves a window where this
+        reads as "not running, still live" - which is exactly what /healthz
+        and the page would show while the subscription is winding down.
+        """
+        self._state = IDLE
         reader, self._reader = self._reader, None
         if reader is not None and not reader.done():
             reader.cancel()
@@ -173,7 +180,6 @@ class Upstream:
                 await reader
             except asyncio.CancelledError:
                 pass
-        self._state = IDLE
 
     async def aclose(self) -> None:
         idle, self._idle_task = self._idle_task, None

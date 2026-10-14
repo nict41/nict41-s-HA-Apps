@@ -153,7 +153,9 @@ async def test_last_viewer_leaving_closes_the_subscription_after_the_idle_delay(
     # Still held, so a page reload doesn't cost a reconnect.
     assert up.running is True
     await _until(lambda: not up.running, timeout=2.0)
+    # Not running and still "live" is a state nothing should ever observe.
     assert up.state == upstream_module.IDLE
+    assert up.status()["upstream"] == upstream_module.IDLE
     assert up.viewers == 0
     assert len(calls) == 1
 
