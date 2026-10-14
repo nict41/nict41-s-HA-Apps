@@ -17,6 +17,15 @@ This repository contains the following apps
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
 
+### [Camera Share](./camera_share)
+
+![Camera Share logo](camera_share/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Shares one Home Assistant camera as a read-only public web page on a LAN port, for publishing a 3D printer's camera to friends through a Cloudflare tunnel - one subscription to Home Assistant however many people are watching.
+
 ### [CPU Performance Governor](./cpu_governor)
 
 ![CPU Performance Governor logo](cpu_governor/logo.png)

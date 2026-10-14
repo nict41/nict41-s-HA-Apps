@@ -1,0 +1,33 @@
+name: "Camera Share"
+version: "1.0.0"
+slug: "camera_share"
+description: "Shares one Home Assistant camera as a read-only public web page, for exposing a printer camera through a Cloudflare tunnel"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/camera_share"
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+# The page is deliberately *not* behind ingress: it exists to be published
+# through a Cloudflare tunnel, which needs a plain LAN port to point at.
+# 8095 is taken by Pingvin Share on this system, hence 8096.
+ports:
+  8099/tcp: 8096
+ports_description:
+  8099/tcp: "Public read-only camera page - point your Cloudflare tunnel's public hostname at http://<HA LAN IP>:8096"
+# The one Supervisor permission this needs: the Home Assistant Core API, so
+# the camera is read through HA's own camera_proxy_stream (and the Elegoo
+# integration's frame hub) rather than from the printer directly.
+homeassistant_api: true
+options:
+  camera_entity: "camera.centauri_carbon_2_chamber_camera"
+  page_title: "3D Printer Cam"
+  fps: 5
+  access_key: ""
+  max_viewers: 5
+schema:
+  camera_entity: match(^camera\.[a-z0-9_]+$)
+  page_title: str
+  fps: int(1,15)
+  access_key: password?
+  max_viewers: int(1,20)
