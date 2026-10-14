@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.2
+
+- **Fixes the camera never loading.** The app read the camera through the
+  Supervisor's API proxy (`http://supervisor/core/api`), and that proxy
+  holds back every response until it has the whole body - only
+  `text/event-stream` is passed through as it arrives. A camera stream never
+  ends, so the app never received even the response headers, and logged
+  "accepted the stream but sent no headers in 20s" every time. The
+  "frame hub is most likely stuck" diagnosis on that line was wrong;
+  reloading the integration or the printer could never help. Each attempt
+  also left a camera stream open inside Home Assistant for up to the
+  proxy's 300 s timeout.
+- **New required option: `ha_token`.** The app now reads the camera from
+  Home Assistant directly at `http://homeassistant:8123`, which needs a
+  long-lived access token (profile -> Security -> Long-lived access tokens;
+  a dedicated non-admin user is a good idea). Until it is set the page
+  shows the camera as offline and the log says why. A new optional
+  `core_url` covers an instance on another port or serving HTTPS.
+- The app no longer asks for the Home Assistant API permission
+  (`homeassistant_api`), since it doesn't go through the Supervisor any more.
+- **`fps` now goes up to 20, and defaults to 20.** The 10 fps cap in 1.0.1
+  was called a camera-safety limit, and it never was one: `fps` only sets
+  how many frames each viewer is sent, and the printer sees one connection
+  whatever it is. It is a bandwidth setting. An existing install keeps the
+  value it already has, so raise it in the options to get the full rate.
+- The app no longer sends `?fps=` to Home Assistant. Home Assistant ignored
+  it (the endpoint's only parameter is `interval`, which would replace the
+  live stream with a slideshow of stills fetched one by one from the
+  printer).
+- **Stopping the camera subscription can no longer hang.** The 5 s bound on
+  shutting the reader and HTTP client down didn't hold on Python 3.12+,
+  where `asyncio.wait_for` waits for a cancelled task to finish even after
+  its timeout - so a reader stuck unwinding an HTTP request could hold up
+  the idle shutdown or an app restart indefinitely.
+
 ## 1.0.1
 
 - **`fps` is now capped at 10** (was 15). This is a camera-safety limit

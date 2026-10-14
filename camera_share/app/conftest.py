@@ -21,8 +21,8 @@ os.environ.setdefault("PAGE_TITLE", "Test Cam")
 os.environ.setdefault("FPS", "5")
 os.environ.setdefault("MAX_VIEWERS", "5")
 os.environ.setdefault("ACCESS_KEY", "")
-os.environ.setdefault("SUPERVISOR_TOKEN", "test-token")
-os.environ.setdefault("HA_API", "http://supervisor.test/core/api")
+os.environ.setdefault("HA_TOKEN", "test-token")
+os.environ.setdefault("HA_API", "http://homeassistant.test/api")
 
 
 # A one-pixel JPEG is all the fan-out ever needs: it only cares that a frame
@@ -79,5 +79,5 @@ def _clean_env(monkeypatch):
     monkeypatch.setenv("ACCESS_KEY", "")
     monkeypatch.setenv("MAX_VIEWERS", "5")
     monkeypatch.setenv("FPS", "5")
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "test-token")
+    monkeypatch.setenv("HA_TOKEN", "test-token")
     yield

@@ -125,8 +125,9 @@ async def test_the_request_asks_home_assistant_for_the_configured_camera(make_up
 
     request = calls[0][1]
     assert request.url.path.endswith("/camera_proxy_stream/camera.centauri_carbon_2_chamber_camera")
-    # The per-viewer cap is also what is asked of the hub upstream.
-    assert request.url.params["fps"] == str(settings.fps())
+    # No query string: HA ignores `fps`, and its one parameter, `interval`,
+    # would swap the live stream for stills fetched one by one.
+    assert request.url.query == b""
     assert request.headers["authorization"] == "Bearer test-token"
 
 
@@ -225,6 +226,16 @@ async def test_a_bad_status_is_reported_not_swallowed(make_upstream):
     assert "2.12.3.0" in (up._error or "")
 
 
+async def test_a_rejected_token_says_so(make_upstream):
+    up, _ = make_upstream(lambda _a, _r: httpx.Response(401, text="401: Unauthorized"))
+
+    up.acquire()
+    await _until(lambda: up.state == upstream_module.OFFLINE)
+
+    assert "ha_token" in (up._error or "")
+    assert "401" in (up._error or "")
+
+
 async def test_a_stream_without_a_boundary_is_rejected(make_upstream):
     def responder(_attempt, _request):
         return httpx.Response(200, headers={"content-type": "image/jpeg"},
@@ -237,15 +248,15 @@ async def test_a_stream_without_a_boundary_is_rejected(make_upstream):
     assert "boundary" in (up._error or "")
 
 
-async def test_no_supervisor_token_means_no_connection_attempt(make_upstream, monkeypatch):
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "")
+async def test_no_ha_token_means_no_connection_attempt(make_upstream, monkeypatch):
+    monkeypatch.setenv("HA_TOKEN", "")
     up, calls = make_upstream(_frames_then([JPEG]))
 
     up.acquire()
     await _until(lambda: up.state == upstream_module.OFFLINE)
 
     assert calls == []
-    assert "SUPERVISOR_TOKEN" in (up._error or "")
+    assert "ha_token" in (up._error or "")
 
 
 async def test_backoff_resets_once_frames_flow_again(make_upstream):

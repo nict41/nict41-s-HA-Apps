@@ -5,10 +5,11 @@
 # Reads app options into the environment and starts the public camera page.
 #
 # Note there is deliberately no HA_URL here: that name collides with other
-# tooling in this stack. The app talks to Home Assistant over the Supervisor's
-# internal proxy (http://supervisor/core/api) using SUPERVISOR_TOKEN, which
-# the Supervisor injects because config.yaml asks for homeassistant_api.
-# HA_API exists only as an override for development and tests.
+# tooling in this stack. The app talks to Home Assistant Core directly
+# (http://homeassistant:8123, or core_url) with the ha_token option, not
+# through the Supervisor's API proxy, which can't pass a camera stream
+# through - see app/settings.py. HA_API exists only as an override for
+# development and tests.
 # ==============================================================================
 
 declare camera_entity
@@ -16,21 +17,33 @@ declare page_title
 declare fps
 declare access_key
 declare max_viewers
+declare ha_token
+declare core_url=""
 
 camera_entity=$(bashio::config 'camera_entity')
 page_title=$(bashio::config 'page_title')
 fps=$(bashio::config 'fps')
 access_key=$(bashio::config 'access_key')
 max_viewers=$(bashio::config 'max_viewers')
+ha_token=$(bashio::config 'ha_token')
+if bashio::config.has_value 'core_url'; then
+    core_url=$(bashio::config 'core_url')
+fi
 
 export CAMERA_ENTITY="${camera_entity}"
 export PAGE_TITLE="${page_title}"
 export FPS="${fps}"
 export ACCESS_KEY="${access_key}"
 export MAX_VIEWERS="${max_viewers}"
+export HA_TOKEN="${ha_token}"
+export CORE_URL="${core_url}"
 
 bashio::log.info "Camera: ${camera_entity}"
 bashio::log.info "Frame rate: up to ${fps} fps per viewer, ${max_viewers} viewer(s) max"
+
+if ! bashio::var.has_value "${ha_token}"; then
+    bashio::log.error "No ha_token set - the camera will show as offline until one is (profile -> Security -> Long-lived access tokens)"
+fi
 
 # Said here as well as in the app's own startup log, because this is the line
 # that lands in the app log before anything else and the page is about to be
