@@ -25,6 +25,53 @@ def test_playlists_fall_back_to_plain_lines(monkeypatch):
     assert settings.load().playlists == ("https://a", "https://b")
 
 
+# ------------------------------------------------------- playlist de-duplication
+
+def test_duplicate_playlist_urls_differing_only_by_si_are_collapsed(monkeypatch):
+    monkeypatch.setenv("YMS_PLAYLISTS", json.dumps([
+        "https://music.youtube.com/playlist?list=PLvsKMOn5as94GH_4-P2Z0l2eRJY_6JidE&si=p-TGNQhEMw2NIjVn",
+        "https://music.youtube.com/playlist?list=PLvsKMOn5as94GH_4-P2Z0l2eRJY_6JidE&si=O2ElVt-FJQM5z94i",
+    ]))
+    playlists = settings.load().playlists
+    assert len(playlists) == 1
+    assert playlists[0].endswith("si=p-TGNQhEMw2NIjVn")
+
+
+def test_duplicate_playlist_urls_are_the_same_across_youtube_hosts(monkeypatch):
+    monkeypatch.setenv("YMS_PLAYLISTS", json.dumps([
+        "https://www.youtube.com/playlist?list=PLabc",
+        "https://youtube.com/playlist?list=PLabc",
+        "https://music.youtube.com/playlist?list=PLabc",
+    ]))
+    assert len(settings.load().playlists) == 1
+
+
+def test_different_playlists_are_both_kept(monkeypatch):
+    monkeypatch.setenv("YMS_PLAYLISTS", json.dumps([
+        "https://music.youtube.com/playlist?list=PLaaa",
+        "https://music.youtube.com/playlist?list=PLbbb",
+    ]))
+    assert len(settings.load().playlists) == 2
+
+
+def test_a_url_with_no_list_param_is_never_treated_as_a_duplicate(monkeypatch):
+    # Doesn't look like a playlist at all by this check - left alone rather
+    # than risking dropping something that should have been kept.
+    monkeypatch.setenv("YMS_PLAYLISTS", json.dumps([
+        "https://music.youtube.com/watch?v=abc",
+        "https://music.youtube.com/watch?v=abc",
+    ]))
+    assert len(settings.load().playlists) == 2
+
+
+def test_a_non_youtube_url_is_left_alone(monkeypatch):
+    monkeypatch.setenv("YMS_PLAYLISTS", json.dumps([
+        "https://example.com/playlist?list=PLabc",
+        "https://example.com/playlist?list=PLabc",
+    ]))
+    assert len(settings.load().playlists) == 2
+
+
 @pytest.mark.parametrize("raw,expected", [("true", True), ("True", True), ("1", True),
                                           ("on", True), ("false", False), ("0", False),
                                           ("", True)])

@@ -128,22 +128,51 @@ def test_a_deferred_video_is_not_offered_again_yet(tmp_path):
     assert store.retired_ids() == set()
 
 
-def test_a_transient_failure_keeps_retrying_next_cycle(tmp_path):
+def test_a_transient_failure_also_backs_off_now(tmp_path):
+    # Previously these retried every single cycle forever - a stale-partial
+    # 416 or a captcha that doesn't clear would eat a download slot and a
+    # request every cycle indefinitely. They now back off too, just on a
+    # shorter schedule than an unavailable classification.
     store = make_store(tmp_path)
-    _fail(store, permanent=False, error="HTTP Error 429: Too Many Requests")
-    assert store.deferred_ids() == {}
+    attempts, retry_after = _fail(store, permanent=False, error="HTTP Error 429: Too Many Requests")
+    assert attempts == 1 and retry_after is not None
+    assert "vid00000001" in store.deferred_ids()
     assert store.retired_ids() == set()
-    # Still absent from downloaded_ids, i.e. still due for another attempt.
+    # Still absent from downloaded_ids, i.e. still due for another attempt -
+    # just not until retry_after.
     assert "vid00000001" not in store.downloaded_ids()
 
 
-def test_a_transient_failure_clears_an_earlier_backoff(tmp_path):
+def test_transient_failures_back_off_further_each_time_on_their_own_schedule(tmp_path):
+    store = make_store(tmp_path)
+    seen = []
+    for _ in range(5):
+        attempts, retry_after = _fail(store, permanent=False, error="Connection reset by peer")
+        seen.append((attempts, retry_after))
+    assert [a for a, _ in seen] == [1, 2, 3, 4, 5]
+    stamps = [r for _, r in seen]
+    assert all(stamps[i] <= stamps[i + 1] for i in range(len(stamps) - 1))
+    # Attempted at most once a day after the third failure: the schedule
+    # (1h, 6h, 24h) is exhausted by then, and every attempt after falls back
+    # to the (default 30-day) recheck_unavailable_days cap, which is >= 24h.
+    assert stamps[2] > stamps[1] >= stamps[0]
+
+
+def test_switching_classification_does_not_reset_the_backoff(tmp_path):
+    """A transient failure no longer wipes out an unavailable one's progress.
+
+    The two schedules are just different speeds of the same escalation -
+    whatever classification the *current* attempt gets just picks which
+    schedule the wait comes from, continuing from the same attempt count.
+    """
     store = make_store(tmp_path)
     _fail(store)
     _fail(store)
     assert store.deferred_ids()
-    _fail(store, permanent=False, error="Connection reset by peer")
-    assert store.deferred_ids() == {}
+    attempts, retry_after = _fail(store, permanent=False, error="Connection reset by peer")
+    assert attempts == 3
+    assert retry_after is not None
+    assert "vid00000001" in store.deferred_ids()
 
 
 def test_cap_of_zero_retires_the_video(tmp_path):
@@ -189,3 +218,47 @@ def test_a_database_from_an_earlier_version_is_migrated(tmp_path):
     assert store.deferred_ids() == {}
     _fail(store)
     assert "vid00000001" in store.deferred_ids()
+
+
+# ---------------------------------------------------------- bot-block backoff
+
+def test_a_bot_block_pauses_for_the_starting_period(tmp_path):
+    store = make_store(tmp_path)
+    assert store.bot_backoff_until() is None
+    until = store.register_bot_block()
+    assert until is not None
+    assert store.bot_backoff_until() == until
+
+
+def test_consecutive_bot_blocks_double_up_to_the_cap(tmp_path):
+    store = make_store(tmp_path)
+    first = store.register_bot_block()
+    second = store.register_bot_block()  # still blocked - doubles
+    assert second > first
+    # Force it to look expired so the next registration reads as consecutive
+    # only via the still-blocked check, not by running the clock for real.
+    for _ in range(6):
+        store.register_bot_block()
+    # Plateaus at the cap rather than growing forever.
+    assert store.get_meta("bot_backoff_hours") == "24"
+
+
+def test_a_fresh_block_after_recovery_restarts_at_the_starting_period(tmp_path):
+    store = make_store(tmp_path)
+    store.register_bot_block()
+    store.register_bot_block()
+    assert store.get_meta("bot_backoff_hours") != "6"
+    store.clear_bot_backoff()
+    fresh = store.register_bot_block()
+    assert store.get_meta("bot_backoff_hours") == "6"
+    assert fresh is not None
+
+
+def test_bot_backoff_survives_reopen(tmp_path):
+    path = str(tmp_path / "state.db")
+    store = Store(path)
+    until = store.register_bot_block()
+    store.close()
+
+    reopened = Store(path)
+    assert reopened.bot_backoff_until() == until

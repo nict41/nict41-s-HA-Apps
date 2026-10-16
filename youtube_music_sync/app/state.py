@@ -67,17 +67,39 @@ STATUS_DUPLICATE_AFTER_DOWNLOAD = "duplicate_after_download"
 # costs one request and keeps that door open.
 UNAVAILABLE_BACKOFF_HOURS = (6, 24, 72, 168, 720)
 
+# Every *other* failure (a captcha that didn't clear, a stale-partial 416, a
+# dropped connection that keeps dropping, ...) used to retry every single
+# cycle forever. That is fine for one or two attempts - most of these really
+# are transient - but a video that keeps failing the same way for days is
+# consuming a download slot and a request every cycle for nothing. Same
+# shape as the unavailable backoff, just shorter: an hour, six hours, a day,
+# then the same recheck_unavailable_days cap.
+TRANSIENT_BACKOFF_HOURS = (1, 6, 24)
 
-def _retry_after(attempts: int, cap_days: int) -> str | None:
+# How long YouTube's own bot/rate-limit challenge pauses every cycle for, in
+# hours: starts at BOT_BLOCK_BACKOFF_START_HOURS and doubles on each cycle
+# that is still blocked when it would otherwise have run, up to this cap.
+BOT_BLOCK_BACKOFF_START_HOURS = 6
+BOT_BLOCK_BACKOFF_CAP_HOURS = 24
+
+
+def _retry_after(attempts: int, cap_days: int, schedule_hours: tuple[int, ...]) -> str | None:
     """When a video that has failed `attempts` times should be tried again.
 
-    `cap_days` of 0 means never: the video is retired until the database is
-    cleared or it stops appearing in a playlist.
+    The first len(schedule_hours) attempts follow that schedule; every
+    attempt after that waits `cap_days` days. `cap_days` of 0 means never:
+    the video is retired until the database is cleared or it stops
+    appearing in a playlist.
     """
     if cap_days == 0:
         return None
-    index = min(max(attempts, 1), len(UNAVAILABLE_BACKOFF_HOURS)) - 1
-    hours = min(UNAVAILABLE_BACKOFF_HOURS[index], cap_days * 24)
+    if attempts <= len(schedule_hours):
+        hours = schedule_hours[attempts - 1]
+    else:
+        hours = cap_days * 24
+    # A schedule entry can exceed a cap_days set low by the user - never wait
+    # longer than they asked for, even on an early attempt.
+    hours = min(hours, cap_days * 24)
     return (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(timespec="seconds")
 
 
@@ -222,16 +244,22 @@ class Store:
     ) -> tuple[int, str | None]:
         """Record a failed download and decide when to try it again.
 
-        A transient failure clears any backoff: whatever was wrong last time
-        is not a property of the video. An unavailable one escalates.
+        Every failure escalates the backoff, permanent or not - a video that
+        keeps failing, for whatever reason, is backed off further each time
+        rather than retried every cycle forever. An unavailable classification
+        just escalates faster (UNAVAILABLE_BACKOFF_HOURS) than an ordinary one
+        (TRANSIENT_BACKOFF_HOURS); switching between the two classifications
+        from one attempt to the next does not reset the count, only which
+        schedule the next wait is read from.
         Returns (attempts so far, when it is next due) for logging.
         """
         row = self._db.execute(
             "SELECT attempts FROM downloads WHERE video_id = ?", (video_id,)
         ).fetchone()
         previous = int(row["attempts"]) if row and row["attempts"] else 0
-        attempts = previous + 1 if permanent else 0
-        retry_after = _retry_after(attempts, cap_days) if permanent else None
+        attempts = previous + 1
+        schedule = UNAVAILABLE_BACKOFF_HOURS if permanent else TRANSIENT_BACKOFF_HOURS
+        retry_after = _retry_after(attempts, cap_days, schedule)
 
         self._db.execute(
             "INSERT INTO downloads (video_id, playlist, title, uploader, duration, path, "
@@ -331,3 +359,41 @@ class Store:
     def get_meta(self, key: str, default: str = "") -> str:
         row = self._db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else default
+
+    # ---------------------------------------------------- bot-block backoff
+
+    def register_bot_block(self) -> str:
+        """Record a YouTube bot/rate-limit challenge. Returns the ISO
+        timestamp cycles are paused until.
+
+        Starts at BOT_BLOCK_BACKOFF_START_HOURS; a hit while an earlier
+        block is still in effect (i.e. consecutive, not a fresh one after
+        things recovered) doubles the wait, up to BOT_BLOCK_BACKOFF_CAP_HOURS.
+        Survives a restart: both the level and the deadline live here, not
+        in memory.
+        """
+        current = int(self.get_meta("bot_backoff_hours", "0") or 0)
+        still_blocked = self.bot_backoff_until() is not None
+        if current and still_blocked:
+            hours = min(current * 2, BOT_BLOCK_BACKOFF_CAP_HOURS)
+        else:
+            hours = BOT_BLOCK_BACKOFF_START_HOURS
+        until = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat(timespec="seconds")
+        self.set_meta("bot_backoff_hours", str(hours))
+        self.set_meta("bot_backoff_until", until)
+        return until
+
+    def bot_backoff_until(self) -> str | None:
+        """ISO timestamp cycles are paused until, or None if not in effect."""
+        until = self.get_meta("bot_backoff_until", "")
+        if until and until > _now():
+            return until
+        return None
+
+    def clear_bot_backoff(self) -> None:
+        """Reset the escalation level once a cycle gets through clean.
+
+        Otherwise a single old block from weeks ago would keep doubling the
+        starting point of any future one forever.
+        """
+        self.set_meta("bot_backoff_hours", "0")

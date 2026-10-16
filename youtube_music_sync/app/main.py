@@ -163,8 +163,11 @@ def _plan_cycle(
         )
 
         if match.status == DUPLICATE:
-            _LOG.info("Already in library: %r (%s) -> %s",
-                      entry.title, match.reason, match.path)
+            # At INFO this was ~100 lines every cycle on a library of any
+            # size, burying the lines that actually need eyeballing. The
+            # "already owned" count in the cycle summary is enough at INFO.
+            _LOG.debug("Already in library: %r (%s) -> %s",
+                       entry.title, match.reason, match.path)
             if record:
                 store.record_skip(entry.video_id, title=entry.title, status="duplicate",
                                   reason=match.reason, matched_path=match.path,
@@ -176,9 +179,15 @@ def _plan_cycle(
             # Close to something owned, but not the same recording - a live cut
             # or a different edit. Downloaded, and called out so it can be
             # eyeballed if the library starts growing near-duplicates.
-            _LOG.info("Downloading %r despite a near match (%s) with %s",
-                      entry.title, match.reason, match.path)
-            report.near_misses += 1
+            #
+            # Deliberately not counted or announced at INFO here: this is the
+            # decision to *attempt* the download, made before it is known
+            # whether the download will even succeed. Counting it here made a
+            # track that failed to download still show up as a "near match
+            # kept" in the cycle summary. The count and the real announcement
+            # happen after the file is actually saved, in _run_downloads.
+            _LOG.debug("Will download %r despite a near match (%s) with %s",
+                       entry.title, match.reason, match.path)
         elif match.status == AMBIGUOUS:
             _LOG.info("Downloading %r to check it against %s - %s",
                       entry.title, match.path, match.reason)
@@ -216,12 +225,13 @@ def _progress_logger(cfg: Config, title: str):
 
 
 def _record_failure(cfg: Config, store: Store, entry, error: str) -> None:
-    """Record a failed download, backing off if the video itself is the problem.
+    """Record a failed download and back off before retrying it.
 
-    A transient failure (captcha, rate limit, dropped connection) is retried
-    on the next cycle exactly as before. One that means the video cannot be
-    fetched escalates through a backoff, so a playlist full of dead entries
-    stops consuming the cycle's download budget.
+    Every failure now escalates a per-video backoff, not just the ones that
+    mean the video itself is gone: an unavailable classification escalates
+    through UNAVAILABLE_BACKOFF_HOURS, anything else through the shorter
+    TRANSIENT_BACKOFF_HOURS, so a track that keeps failing - for whatever
+    reason - stops consuming a download slot and a request every cycle.
     """
     kind = downloader.classify_failure(error)
     permanent = kind == downloader.FAILURE_UNAVAILABLE
@@ -230,22 +240,29 @@ def _record_failure(cfg: Config, store: Store, entry, error: str) -> None:
         uploader=entry.uploader, duration=entry.duration,
         permanent=permanent, error=error, cap_days=cfg.recheck_unavailable_days,
     )
-    if not permanent:
-        return
-    if retry_after:
+    if not retry_after:
+        _LOG.info("  %r looks unavailable - retired, recheck_unavailable_days is 0.",
+                  entry.title)
+    elif permanent:
         _LOG.info("  %r looks unavailable (attempt %d) - not checking again until %s.",
                   entry.title, attempts, retry_after)
     else:
-        _LOG.info("  %r looks unavailable - retired, recheck_unavailable_days is 0.",
-                  entry.title)
+        _LOG.info("  %r failed (attempt %d) - not retrying until %s.",
+                  entry.title, attempts, retry_after)
 
 
-def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report: CycleReport) -> None:
+def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report: CycleReport) -> bool:
+    """Download everything in `plan`.
+
+    Returns True if YouTube's bot/rate-limit challenge was hit, in which
+    case the rest of the plan was deliberately abandoned rather than
+    attempted - continuing into a block only makes it worse.
+    """
     total = len(plan)
-    for position, (entry, _pre_match) in enumerate(plan, start=1):
+    for position, (entry, pre_match) in enumerate(plan, start=1):
         if _stop.is_set():
             _LOG.info("Stopping before download %d/%d.", position, total)
-            return
+            return False
 
         _LOG.info("Downloading %d/%d: %s", position, total, entry.title)
         try:
@@ -268,8 +285,16 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
 
         if not result.ok or not result.path:
             _LOG.error("Download failed: %r - %s", entry.title, result.error)
+            # This one genuinely was attempted and failed, so it is recorded
+            # as usual - it is everything *after* it that is left untouched.
             _record_failure(cfg, store, entry, result.error or "")
             report.failures += 1
+            if downloader.is_bot_block(result.error):
+                until = store.register_bot_block()
+                _LOG.warning(
+                    "YouTube is asking for bot verification - pausing until %s. "
+                    "Set cookies_file in the app options to avoid this.", until)
+                return True
             continue
 
         downloader.stamp_video_id(result.path, entry.video_id)
@@ -298,7 +323,17 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
                 index.add(LibraryEntry(path=final_path, duration=duration,
                                        video_id=file_video_id or entry.video_id, variants=variants))
         else:
-            _LOG.info("Saved %s", result.path)
+            # The near-match decision was made during planning (_plan_cycle),
+            # before it was known whether the download would even succeed.
+            # It is only counted and announced now that the file is actually
+            # saved, so a track that fails to download never shows up as a
+            # "near match kept".
+            if pre_match is not None and pre_match.status == DIFFERENT_VERSION:
+                report.near_misses += 1
+                _LOG.info("Saved %s (kept despite near match with %s: %s)",
+                          result.path, pre_match.path, pre_match.reason)
+            else:
+                _LOG.info("Saved %s", result.path)
             store.record_download(entry.video_id, playlist=entry.playlist, title=entry.title,
                                   uploader=entry.uploader, duration=duration,
                                   path=result.path, status=STATUS_OK)
@@ -311,6 +346,7 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
 
         if cfg.sleep_between_downloads and position < total:
             _stop.wait(cfg.sleep_between_downloads)
+    return False
 
 
 def _publish(cfg: Config, store: Store, publisher: Publisher, status: str,
@@ -410,14 +446,20 @@ def run_cycle(cfg: Config, store: Store, publisher: Publisher) -> CycleReport:
                      "write to %s.", cfg.music_dir)
     elif plan:
         _publish(cfg, store, publisher, "downloading", report)
-        _run_downloads(cfg, store, index, plan, report)
+        bot_blocked = _run_downloads(cfg, store, index, plan, report)
+        if not bot_blocked:
+            # A clean run through the plan - any earlier block has cleared,
+            # so the next one (if there is one) starts the escalation over
+            # rather than doubling from wherever an old one left off.
+            store.clear_bot_backoff()
     else:
         _LOG.info("Nothing new to download.")
+        store.clear_bot_backoff()
 
     store.set_meta("last_run", _utc_now())
     _LOG.info("Cycle done: %d downloaded, %d already owned, %d near matches kept, "
               "%d duplicates caught after download, %d failed, "
-              "%d skipped as unavailable.",
+              "%d deferred (backing off).",
               report.downloaded, report.duplicates, report.near_misses,
               report.duplicates_after_download, report.failures, report.deferred)
     _publish(cfg, store, publisher, "idle", report)
@@ -425,12 +467,18 @@ def run_cycle(cfg: Config, store: Store, publisher: Publisher) -> CycleReport:
 
 
 def main() -> int:
-    cfg = settings.load()
+    # Logging is set up before the config is loaded - settings.load() itself
+    # logs (e.g. a duplicate playlist being dropped), and a log call with no
+    # handler configured yet is silently swallowed rather than queued. The
+    # level is corrected to what the user actually asked for immediately
+    # after, so only this one bootstrap message is ever affected.
     logging.basicConfig(
-        level=_LEVELS.get(cfg.log_level, logging.INFO),
+        level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    cfg = settings.load()
+    logging.getLogger().setLevel(_LEVELS.get(cfg.log_level, logging.INFO))
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
@@ -467,21 +515,44 @@ def main() -> int:
         return 1
 
     os.makedirs(cfg.tmp_dir, exist_ok=True)
+    # Nothing is running at boot, so anything left in here is debris from an
+    # interrupted download on a previous start - most importantly a stale
+    # .part/.aria2 file that would otherwise make the next attempt to resume
+    # it fail with HTTP 416 forever.
+    removed = downloader.clear_tmp_dir(cfg.tmp_dir)
+    if removed:
+        _LOG.info("Cleared %d leftover temp file(s) from a previous run.", removed)
+
     store = Store(cfg.db_path)
 
     try:
         while not _stop.is_set():
             started = time.monotonic()
-            try:
-                run_cycle(cfg, store, publisher)
-            except Exception as err:
-                _LOG.exception("Cycle failed: %s", err)
-                _publish(cfg, store, publisher, "error", None, note=str(err))
+            bot_until = store.bot_backoff_until()
+            if bot_until:
+                _LOG.info("Still pausing for YouTube's bot-check backoff until %s "
+                          "- skipping this cycle.", bot_until)
+            else:
+                try:
+                    run_cycle(cfg, store, publisher)
+                except Exception as err:
+                    _LOG.exception("Cycle failed: %s", err)
+                    _publish(cfg, store, publisher, "error", None, note=str(err))
 
             if _stop.is_set():
                 break
             elapsed = time.monotonic() - started
-            wait = max(60.0, cfg.poll_interval_minutes * 60 - elapsed)
+            # A bot-block hit during the cycle just above, or one already in
+            # effect from before this start, both land here: the next cycle
+            # is scheduled for when the backoff actually clears rather than
+            # the normal poll interval, which would otherwise just waste
+            # that cycle re-discovering the same block.
+            bot_until = store.bot_backoff_until()
+            if bot_until:
+                remaining = (datetime.fromisoformat(bot_until) - datetime.now(timezone.utc)).total_seconds()
+                wait = max(60.0, remaining)
+            else:
+                wait = max(60.0, cfg.poll_interval_minutes * 60 - elapsed)
             _LOG.info("Next check in %.0f minutes.", wait / 60)
             _stop.wait(wait)
     finally:

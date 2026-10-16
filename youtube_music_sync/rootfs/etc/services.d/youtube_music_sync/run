@@ -25,19 +25,11 @@
 # defaults is worse than not coming up.
 # ---------------------------------------------------------------------------
 
-# bashio 0.18 renamed bashio::addon.* to bashio::app.*, keeping the old names
-# as deprecated aliases. Ask for whichever this base image actually ships.
-ha_addon_config() {
-    if declare -F bashio::app.config >/dev/null 2>&1; then
-        bashio::app.config
-    else
-        bashio::addon.config
-    fi
-}
-
 # Supervisor writes this add-on's options here. It is a plain local file: no
 # API call, no cache, nothing to go intermittently wrong. The Supervisor API
-# is kept only as a fallback for the case where the file is not there.
+# (via bashio::app.config - bashio::addon.config is the old, deprecated name
+# for the same call and logs a warning every time it is used) is kept only
+# as a fallback for the case where the file is not there.
 OPTIONS_JSON=""
 if [ -s /data/options.json ]; then
     OPTIONS_JSON="$(cat /data/options.json)"
@@ -45,7 +37,7 @@ fi
 
 if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "${OPTIONS_JSON}"; then
     bashio::log.warning "/data/options.json missing or unreadable - asking the Supervisor."
-    OPTIONS_JSON="$(ha_addon_config 2>/dev/null)" || OPTIONS_JSON=""
+    OPTIONS_JSON="$(bashio::app.config 2>/dev/null)" || OPTIONS_JSON=""
 fi
 
 # `playlists` is in the schema, so a configuration object that lacks it did not
@@ -156,7 +148,8 @@ fi
 # ---------------------------------------------------------------------------
 if [ "$(opt auto_update_ytdlp true)" = "true" ]; then
     bashio::log.info "Updating yt-dlp to the latest release..."
-    if pip3 install --no-cache-dir --break-system-packages --upgrade yt-dlp; then
+    if pip3 install --no-cache-dir --break-system-packages --disable-pip-version-check \
+            --root-user-action=ignore --upgrade yt-dlp; then
         bashio::log.info "yt-dlp is now $(yt-dlp --version 2>/dev/null || echo 'unknown')"
     else
         bashio::log.warning "yt-dlp update failed - continuing with the image's pinned version $(yt-dlp --version 2>/dev/null || echo 'unknown')."

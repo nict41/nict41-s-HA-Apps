@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 
 import pytest
@@ -215,6 +216,110 @@ def test_a_bot_challenge_behind_an_id_prefix_is_still_transient():
     message = ("ERROR: [youtube] aB403cdEfGh: Sign in to confirm you're not a bot. "
                "Use --cookies-from-browser or --cookies")
     assert downloader.classify_failure(message) == downloader.FAILURE_TRANSIENT
+
+
+# ---------------------------------------------------------------- bot blocks
+
+@pytest.mark.parametrize("message", [
+    "ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies-from-browser",
+    "ERROR: unable to download video data: HTTP Error 429: Too Many Requests",
+    "ERROR: [youtube] abc: Sign in to confirm your identity",
+])
+def test_is_bot_block_recognises_the_challenge(message):
+    assert downloader.is_bot_block(message)
+
+
+@pytest.mark.parametrize("message", [
+    "ERROR: [youtube] abc: Video unavailable",
+    "ERROR: aria2c exited with code 22",
+    "ERROR: unable to download video data: HTTP Error 416: Requested range not satisfiable",
+    "", None,
+])
+def test_is_bot_block_ignores_everything_else(message):
+    assert not downloader.is_bot_block(message)
+
+
+# -------------------------------------------------------- stale partial (416)
+
+def test_clear_tmp_dir_removes_everything_in_it(tmp_path):
+    tmp = tmp_path / "tmp"
+    tmp.mkdir()
+    (tmp / "Track.m4a.part").write_bytes(b"x")
+    (tmp / "Track.m4a.part-Frag3").write_bytes(b"x")
+    (tmp / "Track.m4a.aria2").write_bytes(b"x")
+    (tmp / "yms-path-abc123").write_text("/m/Track.m4a")
+    (tmp / "subdir").mkdir()
+    (tmp / "subdir" / "nested").write_bytes(b"x")
+
+    removed = downloader.clear_tmp_dir(str(tmp))
+
+    assert removed == 5
+    assert list(tmp.iterdir()) == []
+
+
+def test_clear_tmp_dir_tolerates_a_missing_directory(tmp_path):
+    assert downloader.clear_tmp_dir(str(tmp_path / "does-not-exist")) == 0
+
+
+def test_download_retries_once_on_http_416_after_clearing_tmp_dir(tmp_path, monkeypatch):
+    config = cfg(data_dir=str(tmp_path))
+    os.makedirs(config.tmp_dir, exist_ok=True)
+    debris = os.path.join(config.tmp_dir, "Track.m4a.part")
+    with open(debris, "wb") as fh:
+        fh.write(b"x")
+
+    attempts = []
+
+    def fake_attempt(cfg_, entry_, timeout, on_progress):
+        attempts.append(os.path.exists(debris))
+        if len(attempts) == 1:
+            return downloader.DownloadResult(
+                ok=False,
+                error="ERROR: unable to download video data: HTTP Error 416: "
+                      "Requested range not satisfiable")
+        return downloader.DownloadResult(ok=True, path="/m/Track.m4a")
+
+    monkeypatch.setattr(downloader, "_attempt_download", fake_attempt)
+    result = downloader.download(config, _entry())
+
+    assert result.ok and result.path == "/m/Track.m4a"
+    assert len(attempts) == 2
+    # The debris was there for the first attempt, gone before the retry.
+    assert attempts[0] is True
+    assert not os.path.exists(debris)
+
+
+def test_download_does_not_retry_other_failures(tmp_path, monkeypatch):
+    config = cfg(data_dir=str(tmp_path))
+    calls = []
+
+    def fake_attempt(cfg_, entry_, timeout, on_progress):
+        calls.append(1)
+        return downloader.DownloadResult(ok=False, error="ERROR: Video unavailable")
+
+    monkeypatch.setattr(downloader, "_attempt_download", fake_attempt)
+    result = downloader.download(config, _entry())
+
+    assert not result.ok and len(calls) == 1
+
+
+def test_download_does_not_retry_a_name_collision_even_if_it_mentions_416(tmp_path, monkeypatch):
+    config = cfg(data_dir=str(tmp_path))
+    calls = []
+
+    def fake_attempt(cfg_, entry_, timeout, on_progress):
+        calls.append(1)
+        return downloader.DownloadResult(ok=False, skipped_existing=True, error="416 unrelated")
+
+    monkeypatch.setattr(downloader, "_attempt_download", fake_attempt)
+    downloader.download(config, _entry())
+
+    assert len(calls) == 1
+
+
+def test_no_continue_is_always_passed_for_downloads():
+    argv = build_download_argv(cfg(), "U", "/p")
+    assert "--no-continue" in argv
 
 
 # ------------------------------------------------------------------- progress

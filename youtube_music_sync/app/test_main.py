@@ -7,7 +7,7 @@ import pytest
 
 import main
 from downloader import DownloadResult, PlaylistEntry
-from library import LibraryEntry, LibraryIndex, TitleVariant
+from library import DIFFERENT_VERSION, LibraryEntry, LibraryIndex, TitleVariant
 from settings import Config
 from state import STATUS_DUPLICATE_AFTER_DOWNLOAD, STATUS_FAILED, STATUS_OK, Store
 
@@ -119,15 +119,19 @@ def test_plan_skips_a_track_the_library_already_has(tmp_path):
     assert store.skip_counts() == {"duplicate": 1}
 
 
-def test_plan_downloads_a_different_version_but_flags_it(tmp_path):
+def test_plan_downloads_a_different_version_but_does_not_count_it_yet(tmp_path):
     config, store = cfg(tmp_path), store_for(tmp_path)
     index = LibraryIndex([owned()])
     plan, report = _plan(config, store, index,
                          [entry(title="Some Band - Song Name (Live)", duration=215.0)])
 
-    # A live take is not the studio cut - it should still be fetched.
+    # A live take is not the studio cut - it should still be fetched. But
+    # "near matches kept" is only true once the file is actually saved
+    # (_run_downloads), not merely planned - see test_main.py's download
+    # tests for that half.
     assert len(plan) == 1
-    assert report.near_misses == 1
+    assert plan[0][1].status == DIFFERENT_VERSION
+    assert report.near_misses == 0
     assert report.duplicates == 0
 
 
@@ -185,6 +189,50 @@ def test_successful_download_is_recorded_and_indexed(tmp_path, monkeypatch, fake
     assert store.downloaded_ids() == {"aaaaaaaaaaa"}
     # Indexed live, so the same track on a second playlist is not fetched twice.
     assert index.match("Some Band - Song Name", 215.0).is_duplicate
+
+
+def test_near_match_is_only_counted_once_actually_saved(tmp_path, monkeypatch, fake_metadata):
+    """The bug this is here to end: a track that never downloads must never
+    show up as a "near match kept" - it was counted during planning before,
+    so a download that then failed still inflated the count."""
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    index = LibraryIndex([owned()])
+    saved = os.path.join(config.music_dir, "Some Band - Song Name (Live).m4a")
+    open(saved, "wb").close()
+
+    monkeypatch.setattr(main.downloader, "download",
+                        lambda c, e, **kw: DownloadResult(ok=True, path=saved))
+    monkeypatch.setattr(main.downloader, "stamp_video_id", lambda p, v: True)
+    fake_metadata(215.0)
+
+    pre_match = index.match("Some Band - Song Name (Live)", 215.0)
+    assert pre_match.status == DIFFERENT_VERSION
+
+    report = main.CycleReport()
+    main._run_downloads(
+        config, store, index,
+        [(entry(title="Some Band - Song Name (Live)"), pre_match)], report)
+
+    assert report.near_misses == 1
+    assert report.downloaded == 1
+
+
+def test_a_near_match_that_fails_to_download_is_not_counted(tmp_path, monkeypatch):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    index = LibraryIndex([owned()])
+    pre_match = index.match("Some Band - Song Name (Live)", 215.0)
+    assert pre_match.status == DIFFERENT_VERSION
+
+    monkeypatch.setattr(main.downloader, "download",
+                        lambda c, e, **kw: DownloadResult(ok=False, error="ERROR: Video unavailable"))
+
+    report = main.CycleReport()
+    main._run_downloads(
+        config, store, index,
+        [(entry(title="Some Band - Song Name (Live)"), pre_match)], report)
+
+    assert report.near_misses == 0
+    assert report.failures == 1
 
 
 def test_duplicate_found_after_download_is_quarantined(tmp_path, monkeypatch, fake_metadata):
@@ -298,15 +346,18 @@ def test_an_unavailable_video_is_dropped_from_later_plans(tmp_path):
     assert report.planned == 0
 
 
-def test_a_transiently_failed_video_is_still_planned(tmp_path):
+def test_a_transiently_failed_video_now_backs_off_too(tmp_path):
+    # Previously a transient failure never backed off at all and was always
+    # replanned immediately; it now escalates on its own (shorter) schedule
+    # just like an unavailable one, so one that just failed is deferred too.
     config, store = cfg(tmp_path), store_for(tmp_path)
     store.record_failure("aaaaaaaaaaa", playlist="P", title="T", uploader="C",
                          duration=None, permanent=False,
                          error="ERROR: aria2c exited with code 22",
                          cap_days=config.recheck_unavailable_days)
     plan, report = _plan(config, store, LibraryIndex(), [entry()])
-    assert len(plan) == 1
-    assert report.deferred == 0
+    assert plan == []
+    assert report.deferred == 1
 
 
 def test_dead_entries_do_not_consume_the_per_cycle_budget(tmp_path):
@@ -357,7 +408,12 @@ def test_an_unavailable_download_backs_itself_off(tmp_path, monkeypatch):
     assert plan2 == [] and report2.deferred == 1
 
 
-def test_a_transient_download_failure_is_retried_next_cycle(tmp_path, monkeypatch):
+def test_a_transient_download_failure_now_backs_off_too(tmp_path, monkeypatch):
+    """It is no longer retried on the very next plan - see test_state.py for
+    the schedule itself (1h, 6h, 24h, then recheck_unavailable_days); this
+    just confirms main.py wires a transient failure into that backoff at
+    all, rather than leaving it retrying forever the way "unavailable" used
+    to be the only classification that did."""
     config, store = cfg(tmp_path), store_for(tmp_path)
     monkeypatch.setattr(main.downloader, "download", lambda c, e, **kw: DownloadResult(
         ok=False, error="ERROR: aria2c exited with code 22"))
@@ -368,7 +424,87 @@ def test_a_transient_download_failure_is_retried_next_cycle(tmp_path, monkeypatc
     assert report.failures == 1
 
     plan2, report2 = _plan(config, store, index, [entry()])
-    assert len(plan2) == 1 and report2.deferred == 0
+    assert plan2 == [] and report2.deferred == 1
+
+
+# ----------------------------------------------------------- bot-check backoff
+
+def test_a_bot_check_aborts_the_rest_of_the_plan(tmp_path, monkeypatch):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    attempted = []
+
+    def fake_download(c, e, **kw):
+        attempted.append(e.video_id)
+        return DownloadResult(
+            ok=False, error="ERROR: [youtube] abc: Sign in to confirm you're not a bot")
+
+    monkeypatch.setattr(main.downloader, "download", fake_download)
+    index = LibraryIndex()
+    plan = [(entry("aaaaaaaaaaa"), None), (entry("bbbbbbbbbbb"), None),
+            (entry("ccccccccccc"), None)]
+
+    report = main.CycleReport()
+    bot_blocked = main._run_downloads(config, store, index, plan, report)
+
+    assert bot_blocked is True
+    # Only the first one was ever attempted.
+    assert attempted == ["aaaaaaaaaaa"]
+    # It is recorded as a normal failure; the other two are untouched -
+    # neither failed nor marked unavailable.
+    assert report.failures == 1
+    assert store.stats()["failed"] == 1
+    assert store.get_meta("bot_backoff_hours") != ""
+    assert store.bot_backoff_until() is not None
+
+
+def test_a_clean_run_is_not_reported_as_bot_blocked(tmp_path, monkeypatch):
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    monkeypatch.setattr(main.downloader, "download", lambda c, e, **kw: DownloadResult(
+        ok=False, error="ERROR: aria2c exited with code 22"))
+    index = LibraryIndex()
+
+    report = main.CycleReport()
+    bot_blocked = main._run_downloads(config, store, index, [(entry(), None)], report)
+
+    assert bot_blocked is False
+    assert store.bot_backoff_until() is None
+
+
+def test_run_cycle_registers_and_then_clears_the_bot_backoff(tmp_path, monkeypatch):
+    """End to end through run_cycle(): a bot-check sets the pause, and a
+    later clean cycle resets the escalation level rather than leaving it to
+    double from wherever the old block left off."""
+    from mqtt_client import Publisher
+
+    config, store = cfg(tmp_path), store_for(tmp_path)
+    publisher = Publisher(config)  # no mqtt configured - enabled stays False
+
+    monkeypatch.setattr(main.downloader, "fetch_playlist", lambda c, u: (
+        "P", [entry("aaaaaaaaaaa")]))
+    monkeypatch.setattr(main.downloader, "download", lambda c, e, **kw: DownloadResult(
+        ok=False, error="ERROR: [youtube] abc: Sign in to confirm you're not a bot"))
+
+    main.run_cycle(config, store, publisher)
+    assert store.bot_backoff_until() is not None
+    assert store.get_meta("bot_backoff_hours") != "0"
+
+    # A second, independent video (so nothing about the first one's own
+    # per-video backoff is what makes this pass) that downloads cleanly -
+    # main() would only ever actually reach this call once the pause above
+    # has genuinely expired, but run_cycle() itself doesn't gate on that,
+    # so it's exercised directly here.
+    monkeypatch.setattr(main.downloader, "fetch_playlist", lambda c, u: (
+        "P", [entry("bbbbbbbbbbb", title="Another Track")]))
+    saved = os.path.join(config.music_dir, "Another Track.m4a")
+    open(saved, "wb").close()
+    monkeypatch.setattr(main.downloader, "download",
+                        lambda c, e, **kw: DownloadResult(ok=True, path=saved))
+    monkeypatch.setattr(main.downloader, "stamp_video_id", lambda p, v: True)
+    monkeypatch.setattr(main, "read_file_metadata", lambda p: (
+        200.0, None, (TitleVariant.build("Another Track", "filename"),)))
+
+    main.run_cycle(config, store, publisher)
+    assert store.get_meta("bot_backoff_hours") == "0"
 
 
 # ------------------------------------------------------------------- progress

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
 from dataclasses import dataclass, field
+from urllib.parse import parse_qsl, urlsplit
+
+_LOG = logging.getLogger(__name__)
 
 # Where a relative cookies_file is resolved from: the add-on's own config
 # folder, which Home Assistant surfaces to the user as
@@ -18,6 +22,28 @@ ADDON_CONFIG_DIR = "/config"
 ALLOWED_ROOTS = ("/media", "/share")
 
 QUARANTINE_DIRNAME = ".yt_duplicates"
+
+# Hosts that all serve the same playlist for the same list= id.
+_YOUTUBE_HOSTS = frozenset({"music.youtube.com", "youtube.com", "www.youtube.com"})
+
+
+def _playlist_identity(url: str) -> str | None:
+    """The playlist id a URL points at, or None if it doesn't look like one.
+
+    music.youtube.com, youtube.com and www.youtube.com are the same site for
+    this purpose, and everything in the query string other than list= -
+    most commonly si=, YouTube's own share-tracking parameter - says nothing
+    about which playlist this is. Two URLs with the same list= id, however
+    different otherwise, are the same playlist.
+    """
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    if parts.netloc.lower() not in _YOUTUBE_HOSTS:
+        return None
+    list_id = dict(parse_qsl(parts.query)).get("list")
+    return list_id or None
 
 
 def _str(name: str, default: str = "") -> str:
@@ -55,7 +81,22 @@ def _playlists() -> tuple[str, ...]:
         parsed = [p for p in raw.replace(",", "\n").splitlines()]
     if isinstance(parsed, str):
         parsed = [parsed]
-    return tuple(str(p).strip() for p in parsed if str(p).strip())
+    urls = [str(p).strip() for p in parsed if str(p).strip()]
+
+    seen: dict[str, str] = {}
+    deduped: list[str] = []
+    for url in urls:
+        identity = _playlist_identity(url)
+        if identity is None:
+            deduped.append(url)
+            continue
+        earlier = seen.get(identity)
+        if earlier is not None:
+            _LOG.info("Skipping duplicate playlist (same list id as %r): %r", earlier, url)
+            continue
+        seen[identity] = url
+        deduped.append(url)
+    return tuple(deduped)
 
 
 @dataclass(frozen=True)

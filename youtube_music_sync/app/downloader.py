@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -115,6 +116,24 @@ def classify_failure(error: str | None) -> str:
         return FAILURE_UNAVAILABLE
     return FAILURE_TRANSIENT
 
+
+# A YouTube bot/rate-limit challenge means every subsequent request this
+# cycle will fail the same way - continuing only makes the block worse. This
+# is checked separately from classify_failure because it drives a cycle-wide
+# pause rather than a per-video backoff.
+_BOT_BLOCK_PATTERNS = (
+    "sign in to confirm you",
+    "confirm you're not a bot",
+    "http error 429",
+    "too many requests",
+)
+
+
+def is_bot_block(error: str | None) -> bool:
+    """True when yt-dlp's failure means YouTube is challenging/rate-limiting us."""
+    text = _ERROR_PREFIX.sub("", (error or "").strip()).lower()
+    return any(pattern in text for pattern in _BOT_BLOCK_PATTERNS)
+
 # Centre-crop the artwork to a square before embedding. YouTube thumbnails are
 # 16:9, which most music players letterbox or crop badly; album art is square.
 # The if() guards a portrait thumbnail, and the commas inside it are escaped
@@ -193,6 +212,13 @@ def build_download_argv(cfg: Config, url: str, print_file: str) -> list[str]:
         "--audio-format", cfg.audio_format,
         "--embed-metadata",
         "--no-overwrites",
+        # A stale .part/.aria2 file left behind by an earlier interrupted
+        # attempt (aria2c crashing, the container restarting mid-download)
+        # makes the next attempt try to resume a byte range the server has
+        # since stopped honouring, which fails every time with HTTP 416.
+        # These are small music files - resuming saves little, and never
+        # trying to buys outright immunity to that whole failure mode.
+        "--no-continue",
         "--retries", "3",
         "--fragment-retries", "10",
         "--download-archive", cfg.archive_path,
@@ -343,7 +369,55 @@ def fetch_playlist(cfg: Config, url: str, timeout: int = 300) -> tuple[str, list
     return parse_playlist_json(result.stdout, fallback_url=url)
 
 
+def clear_tmp_dir(tmp_dir: str) -> int:
+    """Remove every leftover file in tmp_dir. Returns how many were removed.
+
+    Downloads happen one at a time, so whenever this runs - at startup,
+    before nothing has run yet, or right before retrying a single download -
+    nothing in here can belong to work still in progress. A stale .part or
+    .aria2 file left by an earlier interrupted attempt is exactly what makes
+    a resumed request collide with a server that has since stopped
+    honouring that byte range (HTTP 416).
+    """
+    removed = 0
+    if not os.path.isdir(tmp_dir):
+        return removed
+    for name in os.listdir(tmp_dir):
+        path = os.path.join(tmp_dir, name)
+        try:
+            if os.path.isfile(path) or os.path.islink(path):
+                os.unlink(path)
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
 def download(
+    cfg: Config,
+    entry: PlaylistEntry,
+    timeout: int | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> DownloadResult:
+    """Download one entry's audio, retrying once if it hits a stale-partial 416.
+
+    --no-continue (above) already stops yt-dlp resuming from a leftover
+    partial file in the first place, but a 416 can in principle still come
+    from something else holding a stale range server-side. Belt and braces:
+    on a 416, clear the temp dir and try exactly once more before giving up.
+    """
+    result = _attempt_download(cfg, entry, timeout, on_progress)
+    if not result.ok and not result.skipped_existing and "416" in result.error:
+        _LOG.warning("  %r failed with HTTP 416 (stale partial download) - "
+                     "clearing temp files and retrying once.", entry.title)
+        clear_tmp_dir(cfg.tmp_dir)
+        result = _attempt_download(cfg, entry, timeout, on_progress)
+    return result
+
+
+def _attempt_download(
     cfg: Config,
     entry: PlaylistEntry,
     timeout: int | None = None,

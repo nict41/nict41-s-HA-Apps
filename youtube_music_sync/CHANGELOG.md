@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.2.3
+
+- Fix a stale partial download permanently failing with HTTP 416. With
+  `use_aria2c` off, yt-dlp's native downloader tried to resume from a
+  `.part`/`.aria2` file an earlier interrupted attempt (aria2c crashing, the
+  container restarting mid-download) left behind, and the server rejected
+  the stale byte range every single time - one track failed this way for 49
+  consecutive cycles across ~30 restarts. `--no-continue` is now always
+  passed (these are small music files; resuming saved little), leftover temp
+  files are cleared at startup, and a download that still hits HTTP 416
+  clears the temp dir and retries once before giving up.
+- Stop hammering YouTube once it starts asking for bot verification. A
+  "Sign in to confirm you're not a bot" response used to be retried for
+  every remaining item in the cycle - one every couple of seconds, which
+  only makes the block worse. The first hit now aborts the rest of the
+  cycle immediately (the remaining items are left untouched, not counted as
+  failed or marked unavailable), logs one clear warning, and pauses future
+  cycles for 6 hours, doubling on each consecutive hit up to a 24-hour cap.
+  The pause survives a restart.
+- Ordinary failures (not just ones classified "unavailable") now back off
+  too, on their own shorter schedule - an hour, six hours, a day, then the
+  same `recheck_unavailable_days` cap. Previously only "unavailable" backed
+  off at all; everything else, including the HTTP 416 above, retried every
+  cycle forever. The cycle summary's "skipped as unavailable" count is now
+  "deferred (backing off)", since it covers both kinds.
+- Fix the near-match count and log line. "Downloading X despite a near
+  match..." was logged, and counted into "near matches kept", during
+  planning - before the download was even attempted - so a near match that
+  then failed to download (including one sitting in its own backoff window)
+  still inflated the count and never got corrected. The decision to attempt
+  it is now logged at DEBUG during planning; the count and an INFO line
+  ("Saved ... kept despite near match with ...") only happen once the file
+  is actually saved.
+- "Already in library" - one line per already-owned track skipped, roughly
+  2,500 lines a day on this library - moved from INFO to DEBUG. The
+  "already owned" count in the cycle summary is enough at INFO.
+- Duplicate playlist URLs are now recognised and skipped, even when they
+  only differ by YouTube's `si=` share-tracking parameter or use a
+  different host (`music.youtube.com`/`youtube.com`/`www.youtube.com` all
+  serve the same playlist for the same `list=` id). Previously each counted
+  as a separate playlist and was read in full every cycle.
+- Switched from the deprecated `bashio::addon.config` to `bashio::app.config`,
+  clearing a "is deprecated" warning on every start.
+- Added `--root-user-action=ignore --disable-pip-version-check` to every
+  `pip3 install` call, clearing pip's "Running pip as the 'root' user..."
+  warning on every start (and during the image build).
+
 ## 0.2.2
 
 - Fix "Failed to save: Missing option 'download_timeout_minutes' in root".

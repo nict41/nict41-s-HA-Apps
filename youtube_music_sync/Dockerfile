@@ -13,7 +13,8 @@ RUN apk add --no-cache \
 COPY app/requirements.txt /app/requirements.txt
 # --break-system-packages: Alpine's python3 marks itself "externally managed"
 # (PEP 668); this is an add-on container, not a shared system, so it's safe.
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages --disable-pip-version-check \
+        --root-user-action=ignore -r /app/requirements.txt
 
 COPY app /app
 COPY rootfs /
