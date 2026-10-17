@@ -16,8 +16,8 @@
 | Option | Default | What it does |
 |---|---|---|
 | `bot_token` | - | Token from @BotFather. Required. |
-| `model` | `parakeet` | `parakeet`, or a Whisper size: `tiny`, `base`, `small`, `medium`, `turbo`, `large-v2`, `large-v3`. |
-| `language` | `en` | Two-letter code used by Whisper. Parakeet ignores it and detects the language itself. |
+| `model` | `parakeet-en` | `parakeet-en` (English only), `parakeet` (25 European languages), or a Whisper size: `tiny`, `base`, `small`, `medium`, `turbo`, `large-v2`, `large-v3`. |
+| `language` | `en` | Two-letter code used by Whisper. The Parakeet models ignore it. |
 | `beam_size` | `1` | Whisper beam search width (1-10). Higher can be slightly more accurate and is slower. Ignored by Parakeet. |
 | `vad_filter` | `false` | Skip silence before transcribing (Whisper). |
 | `threads` | `0` | CPU threads to use; `0` means all cores. Set one lower than your core count if other apps need CPU headroom. |
@@ -50,8 +50,8 @@ Telegram only lets bots download files up to 20 MB.
 **"❌ Could not read the audio file."** The file isn't audio the decoder
 understands. Re-send it as a voice note or an mp3.
 
-**Wrong language or poor accuracy.** Parakeet covers 25 European languages.
-For anything else, switch `model` to `turbo` or `small` and set `language`.
+**Wrong language or poor accuracy.** `parakeet-en` only understands English;
+switch to `parakeet` for 25 European languages. For anything else, switch `model` to `turbo` or `small` and set `language`.
 
 ## Logs
 
