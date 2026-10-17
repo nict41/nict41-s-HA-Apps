@@ -7,6 +7,6 @@ COPY patch.py /tmp/patch.py
 RUN python3 /tmp/patch.py /app && rm /tmp/patch.py
 
 LABEL \
-    org.opencontainers.image.title="Ascoltino" \
+    org.opencontainers.image.title="Transcribe-a-bot" \
     org.opencontainers.image.description="Telegram bot that transcribes voice notes and audio files locally" \
     org.opencontainers.image.source="https://github.com/nict41/nict41-s-HA-Apps/tree/main/ascoltino"

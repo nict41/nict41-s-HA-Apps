@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1-3
+
+- Renamed from Ascoltino to Transcribe-a-bot: app name, logo, docs and the
+  bot's startup message. The slug stays `ascoltino`, so existing installs
+  update in place and keep their configuration and downloaded models.
+
 ## 1.4.1-2
 
 - Add a `parakeet-en` model: NVIDIA's English-only Parakeet-TDT 0.6B v2,

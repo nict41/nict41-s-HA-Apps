@@ -1,4 +1,4 @@
-# Ascoltino
+# Transcribe-a-bot
 
 ## Setup
 
@@ -8,7 +8,7 @@
    `allowed_chat_ids`.
 4. Start the app. The first start downloads the model (~600 MB for Parakeet),
    so give it a minute or two. With `admin_chat_id` set, the bot messages you
-   "✅ Ascoltino is ready!" when it's done.
+   "✅ Transcribe-a-bot is ready!" when it's done.
 5. Send or forward a voice note or audio file to the bot.
 
 ## Options
@@ -42,7 +42,7 @@ Telegram only lets bots download files up to 20 MB.
 - Check the chat ID in `allowed_chat_ids` is yours (ask @userinfobot). If
   `admin_chat_id` is set, a blocked chat triggers an alert there.
 - Make sure only **one** copy of the bot is running with this token. Two apps,
-  or this app plus upstream Ascoltino, polling the same token each receive
+  or this app plus the upstream Ascoltino app, polling the same token each receive
   only some of the messages, so notes go missing at random.
 - Messages that arrive while the app is stopped are kept by Telegram for up
   to 24 hours and processed when it starts again.

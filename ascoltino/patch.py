@@ -1,6 +1,6 @@
 """Patch the upstream Ascoltino app at image build time.
 
-Two changes to the upstream image's /app:
+Three changes to the upstream image's /app:
 
 1. bot.py: transcribe audio files, not just voice notes. Upstream only looks at
    a message's `voice` field. A voice note re-shared from another app
@@ -10,6 +10,7 @@ Two changes to the upstream image's /app:
    0.6B v2, alongside upstream's multilingual v3 (`parakeet`). v2 scores
    slightly better on English. onnx-asr 0.12.0 in the upstream image already
    supports it.
+3. bot.py: the startup message uses this app's name, Transcribe-a-bot.
 
 Every replacement must match exactly once, so an upstream change to the code
 around it fails the image build instead of shipping a half-patched app.
@@ -45,6 +46,7 @@ PATCHES = {
          "                if not audio_attachment(message):\n"),
         ('tg.download_voice(message["voice"]["file_id"], path)',
          'tg.download_voice(audio_attachment(message)["file_id"], path)'),
+        ('"✅ Ascoltino is ready!', '"✅ Transcribe-a-bot is ready!'),
     ],
     "engines.py": [
         ('    "parakeet": "nemo-parakeet-tdt-0.6b-v3",\n',
@@ -69,7 +71,7 @@ def patch(path, replacements):
 def main():
     for name, replacements in PATCHES.items():
         patch(os.path.join(APP, name), replacements)
-    print("patch: audio files accepted; parakeet-en (English-only v2) model added")
+    print("patch: audio files accepted; parakeet-en model added; renamed to Transcribe-a-bot")
 
 
 if __name__ == "__main__":
