@@ -19,6 +19,8 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 
 ### [Ascoltino](./ascoltino)
 
+![Ascoltino logo](ascoltino/logo.png)
+
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
 
