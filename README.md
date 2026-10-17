@@ -17,6 +17,13 @@ This repository contains the following apps
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
 
+### [Ascoltino](./ascoltino)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Telegram bot that transcribes voice notes and audio files locally with Parakeet or Whisper - upstream Ascoltino, patched to also handle audio files shared in from other apps.
+
 ### [Camera Share](./camera_share)
 
 ![Camera Share logo](camera_share/logo.png)
