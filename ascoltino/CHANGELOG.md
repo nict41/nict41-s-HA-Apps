@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1-4
+
+- No more "ready" Telegram message on every start: the app restarts for HA
+  updates and the like, so it was noise. `admin_chat_id` still gets the alert
+  about chats that aren't allowed.
+
 ## 1.4.1-3
 
 - Renamed from Ascoltino to Transcribe-a-bot: app name, logo, docs and the

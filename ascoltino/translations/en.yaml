@@ -25,7 +25,7 @@ configuration:
     description: Optional name displayed in the transcription footer
   admin_chat_id:
     name: Admin Chat ID
-    description: Optional Telegram chat ID to receive startup notifications
+    description: Optional Telegram chat ID that gets an alert when a chat that is not allowed sends audio
   allowed_chat_ids:
     name: Allowed Chat IDs
     description: Comma-separated chat IDs allowed to use the bot (groups are negative). Empty = anyone can use it
