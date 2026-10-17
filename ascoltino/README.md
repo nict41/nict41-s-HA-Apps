@@ -1,6 +1,6 @@
-# Ascoltino
+# Transcribe-a-bot
 
-![Ascoltino logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/ascoltino/logo.png)
+![Transcribe-a-bot logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/ascoltino/logo.png)
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
@@ -32,10 +32,10 @@ once to download the model. It needs no open port, webhook or tunnel.
 Telegram only lets bots download files up to **20 MB**, which is tens of
 minutes of compressed speech.
 
-## Why this is a patched copy
+## Based on Ascoltino
 
 This is [soldatigabriele/ascoltino](https://github.com/soldatigabriele/ascoltino)
-1.4.1 with two changes:
+1.4.1, renamed, with two changes:
 
 - **Audio files work.** Upstream only reads Telegram's `voice` field, so a
   voice note shared in from another app arrives as an `audio` file and is

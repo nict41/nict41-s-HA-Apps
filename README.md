@@ -17,15 +17,6 @@ This repository contains the following apps
 
 Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
 
-### [Ascoltino](./ascoltino)
-
-![Ascoltino logo](ascoltino/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Telegram bot that transcribes voice notes and audio files locally with Parakeet or Whisper - upstream Ascoltino, patched to also handle audio files shared in from other apps.
-
 ### [Camera Share](./camera_share)
 
 ![Camera Share logo](camera_share/logo.png)
@@ -114,6 +105,15 @@ Automatically detects tracking numbers from your shipping emails (AliExpress, eB
 ![Supports amd64 Architecture][amd64-shield]
 
 Self-hosted file sharing platform (a WeTransfer alternative), built on the actively-maintained Pingvin Share X fork.
+
+### [Transcribe-a-bot](./ascoltino)
+
+![Transcribe-a-bot logo](ascoltino/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Telegram bot that transcribes voice notes and audio files locally with Parakeet or Whisper - based on Ascoltino, patched to also handle audio files shared in from other apps.
 
 ### [WordPress](./wordpress)
 
