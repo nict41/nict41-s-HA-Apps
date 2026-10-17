@@ -6,9 +6,9 @@
 ![Supports amd64 Architecture][amd64-shield]
 
 A private Telegram bot that turns voice notes into text **on your own
-machine**. Forward it a voice note - from a Telegram chat, from WhatsApp, from
-a recorder app - and it replies with the transcript a few seconds later. No
-audio goes to a cloud speech service.
+machine**. Forward it a voice note - from a Telegram chat, from another
+messaging network through Beeper, from a recorder app - and it replies with
+the transcript a few seconds later. No audio goes to a cloud speech service.
 
 ```
 You --forward voice note--> Telegram --> this app (long-polls the Bot API)
@@ -20,12 +20,30 @@ You <------- transcript reply <-------------+
 The app makes outbound connections only: to Telegram, and to Hugging Face
 once to download the model. It needs no open port, webhook or tunnel.
 
+## Why audio files, not just voice notes
+
+Telegram gives bots two different kinds of sound message. A **voice note**
+(`voice`) is one recorded as a voice message in Telegram. A sound file shared
+in from somewhere else arrives as an **audio file** (`audio`), even if it
+started life as a voice note in another app.
+
+That matters if you use a multi-network chat app like
+[Beeper](https://www.beeper.com). Forward a voice note from another network,
+such as WhatsApp, to a Telegram bot through Beeper, and the bot receives an
+`audio` file, not a `voice` note. Many Telegram transcription bots only look
+for `voice`, so they ignore it without replying, and the original Ascoltino
+did too.
+
+This app accepts both, so a voice note from any network transcribes the same
+way. One thing is lost on the way: a note bridged in like this has no
+"forwarded from" details, so the bot can't say who originally sent it.
+
 ## What it transcribes
 
 | Telegram delivers it as | Typical source | Upstream | This app |
 |---|---|---|---|
 | `voice` | Recorded in Telegram, or forwarded from a Telegram chat | ✅ | ✅ |
-| `audio` | Voice note shared from WhatsApp or a recorder app; mp3/m4a files | ❌ silently ignored | ✅ |
+| `audio` | Voice note forwarded via Beeper or shared from WhatsApp or a recorder app; mp3/m4a files | ❌ silently ignored | ✅ |
 | `video_note` | Telegram round video message | ❌ | ✅ |
 | `document` with an `audio/*` type | Audio sent "as a file" | ❌ | ✅ |
 
@@ -38,8 +56,9 @@ This is [soldatigabriele/ascoltino](https://github.com/soldatigabriele/ascoltino
 1.4.1, renamed, with two changes:
 
 - **Audio files work.** Upstream only reads Telegram's `voice` field, so a
-  voice note shared in from another app arrives as an `audio` file and is
-  dropped with no reply and nothing in the app log.
+  voice note forwarded through Beeper or shared in from another app is
+  dropped with no reply and nothing in the app log (see
+  [Why audio files](#why-audio-files-not-just-voice-notes)).
 - **An English-only model.** `parakeet-en` adds NVIDIA's Parakeet-TDT v2
   alongside upstream's multilingual v3 (see [Models](#models)).
 
