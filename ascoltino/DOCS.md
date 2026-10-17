@@ -7,8 +7,7 @@
 3. Configure the app (options below), at minimum `bot_token` and
    `allowed_chat_ids`.
 4. Start the app. The first start downloads the model (~600 MB for Parakeet),
-   so give it a minute or two. With `admin_chat_id` set, the bot messages you
-   "✅ Transcribe-a-bot is ready!" when it's done.
+   so give it a minute or two. The app log shows `✅ Ready!` when it's done.
 5. Send or forward a voice note or audio file to the bot.
 
 ## Options
@@ -23,7 +22,7 @@
 | `threads` | `0` | CPU threads to use; `0` means all cores. Set one lower than your core count if other apps need CPU headroom. |
 | `show_footer` | `true` | Add a line with timing and model under each transcript. |
 | `bot_name` | - | Optional name shown in the footer. |
-| `admin_chat_id` | - | Chat that gets the startup message and a one-off alert for each unknown chat that sends audio. |
+| `admin_chat_id` | - | Chat that gets a one-off alert for each unknown chat that sends audio. |
 | `allowed_chat_ids` | - | Comma-separated chat IDs allowed to use the bot. Group IDs are negative. **Empty means anyone.** |
 
 ## What it transcribes

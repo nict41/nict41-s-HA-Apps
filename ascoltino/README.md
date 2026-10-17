@@ -56,7 +56,7 @@ shipping a half-patched bot. No upstream code is copied into this repository.
 3. Install this app and set:
    - `bot_token` - the BotFather token
    - `allowed_chat_ids` - your chat ID (comma-separate several)
-   - `admin_chat_id` - your chat ID again, for startup and intruder alerts
+   - `admin_chat_id` - your chat ID again, for intruder alerts
 4. Start it. The first start downloads the model (~600 MB for Parakeet).
 5. Forward a voice note to your bot.
 
