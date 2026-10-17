@@ -35,15 +35,19 @@ minutes of compressed speech.
 ## Why this is a patched copy
 
 This is [soldatigabriele/ascoltino](https://github.com/soldatigabriele/ascoltino)
-1.4.1 with one fix. Upstream only reads Telegram's `voice` field, so a voice
-note shared in from another app arrives as an `audio` file and is dropped
-with no reply and nothing in the app log.
+1.4.1 with two changes:
+
+- **Audio files work.** Upstream only reads Telegram's `voice` field, so a
+  voice note shared in from another app arrives as an `audio` file and is
+  dropped with no reply and nothing in the app log.
+- **An English-only model.** `parakeet-en` adds NVIDIA's Parakeet-TDT v2
+  alongside upstream's multilingual v3 (see [Models](#models)).
 
 The image is built `FROM` upstream's published image, pinned in
-[`build.yaml`](build.yaml), and [`patch_audio.py`](patch_audio.py) rewrites
-`bot.py` at build time. Each replacement must match exactly once, so if a
-future upstream version moves that code the build fails rather than shipping
-a half-patched bot. No upstream code is copied into this repository.
+[`build.yaml`](build.yaml), and [`patch.py`](patch.py) rewrites `bot.py` and
+`engines.py` at build time. Each replacement must match exactly once, so if
+a future upstream version moves that code the build fails rather than
+shipping a half-patched bot. No upstream code is copied into this repository.
 
 ## Quick start
 
@@ -62,7 +66,8 @@ Full option reference and troubleshooting: [DOCS.md](DOCS.md).
 
 | Model | Speed on CPU | Languages | Notes |
 |---|---|---|---|
-| `parakeet` (default) | Fast | 25 European, auto-detected | The right choice for most people |
+| `parakeet-en` (default) | Fast | English only | Parakeet-TDT v2; best English accuracy here |
+| `parakeet` | Fast | 25 European, auto-detected | Parakeet-TDT v3, upstream's default |
 | `turbo` | Slow | ~100 | Whisper large-v3 turbo; set `language` |
 | `tiny` / `base` / `small` | Faster as they shrink | ~100 | Less accurate |
 | `medium` / `large-v2` / `large-v3` | Slowest | ~100 | Most accurate Whisper sizes |

@@ -2,9 +2,9 @@ ARG BUILD_FROM=ghcr.io/soldatigabriele/ascoltino-amd64:1.4.1
 FROM ${BUILD_FROM}
 
 # The upstream image already holds the bot, its Python dependencies and
-# /run.sh. All this adds is patch_audio.py's rewrite of bot.py.
-COPY patch_audio.py /tmp/patch_audio.py
-RUN python3 /tmp/patch_audio.py /app/bot.py && rm /tmp/patch_audio.py
+# /run.sh. All this adds is patch.py's rewrite of bot.py and engines.py.
+COPY patch.py /tmp/patch.py
+RUN python3 /tmp/patch.py /app && rm /tmp/patch.py
 
 LABEL \
     org.opencontainers.image.title="Ascoltino" \

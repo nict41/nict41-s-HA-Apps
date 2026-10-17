@@ -1,5 +1,5 @@
 # Built on top of the upstream published image, pinned to the version this
-# patch was written against. Bumping it means re-checking patch_audio.py; the
+# patch was written against. Bumping it means re-checking patch.py; the
 # build fails if the code it rewrites has moved.
 build_from:
   amd64: ghcr.io/soldatigabriele/ascoltino-amd64:1.4.1
