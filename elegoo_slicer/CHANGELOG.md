@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- Fix presets inheriting from the wrong vendor. The slicer bundles every
+  vendor's profiles, and vendors reuse parent names such as
+  `fdm_process_common` with different values; the index kept whichever was
+  scanned last, so Elegoo presets silently picked up another vendor's line
+  widths, accelerations and fan settings. Parents now resolve within their
+  child's vendor first, as the slicer does.
+
 ## 0.2.2
 
 - Fix the project export failing (exit -13) after every successful slice.

@@ -32,7 +32,7 @@ import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 LOG = logging.getLogger("slice-api")
@@ -114,18 +114,31 @@ def _infer_type(path: Path, data: dict[str, Any]) -> str | None:
     return None
 
 
+class _Entry(NamedTuple):
+    path: Path
+    is_user: bool
+    vendor: str | None
+    concrete: bool
+
+
 class PresetIndex:
-    """Every preset on disk, by type and name."""
+    """Every preset on disk, by type and name.
+
+    System presets are grouped by vendor: the top-level folder of a system
+    root (Elegoo, BBL, OrcaFilamentLibrary, ...). Vendors reuse parent names
+    such as fdm_process_common with different contents, so a parent is looked
+    up in its child's vendor first, as the slicer itself does. Only a parent
+    that vendor lacks is taken from another one.
+    """
 
     def __init__(self, system_roots: list[Path], user_roots: list[Path]):
-        # (type, name) -> (path, is_user)
-        self._presets: dict[tuple[str, str], tuple[Path, bool]] = {}
-        # System first so user presets of the same name replace them, and
-        # user roots in reverse so the first-listed root wins.
+        # (type, name) -> candidates; user ones first (first-listed root
+        # first), then system ones in scan order.
+        self._presets: dict[tuple[str, str], list[_Entry]] = {}
+        for root in user_roots:
+            self._scan(root, is_user=True)
         for root in system_roots:
             self._scan(root, is_user=False)
-        for root in reversed(user_roots):
-            self._scan(root, is_user=True)
 
     def _scan(self, root: Path, *, is_user: bool) -> None:
         if not root.is_dir():
@@ -140,41 +153,59 @@ class PresetIndex:
             kind = _infer_type(path, data)
             if kind is None:
                 continue
-            self._presets[(kind, data["name"])] = (path, is_user)
+            vendor = None if is_user else path.relative_to(root).parts[0]
+            self._presets.setdefault((kind, data["name"]), []).append(
+                _Entry(path, is_user, vendor, data.get("instantiation") != "false")
+            )
 
     def names(self, kind: str, contains: str = "") -> list[dict[str, Any]]:
         needle = contains.lower()
         out = []
-        for (k, name), (path, is_user) in self._presets.items():
+        for (k, name), entries in self._presets.items():
             if k != kind or needle not in name.lower():
                 continue
-            data = json.loads(path.read_text(encoding="utf-8"))
+            entry = entries[0]
             # Abstract system presets are only parents; nobody slices with them.
-            if not is_user and data.get("instantiation") == "false":
+            if not entry.is_user and not entry.concrete:
                 continue
-            out.append({"name": name, "user": is_user})
+            out.append({"name": name, "user": entry.is_user})
         return sorted(out, key=lambda p: (not p["user"], p["name"]))
 
+    def _find(self, kind: str, name: str, vendor: str | None) -> _Entry:
+        entries = self._presets.get((kind, name))
+        if not entries:
+            raise SliceError(f"no {kind} preset named {name!r}", HTTPStatus.NOT_FOUND)
+        for entry in entries:
+            if entry.is_user:
+                return entry
+        for entry in entries:
+            if entry.vendor == vendor:
+                return entry
+        # A user preset's parent, or a vendor borrowing from a shared library:
+        # prefer the concrete preset, since abstract names are the ones vendors
+        # reuse.
+        return next((e for e in entries if e.concrete), entries[0])
+
     def load(self, kind: str, name: str) -> dict[str, Any]:
-        try:
-            path, _ = self._presets[(kind, name)]
-        except KeyError:
-            raise SliceError(f"no {kind} preset named {name!r}", HTTPStatus.NOT_FOUND) from None
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(self._find(kind, name, None).path.read_text(encoding="utf-8"))
 
     def _chain(self, kind: str, name: str) -> list[tuple[str, dict[str, Any], bool]]:
         """The preset and its ancestors, nearest first, as (name, data, is_user)."""
         chain = []
         seen = set()
         current: str | None = name
+        vendor: str | None = None
         while current:
             if current in seen:
                 raise SliceError(f"{kind} preset {name!r} inherits from itself via {current!r}")
             if len(chain) >= MAX_INHERIT_DEPTH:
                 raise SliceError(f"{kind} preset {name!r} inherits more than {MAX_INHERIT_DEPTH} deep")
             seen.add(current)
-            data = self.load(kind, current)
-            chain.append((current, data, self._presets[(kind, current)][1]))
+            entry = self._find(kind, current, vendor)
+            if entry.vendor is not None:
+                vendor = entry.vendor
+            data = json.loads(entry.path.read_text(encoding="utf-8"))
+            chain.append((current, data, entry.is_user))
             current = data.get("inherits") or None
         return chain
 
