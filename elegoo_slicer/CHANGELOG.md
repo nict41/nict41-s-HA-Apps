@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1
+
+- Fix thumbnails that showed the inside of the model instead of its outside.
+  The camera's screen axes were mirrored, which flips every triangle's
+  winding: the faces towards the viewer were culled and the far inside walls
+  were drawn, so parts looked hollow and their mirror image. The camera is now
+  a right-handed basis, with tests pinning that down.
+
 ## 0.4.0
 
 - **Printer routes.** Upload sliced G-code to a Centauri Carbon 2 and start

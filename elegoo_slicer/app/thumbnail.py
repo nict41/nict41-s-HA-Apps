@@ -149,22 +149,37 @@ def _parse_colour(colour: str) -> tuple[float, float, float]:
     return tuple(int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
 
 
+Basis = tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]
+
+
+def camera(azimuth: float, elevation: float) -> Basis:
+    """Screen axes (right, up, towards the viewer) in model coordinates.
+
+    The model is turned by `azimuth` about Z and seen from in front (-y) and
+    `elevation` above. The basis is right-handed - right x up = towards - which
+    the back-face test and the depth test in render() both rely on. Mirroring
+    one axis flips every triangle's winding: the faces towards the camera get
+    culled and the model's far inside walls are what is left to see.
+    """
+    ca, sa = math.cos(azimuth), math.sin(azimuth)
+    ce, se = math.cos(elevation), math.sin(elevation)
+    # Rows: the model's x, y, z rotated about Z, then dotted with each axis.
+    right = (ca, -sa, 0.0)
+    up = (sa * se, ca * se, ce)
+    towards = (-sa * ce, -ca * ce, se)
+    return right, up, towards
+
+
+def view(basis: Basis, p: tuple[float, float, float]) -> tuple[float, float, float]:
+    return tuple(axis[0] * p[0] + axis[1] * p[1] + axis[2] * p[2] for axis in basis)  # type: ignore[return-value]
+
+
 def render(tris: list[Triangle], colour: str = "#808080", size: int = SIZE) -> bytes:
     """Render to an RGBA PNG."""
     if not tris:
         raise ValueError("model has no triangles")
-    ca, sa = math.cos(AZIMUTH), math.sin(AZIMUTH)
-    ce, se = math.cos(ELEVATION), math.sin(ELEVATION)
-
-    def view(p: tuple[float, float, float]) -> tuple[float, float, float]:
-        # Rotate about Z, then tilt about the new X. Returns (right, up, depth
-        # towards the viewer).
-        x, y, z = p
-        rx = x * ca - y * sa
-        ry = x * sa + y * ca
-        return (rx, z * ce - ry * se, z * se + ry * ce)
-
-    projected = [(view(a), view(b), view(c)) for a, b, c in tris]
+    basis = camera(AZIMUTH, ELEVATION)
+    projected = [(view(basis, a), view(basis, b), view(basis, c)) for a, b, c in tris]
     xs = [v[0] for t in projected for v in t]
     ys = [v[1] for t in projected for v in t]
     span = max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
