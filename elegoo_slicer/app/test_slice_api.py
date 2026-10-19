@@ -80,6 +80,31 @@ def test_resolve_drops_compatibility_lists(profiles):
     assert "compatible_printers" not in idx.resolve("filament", "Esun PLA")
 
 
+def test_parents_resolve_within_their_own_vendor(profiles):
+    system, user = profiles
+    # Another vendor reusing the same abstract parent name with other values,
+    # sorted after Elegoo so a last-one-wins index would pick it.
+    write(system / "Zzz/machine/common.json",
+          {"type": "machine", "name": "common", "instantiation": "false",
+           "nozzle_diameter": ["0.6"], "bed_temp": "99", "printable_height": "999"})
+    write(system / "Zzz/machine/other.json",
+          {"type": "machine", "name": "Other 0.6", "inherits": "common", "instantiation": "true"})
+    idx = PresetIndex([system], [user])
+    assert idx.resolve("machine", "My CC2")["nozzle_diameter"] == ["0.4"]
+    assert idx.resolve("machine", "CC2 0.4")["nozzle_diameter"] == ["0.4"]
+    assert idx.resolve("machine", "Other 0.6")["nozzle_diameter"] == ["0.6"]
+
+
+def test_parent_missing_from_vendor_falls_back_to_another(profiles):
+    system, user = profiles
+    write(system / "Library/filament/base.json",
+          {"type": "filament", "name": "PLA base", "instantiation": "false", "filament_density": ["1.24"]})
+    write(system / "Elegoo/filament/borrow.json",
+          {"type": "filament", "name": "Borrowing PLA", "inherits": "PLA base", "instantiation": "true"})
+    idx = PresetIndex([system], [user])
+    assert idx.resolve("filament", "Borrowing PLA")["filament_density"] == ["1.24"]
+
+
 def test_user_preset_replaces_system_preset_of_same_name(profiles):
     system, user = profiles
     write(user / "default/process/override.json",
