@@ -357,7 +357,8 @@ class Slicer:
         # arrange turn the part, which the GUI's import never does.
         if request.get("arrange", True):
             cmd += ["--arrange", "1"]
-            cmd += ["--allow-rotations", "1" if request.get("allow_rotations") else "0"]
+            # A boolean flag: it takes no value, and is negated by prefix.
+            cmd.append("--allow-rotations" if request.get("allow_rotations") else "--no-allow-rotations")
         if request.get("orient"):
             cmd += ["--orient", "1"]
         if bed := request.get("bed_type"):

@@ -248,7 +248,7 @@ def test_slice_writes_gcode_next_to_model(tmp_path, profiles):
     assert argv[argv.index("--debug") + 1] == "3"
     # Arranged (centred) by default, but never rotated unless asked.
     assert argv[argv.index("--arrange") + 1] == "1"
-    assert argv[argv.index("--allow-rotations") + 1] == "0"
+    assert "--no-allow-rotations" in argv and "--allow-rotations" not in argv
     assert argv[argv.index("--export-3mf") + 1] == "result.3mf"
     assert argv[-1] == str(share / "models/part.stl")
 
@@ -291,9 +291,11 @@ def test_slice_applies_overrides_and_options(tmp_path, profiles):
 def test_arrange_can_be_turned_off_or_allowed_to_rotate(tmp_path, profiles):
     slicer, share = make_slicer(tmp_path, profiles)
     argv = json.loads((Path(slicer.slice(request(share, arrange=False))["job_dir"]) / "datadir/argv.json").read_text())
-    assert "--arrange" not in argv and "--allow-rotations" not in argv
+    assert not {"--arrange", "--allow-rotations", "--no-allow-rotations"} & set(argv)
     argv = json.loads((Path(slicer.slice(request(share, allow_rotations=True))["job_dir"]) / "datadir/argv.json").read_text())
-    assert argv[argv.index("--allow-rotations") + 1] == "1"
+    assert "--allow-rotations" in argv and "--no-allow-rotations" not in argv
+    # Flags take no value: the next argument must not be swallowed as one.
+    assert argv[argv.index("--allow-rotations") + 1].startswith("--")
 
 
 def test_colours_set_all_three_colour_keys(tmp_path, profiles):
