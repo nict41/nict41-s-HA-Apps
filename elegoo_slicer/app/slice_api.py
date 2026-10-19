@@ -529,7 +529,7 @@ class Slicer:
         """The /printer/* routes. One printer operation at a time."""
         route = (method, path)
         known = {("GET", "/printer/status"), ("GET", "/printer/files"), ("POST", "/printer/upload"),
-                 ("POST", "/printer/delete"), ("POST", "/printer/print")}
+                 ("POST", "/printer/delete"), ("POST", "/printer/print"), ("POST", "/printer/home")}
         if route not in known:
             raise SliceError(f"no route {method} {path}", HTTPStatus.NOT_FOUND)
         if not self._printer_lock.acquire(blocking=False):
@@ -548,6 +548,8 @@ class Slicer:
                 if "/" in name or not name.lower().endswith(".gcode"):
                     raise SliceError("name must be a bare file name ending in .gcode")
                 return printer.upload(gcode, name)
+            if route == ("POST", "/printer/home"):
+                return printer.home()
             if route == ("POST", "/printer/delete"):
                 printer.delete(self._printer_file(body))
                 return {"deleted": body["filename"]}

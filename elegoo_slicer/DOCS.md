@@ -88,6 +88,7 @@ service uploads to and prints on a Centauri Carbon 2:
 | `GET /printer/files` | Files on the printer's storage |
 | `POST /printer/upload` | `{"gcode": "/share/.../part.gcode"}`; optional `name` for the file on the printer |
 | `POST /printer/delete` | `{"filename": "part.gcode"}` |
+| `POST /printer/home` | Home all axes (raises the bed into the camera's view); idle only, nozzle heater turned back off after |
 | `POST /printer/print` | Start a file already on the printer (below) |
 
 ```json

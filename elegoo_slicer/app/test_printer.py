@@ -48,6 +48,8 @@ class FakeCC2:
         self.requests: list[tuple[int, dict]] = []
         self.registrations = 0
         self.start_goes_to = 2  # what status a START_PRINT moves the printer to
+        self.homing_polls = 0  # status polls left before a home finishes
+        self.nozzle_target = 0
         self.uploads: list[dict] = []
         self.upload_connections: set = set()
         self.upload_body = bytearray()
@@ -157,8 +159,20 @@ class FakeCC2:
 
     def _answer(self, method, params):
         if method == 1002:
+            if self.status == 10:
+                if self.homing_polls:
+                    self.homing_polls -= 1
+                else:
+                    self.status = 1
             return {"error_code": 0, "machine_status": {"status": self.status, "sub_status": 0},
-                    "print_status": {"filename": ""}, "extruder": {"temperature": 25}, "heater_bed": {"temperature": 24}}
+                    "print_status": {"filename": ""}, "gcode_move": {"z": 5.05},
+                    "extruder": {"temperature": 25, "target": self.nozzle_target}, "heater_bed": {"temperature": 24}}
+        if method == 1026:
+            self.status, self.homing_polls, self.nozzle_target = 10, 2, 140
+            return {"error_code": 0}
+        if method == 1028:
+            self.nozzle_target = params.get("extruder", self.nozzle_target)
+            return {"error_code": 0}
         if method == 2005:
             return {"error_code": 0, "canvas_info": {"auto_refill": True, "canvas_list": [
                 {"canvas_id": 0, "connected": 1, "tray_list": self.trays}]}}
@@ -185,6 +199,11 @@ def cc2():
     yield fake
     fake.mqtt.close()
     fake.http.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def fast_polls(monkeypatch):
+    monkeypatch.setattr(printer_mod, "POLL_SECONDS", 0)
 
 
 @pytest.fixture
@@ -350,3 +369,25 @@ def test_api_printer_errors_keep_their_status(cc2, api):
         slicer.printer_call("POST", "/printer/print", {}, {
             "filename": "part.gcode", "slot_map": [{"t": 0, "tray_id": 1}], "confirm": True, "plate": "textured"})
     assert err.value.status == 409
+
+
+def test_home_waits_for_homing_and_turns_the_nozzle_off(cc2, printer):
+    result = printer.home()
+    assert result == {"homed": True, "z_mm": 5.05, "nozzle_target_c": 0}
+    methods = [m for m, _ in cc2.requests]
+    assert methods.index(1026) < methods.index(1028)
+    assert dict(cc2.requests)[1028] == {"extruder": 0}
+    assert cc2.status == 1
+
+
+def test_home_refuses_unless_idle(cc2, printer):
+    cc2.status = 2
+    with pytest.raises(PrinterError, match="not idle") as err:
+        printer.home()
+    assert err.value.status == 409
+    assert 1026 not in [m for m, _ in cc2.requests]
+
+
+def test_api_home_route(cc2, api):
+    slicer, _ = api
+    assert slicer.printer_call("POST", "/printer/home", {}, {})["homed"] is True
