@@ -1,5 +1,5 @@
 name: "ElegooSlicer"
-version: "0.3.0"
+version: "0.4.0"
 slug: "elegoo_slicer"
 description: "ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a desktop in your browser"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/elegoo_slicer"
@@ -30,6 +30,9 @@ options:
   resolution: "1440x900"
   extra_folders: []
   slice_api_token: ""
+  printer_host: ""
+  printer_serial: ""
+  printer_access_code: ""
 schema:
   web_username: str?
   web_password: password?
@@ -37,3 +40,6 @@ schema:
   extra_folders:
     - str?
   slice_api_token: password?
+  printer_host: str?
+  printer_serial: str?
+  printer_access_code: password?

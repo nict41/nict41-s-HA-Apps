@@ -30,6 +30,20 @@ configuration:
       Bearer token for the headless slicing API on port 8100. That port is
       only reachable from other add-ons and Home Assistant, never your LAN;
       leaving this empty lets any of them slice files under /share and /media.
+  printer_host:
+    name: Printer address
+    description: >-
+      IP address of the Centauri Carbon 2 the API uploads to and prints on.
+  printer_serial:
+    name: Printer serial number
+    description: >-
+      The printer's serial number (mainboard ID), as Home Assistant's Elegoo
+      integration shows it.
+  printer_access_code:
+    name: Printer access code
+    description: >-
+      The access code from the printer's screen (Settings > Network). Used for
+      uploads and for the MQTT commands that start prints.
 
 network:
   3000/tcp: Desktop web interface for direct access, bypassing the sidebar. Unmapped by default - the desktop offers a file manager and a session on your Home Assistant host, so set a password before exposing it.
