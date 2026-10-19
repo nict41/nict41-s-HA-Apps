@@ -246,6 +246,9 @@ def test_slice_writes_gcode_next_to_model(tmp_path, profiles):
     assert argv[argv.index("--load-filaments") + 1] == f"{job}/filament_1.json"
     assert argv[argv.index("--slice") + 1] == "0"
     assert argv[argv.index("--debug") + 1] == "3"
+    # Arranged (centred) by default, but never rotated unless asked.
+    assert argv[argv.index("--arrange") + 1] == "1"
+    assert argv[argv.index("--allow-rotations") + 1] == "0"
     assert argv[argv.index("--export-3mf") + 1] == "result.3mf"
     assert argv[-1] == str(share / "models/part.stl")
 
@@ -283,6 +286,31 @@ def test_slice_applies_overrides_and_options(tmp_path, profiles):
     assert argv[argv.index("--arrange") + 1] == "1"
     assert argv[argv.index("--orient") + 1] == "1"
     assert argv[argv.index("--slice") + 1] == "1"
+
+
+def test_arrange_can_be_turned_off_or_allowed_to_rotate(tmp_path, profiles):
+    slicer, share = make_slicer(tmp_path, profiles)
+    argv = json.loads((Path(slicer.slice(request(share, arrange=False))["job_dir"]) / "datadir/argv.json").read_text())
+    assert "--arrange" not in argv and "--allow-rotations" not in argv
+    argv = json.loads((Path(slicer.slice(request(share, allow_rotations=True))["job_dir"]) / "datadir/argv.json").read_text())
+    assert argv[argv.index("--allow-rotations") + 1] == "1"
+
+
+def test_colours_set_all_three_colour_keys(tmp_path, profiles):
+    slicer, share = make_slicer(tmp_path, profiles)
+    result = slicer.slice(request(share, filaments=["Esun PLA", "Generic PLA"], colours=["#000000"]))
+    job = Path(result["job_dir"])
+    first = json.loads((job / "filament_1.json").read_text())
+    assert first["filament_colour"] == first["filament_multi_colour"] == ["#000000"]
+    assert first["filament_colour_type"] == ["1"]
+    assert "filament_multi_colour" not in json.loads((job / "filament_2.json").read_text())
+
+
+@pytest.mark.parametrize("colours", [["black"], ["#00000"], "#000000", ["#000000", "#FFFFFF"]])
+def test_bad_colours_are_refused(tmp_path, profiles, colours):
+    slicer, share = make_slicer(tmp_path, profiles)
+    with pytest.raises(SliceError, match="colour"):
+        slicer.slice(request(share, colours=colours))
 
 
 @pytest.mark.parametrize("field,value,status", [

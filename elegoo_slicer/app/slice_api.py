@@ -351,8 +351,13 @@ class Slicer:
             # an absolute path comes out as out//abs/path and the export fails.
             "--export-3mf", "result.3mf",
         ]
-        if request.get("arrange"):
+        # On by default: without it a model stays wherever it was modelled,
+        # often a corner of the bed, where the GUI would have centred it. And
+        # without rotation by default, because the slicer's own default lets
+        # arrange turn the part, which the GUI's import never does.
+        if request.get("arrange", True):
             cmd += ["--arrange", "1"]
+            cmd += ["--allow-rotations", "1" if request.get("allow_rotations") else "0"]
         if request.get("orient"):
             cmd += ["--orient", "1"]
         if bed := request.get("bed_type"):
@@ -411,6 +416,17 @@ class Slicer:
             resolved[kind].update(overrides.get(kind) or {})
         for fil in resolved_filaments:
             fil.update(overrides.get("filament") or {})
+        colours = request.get("colours") or []
+        if not isinstance(colours, list) or len(colours) > len(resolved_filaments):
+            raise SliceError("colours must be a list with at most one colour per filament")
+        for fil, colour in zip(resolved_filaments, colours):
+            if not isinstance(colour, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", colour):
+                raise SliceError(f"colour {colour!r} is not #RRGGBB")
+            # All three together: setting filament_colour alone leaves the
+            # multi-colour list disagreeing with it, and the slicer segfaults.
+            fil["filament_colour"] = [colour]
+            fil["filament_multi_colour"] = [colour]
+            fil["filament_colour_type"] = ["1"]
         printer = system_printer_name(resolved["machine"])
         for preset in (resolved["process"], *resolved_filaments):
             preset["compatible_printers"] = [printer]
@@ -450,6 +466,10 @@ class Slicer:
             elapsed = round(time.monotonic() - started, 1)
             log = (proc.stdout or "") + (proc.stderr or "")
             (job / "slicer.log").write_text(log, encoding="utf-8")
+            # The slicer's own log goes to a numbered file in its working
+            # directory, not to stderr; that is the one that says what it did.
+            for own_log in sorted(job.glob("[0-9]*.log")):
+                log += own_log.read_text(encoding="utf-8", errors="replace")
 
             gcode = self._collect_gcode(job / "out")
             result: dict[str, Any] = {

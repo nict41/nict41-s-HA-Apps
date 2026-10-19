@@ -57,12 +57,15 @@ tab). The port is not published, so nothing on your LAN can reach it.
   "filaments": ["Esun Baisc PLA"],
   "output": "/share/prints/part.gcode",
   "bed_type": "Textured PEI Plate",
-  "arrange": true,
+  "colours": ["#000000"],
   "overrides": {"process": {"sparse_infill_density": "30%"}}
 }
 ```
 
-`filaments` is one preset per slot, in order. `output` defaults to the model's
+`filaments` is one preset per slot, in order, and `colours` optionally one
+`#RRGGBB` each. Models are centred on the bed without being rotated; send
+`"arrange": false` to keep the model's own position, or
+`"allow_rotations": true` to let the slicer turn it for a better fit. `output` defaults to the model's
 path with `.gcode`, and has to end in `.gcode`. The reply carries the G-code
 path, print time, filament grams and layer count, plus the slicer's log tail.
 
