@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+- Fix 0.2.5's "Invalid option --no-allow-rotations": ElegooSlicer has the
+  `--no-` negation compiled out of its option parser. Rotation is now set as
+  `--allow-rotations=0` (or `=1`), value in the same token.
+
 ## 0.2.5
 
 - Fix every slice failing in 0.2.4 with "No such file: 0".
