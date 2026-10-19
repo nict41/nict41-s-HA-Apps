@@ -142,3 +142,35 @@ def test_embed_leaves_a_file_that_already_has_a_thumbnail(tmp_path):
     before = gcode.read_bytes()
     assert thumbnail.embed(gcode, b"png") is False
     assert gcode.read_bytes() == before
+
+
+@pytest.mark.parametrize("azimuth", [0, 45, 135, -135, 200])
+@pytest.mark.parametrize("elevation", [10, 45, 80])
+def test_camera_basis_is_right_handed_and_looks_from_the_front(azimuth, elevation):
+    import math
+    right, up, towards = thumbnail.camera(math.radians(azimuth), math.radians(elevation))
+    cross = (right[1] * up[2] - right[2] * up[1], right[2] * up[0] - right[0] * up[2], right[0] * up[1] - right[1] * up[0])
+    assert cross == pytest.approx(towards)
+    assert towards[2] > 0  # the camera is above the bed
+    assert up[2] > 0  # and the model's up is up on screen
+
+
+def test_depth_keeps_the_near_surface_and_front_faces_survive_culling():
+    import math
+    basis = thumbnail.camera(0, math.radians(30))
+    # Unrotated, the camera is in front (-y) of the model: nearer points have
+    # greater depth.
+    assert thumbnail.view(basis, (0, -10, 0))[2] > thumbnail.view(basis, (0, 10, 0))[2]
+    # A cube's front face (outward normal -y), wound outward, must face the
+    # camera in screen space, or render() culls it.
+    a, b, c = (thumbnail.view(basis, V[i]) for i in F[4])  # (0, 1, 5): the y=0 face
+    nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    assert nz > 0
+
+
+def test_a_closed_box_renders_its_lit_top_not_its_inside(tmp_path):
+    """Seen from above, a box shows its top face, which faces the light; the
+    inside of its floor - what a mirrored camera shows - is much darker."""
+    _, _, rows = decode_png(thumbnail.render(thumbnail.load_triangles(binary_stl(tmp_path / "c.stl")), "#808080"))
+    top = [rows[y][x * 4] for y in range(20, 50) for x in range(60, 84) if rows[y][x * 4 + 3] == 255]
+    assert top and sum(top) / len(top) > 120
