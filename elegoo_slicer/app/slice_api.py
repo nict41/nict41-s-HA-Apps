@@ -40,9 +40,11 @@ LOG = logging.getLogger("slice-api")
 PRESET_TYPES = ("machine", "process", "filament")
 
 # Keys that tie a process or filament preset to specific printers or
-# processes. The command line refuses a combination these do not allow, and a
-# user's machine preset never appears in a system preset's list, so they are
-# cleared: the caller choosing the combination is the point.
+# processes. The command line refuses a process whose compatible_printers does
+# not name the machine's system preset (the machine file's `inherits`), and an
+# empty list counts as refusal, not as "anything goes". So these are replaced
+# with exactly the machine being sliced for: the caller choosing the
+# combination is the point.
 COMPAT_KEYS = (
     "compatible_printers",
     "compatible_printers_condition",
@@ -87,7 +89,10 @@ class Settings:
             )
         )
         self.allowed_roots = _paths(env.get("SLICE_ALLOWED_ROOTS", "/share:/media"))
-        self.work_dir = Path(env.get("SLICE_WORK_DIR", "/tmp/slice-api"))
+        # On /share so a failed slice can be diagnosed from outside the
+        # container: each job keeps its preset files and the slicer's own log.
+        self.work_dir = Path(env.get("SLICE_WORK_DIR", "/share/elegoo_slicer/jobs"))
+        self.keep_jobs = int(env.get("SLICE_KEEP_JOBS", "10"))
         self.timeout = int(env.get("SLICE_TIMEOUT", "1800"))
         self.display = env.get("DISPLAY", ":1")
 
@@ -157,8 +162,8 @@ class PresetIndex:
             raise SliceError(f"no {kind} preset named {name!r}", HTTPStatus.NOT_FOUND) from None
         return json.loads(path.read_text(encoding="utf-8"))
 
-    def resolve(self, kind: str, name: str) -> dict[str, Any]:
-        """Return the preset with its whole inherits chain merged in."""
+    def _chain(self, kind: str, name: str) -> list[tuple[str, dict[str, Any], bool]]:
+        """The preset and its ancestors, nearest first, as (name, data, is_user)."""
         chain = []
         seen = set()
         current: str | None = name
@@ -169,21 +174,46 @@ class PresetIndex:
                 raise SliceError(f"{kind} preset {name!r} inherits more than {MAX_INHERIT_DEPTH} deep")
             seen.add(current)
             data = self.load(kind, current)
-            chain.append(data)
+            chain.append((current, data, self._presets[(kind, current)][1]))
             current = data.get("inherits") or None
+        return chain
 
+    def resolve(self, kind: str, name: str) -> dict[str, Any]:
+        """Return the preset with its whole inherits chain merged in.
+
+        The result still names its nearest concrete system ancestor in
+        `inherits` (and is marked "system" when it is one itself), because the
+        command line identifies a printer by that name when it checks process
+        compatibility. It only reads the name; nothing is loaded from it.
+        """
+        chain = self._chain(kind, name)
         merged: dict[str, Any] = {}
-        for data in reversed(chain):
+        for _, data, _ in reversed(chain):
             merged.update(data)
+
+        base = next(
+            (n for n, data, is_user in chain
+             if not is_user and data.get("instantiation") != "false"),
+            "",
+        )
         merged["name"] = name
         merged["type"] = kind
-        merged["from"] = "User"
-        merged["inherits"] = ""
         merged["instantiation"] = "true"
+        if base == name:
+            merged["from"] = "system"
+            merged["inherits"] = ""
+        else:
+            merged["from"] = "User"
+            merged["inherits"] = base
         if kind != "machine":
             for key in COMPAT_KEYS:
                 merged.pop(key, None)
         return merged
+
+
+def system_printer_name(machine: dict[str, Any]) -> str:
+    """The name the command line matches compatible_printers against."""
+    return machine["name"] if machine.get("from") == "system" else machine.get("inherits", "")
 
 
 # ── Slicing ─────────────────────────────────────────────────────────────────
@@ -278,6 +308,9 @@ class Slicer:
     ) -> list[str]:
         cmd = [
             self.settings.slicer,
+            # The command line logs to stderr, errors only by default; info
+            # level is what says which presets it loaded and why it stopped.
+            "--debug", str(int(request.get("debug", 3))),
             "--datadir", str(job / "datadir"),
             "--load-settings", ";".join(str(p) for p in settings_files),
             "--load-filaments", ";".join(str(p) for p in filament_files),
@@ -345,6 +378,10 @@ class Slicer:
             resolved[kind].update(overrides.get(kind) or {})
         for fil in resolved_filaments:
             fil.update(overrides.get("filament") or {})
+        printer = system_printer_name(resolved["machine"])
+        for preset in (resolved["process"], *resolved_filaments):
+            preset["compatible_printers"] = [printer]
+            preset["compatible_printers_condition"] = ""
 
         if not self._lock.acquire(blocking=False):
             raise SliceError("a slice is already running", HTTPStatus.CONFLICT)
@@ -397,7 +434,13 @@ class Slicer:
                 result["stats"] = gcode_stats(output)
             return result
         finally:
+            self._prune_jobs()
             self._lock.release()
+
+    def _prune_jobs(self) -> None:
+        jobs = sorted(p for p in self.settings.work_dir.glob("job-*") if p.is_dir())
+        for old in jobs[: max(0, len(jobs) - self.settings.keep_jobs)]:
+            shutil.rmtree(old, ignore_errors=True)
 
 
 # ── HTTP ────────────────────────────────────────────────────────────────────
