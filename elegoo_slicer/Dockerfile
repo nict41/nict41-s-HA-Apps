@@ -170,7 +170,7 @@ RUN grep -q 'proxy_pass               http://127.0.0.1:6900;' /defaults/default.
     && echo "Published port serves a zoomable page" 
 
 COPY rootfs /
-COPY app/slice_api.py /opt/slice-api/slice_api.py
+COPY app/slice_api.py app/thumbnail.py /opt/slice-api/
 
 RUN chmod a+x /defaults/autostart /custom-cont-init.d/* /custom-services.d/*
 
