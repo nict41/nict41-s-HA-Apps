@@ -35,6 +35,8 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
+import thumbnail
+
 LOG = logging.getLogger("slice-api")
 
 PRESET_TYPES = ("machine", "process", "filament")
@@ -487,11 +489,30 @@ class Slicer:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(gcode, output)
                 result["gcode"] = str(output)
+                if request.get("thumbnail", True):
+                    fil_colour = resolved_filaments[0].get("filament_colour") or ["#808080"]
+                    colour = colours[0] if colours else str(fil_colour[0])
+                    result["thumbnail_error"] = self._add_thumbnail(model, output, colour)
                 result["stats"] = gcode_stats(output)
             return result
         finally:
             self._prune_jobs()
             self._lock.release()
+
+    @staticmethod
+    def _add_thumbnail(model: Path, gcode: Path, colour: str) -> str | None:
+        """Render and embed the preview the command line cannot (see thumbnail).
+
+        Returns why it was skipped, or None. Never fails the slice: a G-code
+        without a preview still prints.
+        """
+        try:
+            png = thumbnail.render(thumbnail.load_triangles(model), colour)
+            thumbnail.embed(gcode, png)
+        except Exception as err:  # noqa: BLE001 - a preview is never worth a failed slice
+            LOG.warning("thumbnail for %s skipped: %r", model.name, err)
+            return repr(err)
+        return None
 
     def _prune_jobs(self) -> None:
         jobs = sorted(p for p in self.settings.work_dir.glob("job-*") if p.is_dir())

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- **Thumbnails.** Sliced G-code now carries the 144×144 plate preview the
+  printer's screen and Home Assistant show. ElegooSlicer's command line cannot
+  render one on Linux (it requests an OpenGL context of version 3.4, which
+  does not exist, taken from the GLFW library's own version number), so the
+  model is rendered here instead: same view, size and block format as the GUI,
+  shaded in the first filament's colour. STL and 3MF, a couple of seconds for
+  a 330k-triangle model. `"thumbnail": false` skips it; a failure is reported
+  as `thumbnail_error` and never fails the slice.
+
 ## 0.2.6
 
 - Fix 0.2.5's "Invalid option --no-allow-rotations": ElegooSlicer has the
