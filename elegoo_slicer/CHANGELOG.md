@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.5
+
+- Fix every slice failing in 0.2.4 with "No such file: 0".
+  `--allow-rotations` is a flag without a value, so the `0` after it was
+  read as a model to load. Rotation is now turned off with
+  `--no-allow-rotations`.
+
 ## 0.2.4
 
 - Models are now centred on the bed by default (`arrange`), and never
