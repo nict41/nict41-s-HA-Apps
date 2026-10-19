@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4
+
+- Models are now centred on the bed by default (`arrange`), and never
+  rotated unless `allow_rotations` is set. Before, an STL either stayed where
+  it was modelled (often a bed corner) or, with `arrange`, was turned 90° by
+  the slicer's own default.
+- New `colours` option: one `#RRGGBB` per filament. It sets the colour
+  together with the two fields the slicer expects to agree with it, which a
+  bare `filament_colour` override does not (that crashes the slicer).
+- The reply's `log_tail` now includes the slicer's own log, which it writes
+  to a numbered file rather than to stderr.
+
 ## 0.2.3
 
 - Fix presets inheriting from the wrong vendor. The slicer bundles every
