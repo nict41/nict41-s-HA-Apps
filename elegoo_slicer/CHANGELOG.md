@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- New `POST /printer/home`: home all axes, which raises the bed into the
+  chamber camera's view for a check before printing. Only when the printer is
+  idle; waits for the home to finish and turns the nozzle heater back off,
+  since homing leaves it at 140 °C for probing.
+
 ## 0.4.1
 
 - Fix thumbnails that showed the inside of the model instead of its outside.

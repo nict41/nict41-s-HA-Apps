@@ -38,9 +38,12 @@ from pathlib import Path
 from typing import Any
 
 CHUNK = 1024 * 1024
+POLL_SECONDS = 2
 
 METHOD_STATUS = 1002
 METHOD_START_PRINT = 1020
+METHOD_HOME = 1026
+METHOD_SET_TEMPERATURE = 1028
 METHOD_FILE_LIST = 1044
 METHOD_FILE_DETAIL = 1046
 METHOD_DELETE_FILE = 1047
@@ -49,6 +52,7 @@ METHOD_CANVAS = 2005
 
 STATUS_IDLE = 1
 STATUS_PRINTING = 2
+STATUS_HOMING = 10
 STATUS_NAMES = {
     0: "initializing", 1: "idle", 2: "printing", 3: "filament operating", 4: "filament operating",
     5: "auto leveling", 6: "PID calibrating", 7: "resonance testing", 8: "self checking",
@@ -325,6 +329,43 @@ class Printer:
         if result.get("error_code"):
             raise PrinterError(f"printer refused to delete {name!r} (error_code {result['error_code']})")
 
+    def home(self, *, timeout: float = 180) -> dict[str, Any]:
+        """Home all axes, which also raises the bed to the nozzle.
+
+        That is what puts the bed in the chamber camera's view for a check
+        before a print. Homing heats the nozzle to 140 °C for probing and
+        leaves it there, so the heater target is put back to 0 afterwards.
+        """
+        with self.session() as s:
+            machine = s.request(METHOD_STATUS).get("machine_status") or {}
+            if machine.get("status") != STATUS_IDLE:
+                raise PrinterError(f"printer is {STATUS_NAMES.get(machine.get('status'))}, not idle", 409)
+            result = s.request(METHOD_HOME, {})
+            if result.get("error_code"):
+                raise PrinterError(f"printer refused to home (error_code {result['error_code']})")
+            started = time.monotonic()
+            deadline = started + timeout
+            began = False
+            while True:
+                time.sleep(POLL_SECONDS)
+                status = s.request(METHOD_STATUS)
+                code = (status.get("machine_status") or {}).get("status")
+                began = began or code == STATUS_HOMING
+                # Done once it has been homing and is idle again. A home so
+                # quick that no poll saw it counts as done after ten seconds.
+                if code == STATUS_IDLE and (began or time.monotonic() - started > 10):
+                    break
+                if time.monotonic() > deadline:
+                    raise PrinterError(f"printer still {STATUS_NAMES.get(code)} {timeout:.0f}s after home", 504)
+            s.request(METHOD_SET_TEMPERATURE, {"extruder": 0})
+            status = s.request(METHOD_STATUS)
+        move = status.get("gcode_move") or {}
+        return {
+            "homed": True,
+            "z_mm": move.get("z"),
+            "nozzle_target_c": (status.get("extruder") or {}).get("target"),
+        }
+
     def start(
         self,
         name: str,
@@ -380,4 +421,4 @@ class Printer:
                     raise PrinterError(
                         f"printer accepted the start but is still {STATUS_NAMES.get(machine.get('status'))} "
                         f"after {verify_seconds:.0f}s", 504)
-                time.sleep(2)
+                time.sleep(POLL_SECONDS)
