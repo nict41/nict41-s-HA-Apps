@@ -76,6 +76,34 @@ save is a diff against the built-in one it inherits from, and the API merges
 that whole chain into one complete file before slicing, so the command line
 never quietly falls back to defaults for the settings a diff leaves out.
 
+
+### Printer routes
+
+With `printer_host`, `printer_serial` and `printer_access_code` set, the same
+service uploads to and prints on a Centauri Carbon 2:
+
+| Request | Does |
+|---|---|
+| `GET /printer/status` | State, temperatures, current job, CANVAS trays (loaded, type, colour) |
+| `GET /printer/files` | Files on the printer's storage |
+| `POST /printer/upload` | `{"gcode": "/share/.../part.gcode"}`; optional `name` for the file on the printer |
+| `POST /printer/delete` | `{"filename": "part.gcode"}` |
+| `POST /printer/print` | Start a file already on the printer (below) |
+
+```json
+{"filename": "part.gcode", "confirm": true, "plate": "textured",
+ "slot_map": [{"t": 0, "tray_id": 1}]}
+```
+
+`slot_map` says which CANVAS tray feeds each filament the file uses (`t` is
+the slicer's filament index). `plate` is the side of the build plate in use.
+Timelapse and auto bed levelling are on unless `"timelapse": false` /
+`"bed_leveling": false`. The print is refused unless the printer is idle, the
+file is on it and every mapped tray is loaded, and the reply only comes once
+the printer reports it is printing.
+
+The printer serves only a few clients at once. A `503` saying it has no free
+client slots clears within about a minute.
 ## How the sidebar works
 
 Worth knowing, because it is unusual. The Kasm web client builds its websocket

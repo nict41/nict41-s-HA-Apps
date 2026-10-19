@@ -34,12 +34,18 @@ web_user=""
 web_pass=""
 resolution=""
 api_token=""
+printer_host=""
+printer_serial=""
+printer_code=""
 
 if [ -f "${OPTIONS}" ]; then
     web_user="$(opt '.web_username')"
     web_pass="$(opt '.web_password')"
     resolution="$(opt '.resolution')"
     api_token="$(opt '.slice_api_token')"
+    printer_host="$(opt '.printer_host')"
+    printer_serial="$(opt '.printer_serial')"
+    printer_code="$(opt '.printer_access_code')"
 else
     # Not fatal — the defaults are a usable configuration — but say so, because
     # it also means options set in the UI are not being applied.
@@ -67,6 +73,17 @@ if [ -n "${api_token}" ]; then
     log "Slice API on :8100 requires a bearer token"
 else
     log "Slice API on :8100 has no token: any add-on on the Supervisor network can use it"
+fi
+
+# The printer the API uploads to and starts prints on. Without all three the
+# /printer routes answer "not configured"; slicing works either way.
+put PRINTER_HOST "${printer_host}"
+put PRINTER_SERIAL "${printer_serial}"
+put PRINTER_ACCESS_CODE "${printer_code}"
+if [ -n "${printer_host}" ] && [ -n "${printer_serial}" ] && [ -n "${printer_code}" ]; then
+    log "Printer API: ${printer_host} (serial ${printer_serial})"
+else
+    log "Printer API: not configured (set printer_host, printer_serial, printer_access_code)"
 fi
 
 # ── Desktop size ─────────────────────────────────────────────────────────────

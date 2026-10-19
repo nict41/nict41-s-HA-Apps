@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+- **Printer routes.** Upload sliced G-code to a Centauri Carbon 2 and start
+  it, through the same API: `GET /printer/status` (state, temperatures,
+  CANVAS trays), `GET /printer/files`, `POST /printer/upload`,
+  `POST /printer/delete` and `POST /printer/print`. Message formats are the
+  ones ElegooSlicer itself sends to this printer.
+- Starting a print requires `"confirm": true`, the plate side in use
+  (`"plate": "textured"` or `"smooth"`), and a slot map for every filament the
+  file uses. It is refused unless the printer is idle, the file is on it and
+  every mapped tray is loaded, and it only reports success once the printer
+  says it is printing. Timelapse and auto bed levelling are on unless turned
+  off.
+- New options `printer_host`, `printer_serial`, `printer_access_code`.
+
 ## 0.3.0
 
 - **Thumbnails.** Sliced G-code now carries the 144×144 plate preview the

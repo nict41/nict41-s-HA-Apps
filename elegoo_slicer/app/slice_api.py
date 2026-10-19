@@ -36,6 +36,7 @@ from typing import Any, NamedTuple
 from urllib.parse import parse_qs, urlparse
 
 import thumbnail
+from printer import Printer, PrinterError
 
 LOG = logging.getLogger("slice-api")
 
@@ -97,6 +98,9 @@ class Settings:
         self.keep_jobs = int(env.get("SLICE_KEEP_JOBS", "10"))
         self.timeout = int(env.get("SLICE_TIMEOUT", "1800"))
         self.display = env.get("DISPLAY", ":1")
+        self.printer_host = env.get("PRINTER_HOST", "")
+        self.printer_serial = env.get("PRINTER_SERIAL", "")
+        self.printer_access_code = env.get("PRINTER_ACCESS_CODE", "")
 
 
 # ── Presets ─────────────────────────────────────────────────────────────────
@@ -312,6 +316,7 @@ class Slicer:
     def __init__(self, settings: Settings):
         self.settings = settings
         self._lock = threading.Lock()
+        self._printer_lock = threading.Lock()
 
     def index(self) -> PresetIndex:
         # Rebuilt per request so a preset dropped into /share is picked up
@@ -514,6 +519,75 @@ class Slicer:
             return repr(err)
         return None
 
+    # -- printer
+
+    def printer(self) -> Printer:
+        s = self.settings
+        return Printer(s.printer_host, s.printer_serial, s.printer_access_code)
+
+    def printer_call(self, method: str, path: str, query: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
+        """The /printer/* routes. One printer operation at a time."""
+        route = (method, path)
+        known = {("GET", "/printer/status"), ("GET", "/printer/files"), ("POST", "/printer/upload"),
+                 ("POST", "/printer/delete"), ("POST", "/printer/print")}
+        if route not in known:
+            raise SliceError(f"no route {method} {path}", HTTPStatus.NOT_FOUND)
+        if not self._printer_lock.acquire(blocking=False):
+            raise SliceError("another printer operation is running", HTTPStatus.CONFLICT)
+        try:
+            printer = self.printer()
+            if route == ("GET", "/printer/status"):
+                return printer.status()
+            if route == ("GET", "/printer/files"):
+                return {"files": printer.files(int(query.get("limit", 20)))}
+            if route == ("POST", "/printer/upload"):
+                gcode = self._check_path(body.get("gcode"), "gcode", must_exist=True)
+                if gcode.suffix.lower() != ".gcode":
+                    raise SliceError("gcode must be a .gcode file")
+                name = str(body.get("name") or gcode.name)
+                if "/" in name or not name.lower().endswith(".gcode"):
+                    raise SliceError("name must be a bare file name ending in .gcode")
+                return printer.upload(gcode, name)
+            if route == ("POST", "/printer/delete"):
+                printer.delete(self._printer_file(body))
+                return {"deleted": body["filename"]}
+            return self._start_print(printer, body)
+        except PrinterError as err:
+            raise SliceError(str(err), HTTPStatus(err.status)) from None
+        finally:
+            self._printer_lock.release()
+
+    @staticmethod
+    def _printer_file(body: dict[str, Any]) -> str:
+        name = body.get("filename")
+        if not isinstance(name, str) or not name or "/" in name:
+            raise SliceError("filename must be the bare name of a file on the printer")
+        return name
+
+    PLATE_LAYOUT = {"textured": "A", "smooth": "B"}  # elegoo-link: heatedBedType 0=textured -> "A"
+
+    def _start_print(self, printer: Printer, body: dict[str, Any]) -> dict[str, Any]:
+        # Deliberately explicit: nothing here starts a print by default.
+        if body.get("confirm") is not True:
+            raise SliceError("starting a print needs \"confirm\": true")
+        name = self._printer_file(body)
+        slot_map = body.get("slot_map")
+        if not isinstance(slot_map, list) or not slot_map or not all(
+            isinstance(m, dict) and isinstance(m.get("t"), int) and isinstance(m.get("tray_id"), int)
+            for m in slot_map
+        ):
+            raise SliceError("slot_map must be a list of {t, tray_id[, canvas_id]} with integer t and tray_id")
+        plate = body.get("plate")
+        if plate not in self.PLATE_LAYOUT:
+            raise SliceError("plate must be \"textured\" or \"smooth\" (the side of the build plate in use)")
+        config = {
+            "print_layout": self.PLATE_LAYOUT[plate],
+            "delay_video": bool(body.get("timelapse", True)),
+            "printer_check": bool(body.get("bed_leveling", True)),
+            "bedlevel_force": bool(body.get("bed_leveling_force", False)),
+        }
+        return printer.start(name, slot_map, auto_refill=body.get("auto_refill", True), config=config)
+
     def _prune_jobs(self) -> None:
         jobs = sorted(p for p in self.settings.work_dir.glob("job-*") if p.is_dir())
         for old in jobs[: max(0, len(jobs) - self.settings.keep_jobs)]:
@@ -585,6 +659,8 @@ def make_handler(slicer: Slicer) -> type[BaseHTTPRequestHandler]:
                     body = slicer.index().resolve(kind, query["name"])
                 elif method == "POST" and url.path == "/slice":
                     body = slicer.slice(self._body())
+                elif url.path.startswith("/printer/"):
+                    body = slicer.printer_call(method, url.path, query, self._body() if method == "POST" else {})
                 else:
                     raise SliceError(f"no route {method} {url.path}", HTTPStatus.NOT_FOUND)
             except SliceError as err:
