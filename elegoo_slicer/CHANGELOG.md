@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2
+
+- Fix the project export failing (exit -13) after every successful slice.
+  The slicer joins `--export-3mf` onto `--outputdir` itself, so the absolute
+  path passed until now became `out//share/.../result.3mf`.
+
 ## 0.2.1
 
 - Fix every slice failing with exit code -17 ("process not compatible").
