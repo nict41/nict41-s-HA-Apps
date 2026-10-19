@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import slice_api
 from slice_api import PresetIndex, Settings, SliceError, Slicer, gcode_stats, make_handler
 
 
@@ -54,9 +55,19 @@ def test_resolve_walks_the_whole_chain(profiles):
     assert machine["bed_temp"] == "55"               # middle of the chain
     assert machine["nozzle_diameter"] == ["0.4"]     # root of the chain
     assert machine["name"] == "My CC2"
-    assert machine["inherits"] == ""
     assert machine["type"] == "machine"
     assert machine["instantiation"] == "true"
+    # Still names its concrete system ancestor, skipping the abstract root.
+    assert machine["inherits"] == "CC2 0.4"
+    assert machine["from"] == "User"
+
+
+def test_resolving_a_system_preset_marks_it_system(profiles):
+    machine = PresetIndex([profiles[0]], [profiles[1]]).resolve("machine", "CC2 0.4")
+    assert machine["from"] == "system"
+    assert machine["inherits"] == ""
+    assert machine["nozzle_diameter"] == ["0.4"]
+    assert slice_api.system_printer_name(machine) == "CC2 0.4"
 
 
 def test_resolve_drops_compatibility_lists(profiles):
@@ -197,10 +208,19 @@ def test_slice_writes_gcode_next_to_model(tmp_path, profiles):
     job = Path(result["job_dir"])
     machine = json.loads((job / "machine.json").read_text())
     assert machine["printable_height"] == "250" and machine["nozzle_diameter"] == ["0.4"]
+    # The process and filament must name the machine's system preset, or the
+    # command line refuses the combination (exit -17).
+    process = json.loads((job / "process.json").read_text())
+    filament = json.loads((job / "filament_1.json").read_text())
+    assert machine["inherits"] == "CC2 0.4"
+    assert process["compatible_printers"] == ["CC2 0.4"]
+    assert filament["compatible_printers"] == ["CC2 0.4"]
+    assert process["compatible_printers_condition"] == ""
     argv = json.loads((job / "datadir/argv.json").read_text())
     assert argv[argv.index("--load-settings") + 1] == f"{job}/machine.json;{job}/process.json"
     assert argv[argv.index("--load-filaments") + 1] == f"{job}/filament_1.json"
     assert argv[argv.index("--slice") + 1] == "0"
+    assert argv[argv.index("--debug") + 1] == "3"
     assert argv[-1] == str(share / "models/part.stl")
 
 
@@ -267,6 +287,18 @@ def test_missing_model_and_bad_filaments(tmp_path, profiles):
     assert err.value.status == 404
     with pytest.raises(SliceError, match="filaments"):
         slicer.slice(request(share, filaments=[]))
+
+
+def test_old_jobs_are_pruned(tmp_path, profiles):
+    slicer, share = make_slicer(tmp_path, profiles)
+    slicer.settings.keep_jobs = 2
+    work = slicer.settings.work_dir
+    for stamp in ("20200101-000000-aaaaaa", "20200101-000001-bbbbbb", "20200101-000002-cccccc"):
+        (work / f"job-{stamp}").mkdir(parents=True)
+    result = slicer.slice(request(share))
+    remaining = sorted(p.name for p in work.glob("job-*"))
+    assert len(remaining) == 2
+    assert Path(result["job_dir"]).name in remaining
 
 
 def test_only_one_slice_at_a_time(tmp_path, profiles):

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1
+
+- Fix every slice failing with exit code -17 ("process not compatible").
+  The command line identifies the printer by the machine preset's `inherits`
+  and only accepts a process whose `compatible_printers` names it, treating
+  an empty list as a refusal. Flattened presets now keep the machine's
+  nearest system ancestor in `inherits`, and the process and filaments list
+  exactly that printer.
+- Job folders (flattened presets, the slicer's log) now live in
+  `/share/elegoo_slicer/jobs`, so a failed slice can be diagnosed from
+  outside the container. The newest 10 are kept.
+- The slicer logs at info level by default (`debug` in the request to change).
+
 ## 0.2.0
 
 - **Slice API.** Slice a model with named presets over HTTP, without opening
