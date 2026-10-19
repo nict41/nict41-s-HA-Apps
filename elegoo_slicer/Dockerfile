@@ -85,6 +85,7 @@ RUN apt-get update \
         libxkbcommon0 \
         fonts-dejavu-core \
         fonts-liberation \
+        python3 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL -o /tmp/ElegooSlicer.AppImage \
@@ -95,7 +96,14 @@ RUN curl -fsSL -o /tmp/ElegooSlicer.AppImage \
     && mv /tmp/squashfs-root /opt/elegoo-slicer \
     && rm -f /tmp/ElegooSlicer.AppImage \
     && test -x /opt/elegoo-slicer/AppRun \
-    && test -x /opt/elegoo-slicer/bin/elegoo-slicer
+    && test -x /opt/elegoo-slicer/bin/elegoo-slicer \
+    && { find /opt/elegoo-slicer -path '*profiles/Elegoo.json' -print; \
+         test -f /opt/elegoo-slicer/resources/profiles/Elegoo.json; }
+
+# The slice API resolves presets against the profiles bundled above, at the
+# path the last test proves. If a release moves them, the build fails there
+# and the find shows where they went, rather than the API answering "no preset
+# named ..." for every system preset at runtime.
 
 # Prove the library set is complete while the build can still fail loudly: a
 # missing soname here is far cheaper to find than a desktop that opens to
@@ -162,8 +170,9 @@ RUN grep -q 'proxy_pass               http://127.0.0.1:6900;' /defaults/default.
     && echo "Published port serves a zoomable page" 
 
 COPY rootfs /
+COPY app/slice_api.py /opt/slice-api/slice_api.py
 
-RUN chmod a+x /defaults/autostart /custom-cont-init.d/*
+RUN chmod a+x /defaults/autostart /custom-cont-init.d/* /custom-services.d/*
 
 LABEL \
     org.opencontainers.image.title="ElegooSlicer" \

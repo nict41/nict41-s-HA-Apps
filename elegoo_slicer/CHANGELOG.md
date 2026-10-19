@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- **Slice API.** Slice a model with named presets over HTTP, without opening
+  the desktop: `POST /slice` on port 8100, reachable from Home Assistant and
+  other add-ons only. Exported user presets are merged with everything they
+  inherit before slicing, so a preset that only lists your changes slices with
+  the same settings the GUI would use. See the Slice API section of the docs.
+- New option `slice_api_token` to require a bearer token for it.
+
 ## 0.1.7
 
 - The `/__elegoo` diagnostic endpoint no longer reports a version. It carried

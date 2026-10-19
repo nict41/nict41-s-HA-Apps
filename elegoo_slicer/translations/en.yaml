@@ -24,6 +24,12 @@ configuration:
       dialogs. Everything mounted under /share and /media is added
       automatically, so a NAS attached in Settings > System > Storage already
       appears by name; use this only for somewhere else inside the add-on.
+  slice_api_token:
+    name: Slice API token
+    description: >-
+      Bearer token for the headless slicing API on port 8100. That port is
+      only reachable from other add-ons and Home Assistant, never your LAN;
+      leaving this empty lets any of them slice files under /share and /media.
 
 network:
   3000/tcp: Desktop web interface for direct access, bypassing the sidebar. Unmapped by default - the desktop offers a file manager and a session on your Home Assistant host, so set a password before exposing it.
