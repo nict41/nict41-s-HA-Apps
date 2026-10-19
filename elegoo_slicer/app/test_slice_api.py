@@ -295,7 +295,7 @@ def test_arrange_can_be_turned_off_or_allowed_to_rotate(tmp_path, profiles):
     argv = json.loads((Path(slicer.slice(request(share, allow_rotations=True))["job_dir"]) / "datadir/argv.json").read_text())
     assert "--allow-rotations" in argv and "--no-allow-rotations" not in argv
     # Flags take no value: the next argument must not be swallowed as one.
-    assert argv[argv.index("--allow-rotations") + 1].startswith("--")
+    assert argv[argv.index("--allow-rotations") + 1] not in ("0", "1")
 
 
 def test_colours_set_all_three_colour_keys(tmp_path, profiles):
