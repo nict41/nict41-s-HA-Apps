@@ -33,11 +33,13 @@ opt() {
 web_user=""
 web_pass=""
 resolution=""
+api_token=""
 
 if [ -f "${OPTIONS}" ]; then
     web_user="$(opt '.web_username')"
     web_pass="$(opt '.web_password')"
     resolution="$(opt '.resolution')"
+    api_token="$(opt '.slice_api_token')"
 else
     # Not fatal — the defaults are a usable configuration — but say so, because
     # it also means options set in the UI are not being applied.
@@ -55,6 +57,16 @@ else
     fi
     log "No password configured. Home Assistant still authenticates the sidebar;"
     log "only map port 3000 once web_password is set."
+fi
+
+# ── Slice API ────────────────────────────────────────────────────────────────
+# Reachable from the Supervisor network only, never the LAN. Without a token
+# any other add-on on that network can ask for a slice, so say which it is.
+put SLICE_API_TOKEN "${api_token}"
+if [ -n "${api_token}" ]; then
+    log "Slice API on :8100 requires a bearer token"
+else
+    log "Slice API on :8100 has no token: any add-on on the Supervisor network can use it"
 fi
 
 # ── Desktop size ─────────────────────────────────────────────────────────────

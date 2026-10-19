@@ -1,0 +1,14 @@
+#!/usr/bin/with-contenv bash
+# shellcheck shell=bash
+#
+# Headless slicing over HTTP, beside the desktop. The base image supervises
+# everything in /custom-services.d, so a crash is restarted rather than left
+# dead. Listens on the Supervisor network only: the port is deliberately not
+# in config.yaml's `ports`, so nothing on the LAN can reach it.
+#
+# DISPLAY points at the desktop's own X server. The slicer renders its plate
+# thumbnails with OpenGL even from the command line, and the printer's screen
+# shows those thumbnails, so a slice without a display is not good enough.
+
+export DISPLAY="${DISPLAY:-:1}"
+exec python3 /opt/slice-api/slice_api.py

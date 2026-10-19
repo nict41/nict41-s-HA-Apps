@@ -27,11 +27,51 @@ Upstream ships Linux as an AppImage only, pinned here at **v1.5.3.5**. Bump
 | `web_password` | Password for the web interface. **Empty means no login at all** — the base image treats an unset password as open access |
 | `resolution` | Starting desktop size, `WIDTHxHEIGHT`. Default `1440x900`. Mainly affects phones and tablets; a desktop browser resizes on connect |
 | `extra_folders` | Extra paths to offer in the slicer's file dialogs. `/share` and `/media` mounts are added automatically |
+| `slice_api_token` | Bearer token for the [slice API](#slice-api). Empty means any add-on on the Supervisor network may use it |
 
-These apply to the **direct port only**. The sidebar is served by a separate
-listener that Home Assistant has already authenticated, so setting a password
-does not put a second login in front of the panel. Leave both empty unless you
-are mapping port 3000.
+The username and password apply to the **direct port only**. The sidebar is
+served by a separate listener that Home Assistant has already authenticated,
+so setting a password does not put a second login in front of the panel. Leave
+both empty unless you are mapping port 3000.
+
+## Slice API
+
+Slicing without the desktop: a small HTTP service on port **8100** runs the
+slicer's command line with named presets and writes the G-code to `/share` or
+`/media`. It is reachable only from Home Assistant and other add-ons, as
+`http://beb500c8-elegoo-slicer:8100` (the hostname is on the add-on's Info
+tab). The port is not published, so nothing on your LAN can reach it.
+
+| Request | Does |
+|---|---|
+| `GET /health` | Slicer and profile folders found, whether a slice is running |
+| `GET /presets?type=machine\|process\|filament[&contains=text]` | Preset names, your own first |
+| `GET /resolve?type=…&name=…` | One preset with everything it inherits merged in |
+| `POST /slice` | Slice a model (below). Blocks until done; one slice at a time, `409` while busy |
+
+```json
+{
+  "model": "/share/prints/part.stl",
+  "machine": "Elegoo CC2 0.4 noz - Nic",
+  "process": "0.20mm Strength @Elegoo CC2 0.4 nozzle",
+  "filaments": ["Esun Baisc PLA"],
+  "output": "/share/prints/part.gcode",
+  "bed_type": "Textured PEI Plate",
+  "arrange": true,
+  "overrides": {"process": {"sparse_infill_density": "30%"}}
+}
+```
+
+`filaments` is one preset per slot, in order. `output` defaults to the model's
+path with `.gcode`, and has to end in `.gcode`. The reply carries the G-code
+path, print time, filament grams and layer count, plus the slicer's log tail.
+
+**Presets.** Your own presets are read from `/share/elegoo_slicer/profiles`
+first (copy the GUI's `user` folder there, as is) and then from the desktop's
+own user folder. Built-in presets come from the slicer itself. A preset you
+save is a diff against the built-in one it inherits from, and the API merges
+that whole chain into one complete file before slicing, so the command line
+never quietly falls back to defaults for the settings a diff leaves out.
 
 ## How the sidebar works
 
