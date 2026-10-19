@@ -316,7 +316,9 @@ class Slicer:
             "--load-filaments", ";".join(str(p) for p in filament_files),
             "--slice", str(int(request.get("plate", 0))),
             "--outputdir", str(job / "out"),
-            "--export-3mf", str(job / "out" / "result.3mf"),
+            # A bare name: the slicer joins this onto --outputdir itself, so
+            # an absolute path comes out as out//abs/path and the export fails.
+            "--export-3mf", "result.3mf",
         ]
         if request.get("arrange"):
             cmd += ["--arrange", "1"]

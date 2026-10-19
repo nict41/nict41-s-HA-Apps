@@ -163,7 +163,7 @@ mode = "{mode}"
 if mode == "gcode":
     (out / "plate_1.gcode").write_text({gcode!r})
 elif mode == "3mf":
-    with zipfile.ZipFile(args[args.index("--export-3mf") + 1], "w") as zf:
+    with zipfile.ZipFile(out / args[args.index("--export-3mf") + 1], "w") as zf:
         zf.writestr("Metadata/plate_1.gcode", {gcode!r})
 print("sliced")
 sys.exit({code})
@@ -221,6 +221,7 @@ def test_slice_writes_gcode_next_to_model(tmp_path, profiles):
     assert argv[argv.index("--load-filaments") + 1] == f"{job}/filament_1.json"
     assert argv[argv.index("--slice") + 1] == "0"
     assert argv[argv.index("--debug") + 1] == "3"
+    assert argv[argv.index("--export-3mf") + 1] == "result.3mf"
     assert argv[-1] == str(share / "models/part.stl")
 
 
