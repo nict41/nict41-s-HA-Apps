@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.8
+
+- Security: rebuild on PHP 8.3.36, which fixes the "php2shell"
+  unauthenticated RCE bugs CVE-2026-109618 and CVE-2026-109619. The base
+  image is now pinned by digest, so a Home Assistant rebuild can't reuse
+  a cached 8.3.35 layer.
+- Turn off `expose_php`, so responses no longer carry an
+  `X-Powered-By: PHP/...` header.
+- Log the running PHP version at startup.
+
 ## 1.1.7
 
 - Move the vendored bashio from 0.17.5 to 0.19.0.

@@ -1,4 +1,7 @@
-FROM wordpress:php8.3-apache
+# Pinned by digest so a Home Assistant rebuild can't reuse a cached,
+# unpatched base layer. The digest is the multi-arch index for
+# wordpress:php8.3-apache with PHP 8.3.36 (CVE-2026-109618/109619).
+FROM wordpress:php8.3-apache@sha256:18b73b2dad9c0cdced35c5200dd6562c937a8e994762b4f2b43b1ece9fb317c9
 
 ARG BASHIO_VERSION="0.19.0"
 
@@ -41,6 +44,9 @@ RUN set -eu; \
             -e 's!/var/www/html!/data/wordpress!g' \
             -e 's!/var/www/!/data/wordpress/!g' \
             {} +
+
+# Don't advertise the PHP version in an X-Powered-By header.
+RUN echo 'expose_php = Off' > "${PHP_INI_DIR}/conf.d/zz-expose-php.ini"
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
