@@ -1,6 +1,8 @@
 #!/usr/bin/env bashio
 set -e
 
+bashio::log.info "PHP $(php -r 'echo PHP_VERSION;')"
+
 # ==========================================================================
 # Mode detection: no db_host configured -> bundled local MariaDB
 # ==========================================================================
