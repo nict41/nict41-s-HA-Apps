@@ -162,6 +162,7 @@ class DownloadResult:
     path: str | None = None
     error: str = ""
     skipped_existing: bool = False
+    artists: tuple[str, ...] = ()
 
 
 # Marks the progress lines this add-on asks yt-dlp to emit, so they can be
@@ -202,7 +203,9 @@ def build_playlist_argv(cfg: Config, url: str) -> list[str]:
     ]
 
 
-def build_download_argv(cfg: Config, url: str, print_file: str) -> list[str]:
+def build_download_argv(
+    cfg: Config, url: str, print_file: str, artists_file: str | None = None
+) -> list[str]:
     argv = [
         "yt-dlp",
         *_common_args(cfg, progress=True),
@@ -229,6 +232,13 @@ def build_download_argv(cfg: Config, url: str, print_file: str) -> list[str]:
         "--no-simulate",
         "--print-to-file", "after_move:filepath", print_file,
     ]
+
+    if artists_file:
+        # --embed-metadata joins every credited artist into one "A, B" string,
+        # which a library then files as a single made-up artist. The list
+        # itself is printed here so split_artist_tags can write it back as
+        # one tag per artist.
+        argv += ["--print-to-file", "after_move:%(artists)j", artists_file]
 
     # Only meaningful when re-encoding; "best" remuxes the original stream and
     # ignores quality entirely.
@@ -435,17 +445,22 @@ def _attempt_download(
     os.makedirs(cfg.tmp_dir, exist_ok=True)
     handle, print_file = tempfile.mkstemp(prefix="yms-path-", dir=cfg.tmp_dir)
     os.close(handle)
+    handle, artists_file = tempfile.mkstemp(prefix="yms-artists-", dir=cfg.tmp_dir)
+    os.close(handle)
     try:
         returncode, tail = _run_streaming(
-            build_download_argv(cfg, entry.url, print_file), timeout, on_progress
+            build_download_argv(cfg, entry.url, print_file, artists_file), timeout, on_progress
         )
         with open(print_file, "r", encoding="utf-8", errors="replace") as fh:
             printed = [line.strip() for line in fh if line.strip()]
+        with open(artists_file, "r", encoding="utf-8", errors="replace") as fh:
+            artists = _parse_artists([line.strip() for line in fh if line.strip()])
     finally:
-        try:
-            os.unlink(print_file)
-        except OSError:
-            pass
+        for path in (print_file, artists_file):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
     if returncode != 0:
         return DownloadResult(ok=False, error=tail[-1] if tail else f"yt-dlp exited {returncode}")
@@ -459,7 +474,65 @@ def _attempt_download(
             error="yt-dlp wrote no file - a file of that name already exists in the library",
         )
 
-    return DownloadResult(ok=True, path=printed[-1])
+    return DownloadResult(ok=True, path=printed[-1], artists=artists)
+
+
+def _parse_artists(lines: list[str]) -> tuple[str, ...]:
+    """The artist list yt-dlp printed, or () when it had none.
+
+    Videos with no music metadata print "NA" rather than a JSON list.
+    """
+    if not lines:
+        return ()
+    try:
+        value = json.loads(lines[-1])
+    except ValueError:
+        return ()
+    if not isinstance(value, list):
+        return ()
+    names = [str(v).strip() for v in value if isinstance(v, str) and v.strip()]
+    return tuple(dict.fromkeys(names))
+
+
+def split_artist_tags(path: str, artists: tuple[str, ...]) -> bool:
+    """Replace the joined "A, B" artist tag with one tag per artist.
+
+    Music Assistant (and most other libraries) read a multi-value artist tag
+    as separate artists, but never split a single value on commas because
+    real names contain them. Only touches a tag that is exactly yt-dlp's
+    joined form, so a hand-edited artist is left alone.
+    """
+    if len(artists) < 2:
+        return False
+    joined = ", ".join(artists)
+    try:
+        from mutagen import File as MutagenFile
+        from mutagen.id3 import ID3, TPE1
+        from mutagen.mp4 import MP4
+
+        audio = MutagenFile(path)
+        if audio is None or audio.tags is None:
+            return False
+
+        if isinstance(audio, MP4):
+            if list(audio.tags.get("\xa9ART", [])) != [joined]:
+                return False
+            audio.tags["\xa9ART"] = list(artists)
+        elif isinstance(audio.tags, ID3):
+            frame = audio.tags.get("TPE1")
+            if frame is None or list(frame.text) != [joined]:
+                return False
+            audio.tags.add(TPE1(encoding=3, text=list(artists)))
+        else:
+            if list(audio.tags.get("artist", [])) != [joined]:
+                return False
+            audio.tags["artist"] = list(artists)
+
+        audio.save()
+        return True
+    except Exception as err:
+        _LOG.warning("Could not split the artist tag on %s: %s", path, err)
+        return False
 
 
 def stamp_video_id(path: str, video_id: str) -> bool:
