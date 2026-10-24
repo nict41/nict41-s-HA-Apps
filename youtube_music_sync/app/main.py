@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+import albumartist
 import downloader
 import settings
 from library import AMBIGUOUS, DIFFERENT_VERSION, DUPLICATE, LibraryEntry, LibraryIndex, read_file_metadata
@@ -339,6 +340,8 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
                                   uploader=entry.uploader, duration=duration,
                                   path=result.path, status=STATUS_OK)
             report.downloaded += 1
+            albumartist.apply_for(result.path, cfg.music_dir,
+                                  frozenset({cfg.quarantine_dir}))
             if variants:
                 # Added to the live index so a track appearing on two monitored
                 # playlists is not fetched twice in the same cycle.

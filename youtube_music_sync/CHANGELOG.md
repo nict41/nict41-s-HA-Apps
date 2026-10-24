@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5
+
+- Set an album artist on every download. YouTube gives none, so Music
+  Assistant filed every album under "Various Artists" and artist pages showed
+  no albums. After each download the app looks at every library track with
+  the same album tag: identical artists become the album artist, an artist
+  credited on every track wins over guests, and anything else is "Various
+  Artists". Same-titled singles from different years (two unrelated "Your
+  Love"s) are kept apart. Sibling tracks are rewritten too, since a new
+  track can turn a single-artist album into a compilation.
+
 ## 0.2.4
 
 - Write one artist tag per credited artist. yt-dlp's `--embed-metadata`
