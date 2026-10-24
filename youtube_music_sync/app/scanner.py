@@ -32,7 +32,7 @@ class ScanStats:
 
 
 def build_index(cfg: Config, store: Store) -> tuple[LibraryIndex, ScanStats]:
-    """Index every audio file under music_dir, using the cache where valid."""
+    """Index every audio file under music_dir and any playlist folders, using the cache where valid."""
     started = time.monotonic()
     cached = store.load_library_cache()
     stats = ScanStats()
@@ -44,7 +44,9 @@ def build_index(cfg: Config, store: Store) -> tuple[LibraryIndex, ScanStats]:
     # them would make every future copy look like a duplicate of a duplicate.
     skip_dirs = frozenset({os.path.normpath(cfg.quarantine_dir)})
 
-    for path in iter_audio_files(cfg.music_dir, skip_dirs=skip_dirs):
+    paths = (p for root in cfg.library_dirs if os.path.isdir(root)
+             for p in iter_audio_files(root, skip_dirs=skip_dirs))
+    for path in paths:
         try:
             stat = os.stat(path)
         except OSError as err:

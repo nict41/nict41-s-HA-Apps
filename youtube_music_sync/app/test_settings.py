@@ -178,3 +178,45 @@ def test_every_scalar_option_is_optional():
         "these options are required and will break saving for anyone whose "
         f"install predates them: {sorted(required)}"
     )
+
+
+# ------------------------------------------------------- playlist_settings
+
+_TALKS = "https://youtube.com/playlist?list=PLtalks&si=abc"
+
+
+def test_playlist_settings_are_parsed(monkeypatch):
+    monkeypatch.setenv("YMS_PLAYLIST_SETTINGS", json.dumps([
+        {"playlist": "Dub Tings", "genre": "Dub"},
+        {"playlist": "PLtalks", "genre": "Spoken Word", "folder": "/media/nas1/Podcasts/Talks"},
+        {"genre": "no playlist - ignored"},
+    ]))
+    cfg = settings.load()
+    assert [s.playlist for s in cfg.playlist_settings] == ["Dub Tings", "PLtalks"]
+
+
+def test_a_setting_matches_by_title_list_id_or_url():
+    by_title = settings.PlaylistSetting("dub tings", genre="Dub")
+    by_id = settings.PlaylistSetting("PLtalks")
+    by_url = settings.PlaylistSetting("https://music.youtube.com/playlist?list=PLtalks")
+    assert by_title.matches("https://youtube.com/playlist?list=PLother", "Dub Tings")
+    assert by_id.matches(_TALKS, "Universe Inside You")
+    assert by_url.matches(_TALKS, "Universe Inside You")
+    assert not by_id.matches("https://youtube.com/playlist?list=PLother", "Dub Tings")
+
+
+def test_dest_dir_and_library_dirs():
+    cfg = settings.Config(playlists=("u",), music_dir="/media/nas1/Music", playlist_settings=(
+        settings.PlaylistSetting("PLtalks", folder="/media/nas1/Podcasts/Talks"),
+        settings.PlaylistSetting("Dub Tings", genre="Dub"),
+    ))
+    assert cfg.dest_dir(_TALKS, "x") == "/media/nas1/Podcasts/Talks"
+    assert cfg.dest_dir("https://youtube.com/playlist?list=PLdub", "Dub Tings") == "/media/nas1/Music"
+    assert cfg.library_dirs == ("/media/nas1/Music", "/media/nas1/Podcasts/Talks")
+
+
+def test_a_playlist_folder_outside_the_mounts_is_a_problem():
+    cfg = settings.Config(playlists=("u",), music_dir="/media/nas1/Music", playlist_settings=(
+        settings.PlaylistSetting("PLtalks", folder="/data/talks"),
+    ))
+    assert any("PLtalks" in issue and "/data/talks" in issue for issue in cfg.problems())
