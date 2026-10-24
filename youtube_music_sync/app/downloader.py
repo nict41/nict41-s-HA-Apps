@@ -150,6 +150,8 @@ class PlaylistEntry:
     duration: float | None
     uploader: str
     playlist: str
+    # The configured URL the entry was read from, for playlist_settings.
+    source: str = ""
 
     @property
     def url(self) -> str:
@@ -204,7 +206,8 @@ def build_playlist_argv(cfg: Config, url: str) -> list[str]:
 
 
 def build_download_argv(
-    cfg: Config, url: str, print_file: str, artists_file: str | None = None
+    cfg: Config, url: str, print_file: str, artists_file: str | None = None,
+    dest_dir: str | None = None,
 ) -> list[str]:
     argv = [
         "yt-dlp",
@@ -225,7 +228,7 @@ def build_download_argv(
         "--retries", "3",
         "--fragment-retries", "10",
         "--download-archive", cfg.archive_path,
-        "--paths", f"home:{cfg.music_dir}",
+        "--paths", f"home:{dest_dir or cfg.music_dir}",
         "--paths", f"temp:{cfg.tmp_dir}",
         "-o", cfg.output_template,
         # --print-to-file implies --simulate, which would download nothing.
@@ -449,7 +452,9 @@ def _attempt_download(
     os.close(handle)
     try:
         returncode, tail = _run_streaming(
-            build_download_argv(cfg, entry.url, print_file, artists_file), timeout, on_progress
+            build_download_argv(cfg, entry.url, print_file, artists_file,
+                                cfg.dest_dir(entry.source, entry.playlist)),
+            timeout, on_progress
         )
         with open(print_file, "r", encoding="utf-8", errors="replace") as fh:
             printed = [line.strip() for line in fh if line.strip()]
@@ -567,4 +572,25 @@ def stamp_video_id(path: str, video_id: str) -> bool:
         return True
     except Exception as err:
         _LOG.warning("Could not stamp %s onto %s: %s", VIDEO_ID_TAG, path, err)
+        return False
+
+
+def set_genre(path: str, genre: str) -> bool:
+    """Replace the genre tag. yt-dlp writes YouTube's video category there
+    ("Music", "Entertainment", "Education"), which is no use as a genre."""
+    if not genre:
+        return False
+    try:
+        from mutagen import File as MutagenFile
+
+        audio = MutagenFile(path, easy=True)
+        if audio is None:
+            return False
+        if audio.tags is None:
+            audio.add_tags()
+        audio.tags["genre"] = [genre]
+        audio.save()
+        return True
+    except Exception as err:
+        _LOG.warning("Could not set the genre on %s: %s", path, err)
         return False

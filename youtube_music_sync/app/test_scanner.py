@@ -111,3 +111,14 @@ def test_missing_music_dir_yields_an_empty_index(tmp_path):
                     data_dir=str(tmp_path / "data"))
     index, stats = build_index(config, Store(config.db_path))
     assert len(index) == 0 and stats.files == 0
+
+
+def test_playlist_folders_are_indexed_too(tmp_path):
+    from settings import PlaylistSetting
+    music, talks = tmp_path / "music", tmp_path / "talks"
+    make_audio(str(music / "Song.flac"), 3)
+    make_audio(str(talks / "Talk.flac"), 4)
+    config = Config(playlists=("u",), music_dir=str(music), data_dir=str(tmp_path / "data"),
+                    playlist_settings=(PlaylistSetting("PLtalks", folder=str(talks)),))
+    index, stats = build_index(config, Store(config.db_path))
+    assert index.match("Talk", 4.0).is_duplicate

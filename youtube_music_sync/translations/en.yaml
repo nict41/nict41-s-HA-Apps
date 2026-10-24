@@ -141,6 +141,15 @@ configuration:
       this on: YouTube changes how extraction works every few weeks, and a
       version frozen at image-build time eventually fails every download. A
       failed update is not fatal - the version baked into the image still runs.
+  playlist_settings:
+    name: Per-playlist settings
+    description: >-
+      Optional overrides per playlist. "playlist" is the playlist URL, its
+      list= id, or its title. "genre" replaces the genre tag on its downloads
+      (yt-dlp otherwise writes YouTube's video category, like "Music" or
+      "Education"). "folder" saves its downloads somewhere other than
+      music_dir - for example talks into a podcasts folder - and is checked
+      for duplicates like music_dir.
   extra_args:
     name: Extra yt-dlp arguments
     description: >-

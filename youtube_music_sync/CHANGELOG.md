@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.6
+
+- New `playlist_settings` option: per playlist (matched by URL, list= id or
+  title), a `genre` to write instead of the YouTube video category yt-dlp
+  puts in the genre tag ("Music", "Entertainment", "Education"...), and/or a
+  `folder` to save into instead of `music_dir` - e.g. a channel of talks into
+  a podcasts folder. Every configured folder is indexed for duplicates along
+  with `music_dir`, so moving a playlist's existing files into its folder
+  does not trigger re-downloads.
+
 ## 0.2.5
 
 - Set an album artist on every download. YouTube gives none, so Music

@@ -100,6 +100,41 @@ def _playlists() -> tuple[str, ...]:
 
 
 @dataclass(frozen=True)
+class PlaylistSetting:
+    """Per-playlist overrides. `playlist` is a URL, a list= id or a title."""
+    playlist: str
+    genre: str = ""
+    folder: str = ""
+
+    def matches(self, url: str, title: str) -> bool:
+        wanted = self.playlist.strip()
+        if not wanted:
+            return False
+        wanted_id = _playlist_identity(wanted) or wanted
+        if url and wanted_id == (_playlist_identity(url) or url):
+            return True
+        return bool(title) and wanted.casefold() == title.strip().casefold()
+
+
+def _playlist_settings() -> tuple[PlaylistSetting, ...]:
+    try:
+        parsed = json.loads(_str("YMS_PLAYLIST_SETTINGS", "[]"))
+    except (TypeError, ValueError):
+        _LOG.warning("Ignoring playlist_settings - it is not a list of entries.")
+        return ()
+    found = []
+    for raw in parsed if isinstance(parsed, list) else []:
+        if not isinstance(raw, dict) or not str(raw.get("playlist") or "").strip():
+            continue
+        found.append(PlaylistSetting(
+            playlist=str(raw["playlist"]).strip(),
+            genre=str(raw.get("genre") or "").strip(),
+            folder=str(raw.get("folder") or "").strip(),
+        ))
+    return tuple(found)
+
+
+@dataclass(frozen=True)
 class MqttConfig:
     host: str
     port: int
@@ -132,6 +167,7 @@ class Config:
     cookies_file: str = ""
     use_aria2c: bool = False
     extra_args: tuple[str, ...] = field(default_factory=tuple)
+    playlist_settings: tuple[PlaylistSetting, ...] = field(default_factory=tuple)
     log_level: str = "info"
     data_dir: str = "/data"
     mqtt: MqttConfig | None = None
@@ -164,6 +200,26 @@ class Config:
     def quarantine_dir(self) -> str:
         return os.path.join(self.music_dir, QUARANTINE_DIRNAME)
 
+    def setting_for(self, url: str, title: str) -> PlaylistSetting | None:
+        """The first playlist_settings entry naming this playlist, if any."""
+        for setting in self.playlist_settings:
+            if setting.matches(url, title):
+                return setting
+        return None
+
+    def dest_dir(self, url: str, title: str) -> str:
+        setting = self.setting_for(url, title)
+        return setting.folder if setting and setting.folder else self.music_dir
+
+    @property
+    def library_dirs(self) -> tuple[str, ...]:
+        """Every folder downloads can land in - all of them count as owned."""
+        dirs = [self.music_dir]
+        for setting in self.playlist_settings:
+            if setting.folder and setting.folder not in dirs:
+                dirs.append(setting.folder)
+        return tuple(dirs)
+
     @property
     def resolved_cookies_file(self) -> str:
         if not self.cookies_file:
@@ -180,22 +236,26 @@ class Config:
                 "No playlists configured - add at least one public playlist URL "
                 "to the 'playlists' option."
             )
-        normalized = os.path.normpath(self.music_dir)
-        if not any(
-            normalized == root or normalized.startswith(root + os.sep)
-            for root in ALLOWED_ROOTS
-        ):
-            issues.append(
-                f"music_dir ({self.music_dir}) must be under /media or /share, "
-                "which is where Home Assistant network storage mounts appear. "
-                "A path outside them would write into the add-on container and "
-                "be lost on the next update."
-            )
-        elif normalized in ALLOWED_ROOTS:
-            issues.append(
-                f"music_dir ({self.music_dir}) is the mount root itself - point "
-                "it at the music folder inside your NAS share."
-            )
+        for label, path in [("music_dir", self.music_dir)] + [
+            (f"playlist_settings folder for {s.playlist!r}", s.folder)
+            for s in self.playlist_settings if s.folder
+        ]:
+            normalized = os.path.normpath(path)
+            if not any(
+                normalized == root or normalized.startswith(root + os.sep)
+                for root in ALLOWED_ROOTS
+            ):
+                issues.append(
+                    f"{label} ({path}) must be under /media or /share, "
+                    "which is where Home Assistant network storage mounts appear. "
+                    "A path outside them would write into the add-on container and "
+                    "be lost on the next update."
+                )
+            elif normalized in ALLOWED_ROOTS:
+                issues.append(
+                    f"{label} ({path}) is the mount root itself - point "
+                    "it at a folder inside your NAS share."
+                )
         cookies = self.resolved_cookies_file
         if cookies and not os.path.isfile(cookies):
             issues.append(f"cookies_file does not exist: {cookies}")
@@ -237,6 +297,7 @@ def load() -> Config:
         cookies_file=_str("YMS_COOKIES_FILE"),
         use_aria2c=_bool("YMS_USE_ARIA2C", False),
         extra_args=tuple(shlex.split(_str("YMS_EXTRA_ARGS"))),
+        playlist_settings=_playlist_settings(),
         log_level=_str("YMS_LOG_LEVEL", "info"),
         data_dir=_str("YMS_DATA_DIR", "/data"),
         mqtt=mqtt,

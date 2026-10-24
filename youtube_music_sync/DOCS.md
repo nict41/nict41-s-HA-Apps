@@ -103,6 +103,7 @@ is set to.
 | `cookies_file` | `""` | Path to an exported `cookies.txt`. A bare filename is read from `/addon_configs/<slug>/`. Needed if YouTube starts asking to confirm you're not a bot. |
 | `use_aria2c` | `false` | Use aria2c as the downloader - multi-connection, more robust on flaky fragments. |
 | `auto_update_ytdlp` | `true` | Update yt-dlp on every start. Leave on: YouTube changes extraction every few weeks. |
+| `playlist_settings` | `[]` | Per-playlist `genre` and/or `folder` (see below). |
 | `extra_args` | `""` | Extra yt-dlp flags, appended last so they override anything above. |
 | `log_level` | `info` | `debug` logs every yt-dlp command line. |
 
@@ -219,3 +220,23 @@ cycle for ever. If a very long track still times out, raise
 Delete the add-on's `/data/state.db` (uninstall/reinstall) to clear the
 download history and library cache. Files already in the library are untouched
 and will simply be re-recognised on the next scan.
+
+## Per-playlist genre and folder
+
+`playlist_settings` lets each playlist set the genre written to its
+downloads, and where they are saved:
+
+```yaml
+playlist_settings:
+  - playlist: "Dub Tings"            # title, list= id or full URL
+    genre: Dub
+  - playlist: PLYwn70uGLQO1LP3-gh3uQVPWE2-NoJWFq
+    genre: Spoken Word
+    folder: /media/nas1/Podcasts/Universe Inside You
+```
+
+Every `folder` listed here is scanned for duplicates alongside `music_dir`,
+so moving a playlist's existing files into its folder never causes them to
+be downloaded again. A track on two playlists takes the settings of the
+first playlist it was found on.
+

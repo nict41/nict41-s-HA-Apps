@@ -13,7 +13,7 @@ import shutil
 import signal
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 
 import albumartist
@@ -300,6 +300,9 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
 
         downloader.stamp_video_id(result.path, entry.video_id)
         downloader.split_artist_tags(result.path, result.artists)
+        setting = cfg.setting_for(entry.source, entry.playlist)
+        if setting is not None:
+            downloader.set_genre(result.path, setting.genre)
         duration, file_video_id, variants = read_file_metadata(result.path)
 
         # Second pass with the real duration. The playlist listing sometimes
@@ -340,7 +343,7 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
                                   uploader=entry.uploader, duration=duration,
                                   path=result.path, status=STATUS_OK)
             report.downloaded += 1
-            albumartist.apply_for(result.path, cfg.music_dir,
+            albumartist.apply_for(result.path, cfg.dest_dir(entry.source, entry.playlist),
                                   frozenset({cfg.quarantine_dir}))
             if variants:
                 # Added to the live index so a track appearing on two monitored
@@ -429,6 +432,7 @@ def run_cycle(cfg: Config, store: Store, publisher: Publisher) -> CycleReport:
             continue
         _LOG.info("Playlist %r: %d available entries.", title, len(found))
         for entry in found:
+            entry = replace(entry, source=url)
             # The same track on two monitored playlists is one download.
             if entry.video_id not in seen_ids:
                 seen_ids.add(entry.video_id)

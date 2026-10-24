@@ -1,5 +1,5 @@
 name: "YouTube Music Sync"
-version: "0.2.5"
+version: "0.2.6"
 slug: "youtube_music_sync"
 description: >-
   Watches public YouTube playlists and mirrors each video's audio into your
@@ -52,6 +52,7 @@ options:
   use_aria2c: false
   auto_update_ytdlp: true
   extra_args: ""
+  playlist_settings: []
   log_level: "info"
 schema:
   playlists:
@@ -79,4 +80,8 @@ schema:
   use_aria2c: bool?
   auto_update_ytdlp: bool?
   extra_args: "str?"
+  playlist_settings:
+    - playlist: str
+      genre: str?
+      folder: str?
   log_level: "list(trace|debug|info|notice|warning|error|fatal)?"

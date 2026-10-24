@@ -453,3 +453,22 @@ def test_split_artist_tags_leaves_a_hand_edited_tag_alone(tmp_path):
 
 def test_split_artist_tags_ignores_a_single_artist(tmp_path):
     assert not downloader.split_artist_tags(str(tmp_path / "missing.ogg"), ("Solo",))
+
+
+def test_downloads_land_in_the_playlist_folder():
+    from settings import PlaylistSetting
+    config = cfg(playlist_settings=(PlaylistSetting("PLtalks", folder="/media/nas1/Podcasts/Talks"),))
+    argv = build_download_argv(config, "https://x", "/tmp/p", None, config.dest_dir(
+        "https://youtube.com/playlist?list=PLtalks", "Talks"))
+    assert argv[argv.index("--paths") + 1] == "home:/media/nas1/Podcasts/Talks"
+    assert build_download_argv(config, "https://x", "/tmp/p")[argv.index("--paths") + 1] == "home:/media/nas1/Music"
+
+
+def test_set_genre_replaces_the_youtube_category(tmp_path):
+    from mutagen.flac import FLAC
+    path = str(tmp_path / "t.flac")
+    _write_tagged_flac(path, "Calibre")
+    audio = FLAC(path); audio["genre"] = "Entertainment"; audio.save()
+    assert downloader.set_genre(path, "Liquid Drum & Bass")
+    assert FLAC(path)["genre"] == ["Liquid Drum & Bass"]
+    assert not downloader.set_genre(path, "")
