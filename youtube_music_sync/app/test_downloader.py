@@ -385,3 +385,71 @@ def test_a_silent_process_still_hits_the_timeout(tmp_path):
     argv = _script(tmp_path, "import time\ntime.sleep(30)\n")
     with pytest.raises(subprocess.TimeoutExpired):
         downloader._run_streaming(argv, timeout=1)
+
+
+def test_download_asks_yt_dlp_for_the_artist_list():
+    argv = build_download_argv(cfg(), "https://x", "/tmp/p", "/tmp/a")
+    i = argv.index("after_move:%(artists)j")
+    assert argv[i - 1] == "--print-to-file" and argv[i + 1] == "/tmp/a"
+    # The filepath print stays first; the runner and tests read it by position.
+    assert argv[argv.index("--print-to-file") + 1] == "after_move:filepath"
+
+
+def _fake_run_with_artists(path, artists_line):
+    def runner(argv, timeout, on_progress=None):
+        files = [argv[i + 2] for i, a in enumerate(argv) if a == "--print-to-file"]
+        with open(files[0], "w", encoding="utf-8") as fh:
+            fh.write(path)
+        with open(files[1], "w", encoding="utf-8") as fh:
+            fh.write(artists_line)
+        return 0, []
+    return runner
+
+
+def test_download_returns_the_artist_list(tmp_path, monkeypatch):
+    monkeypatch.setattr(downloader, "_run_streaming",
+                        _fake_run_with_artists("/m/x.opus\n", '["Calibre", "High Contrast", "Calibre"]\n'))
+    result = downloader.download(cfg(data_dir=str(tmp_path)), _entry())
+    assert result.artists == ("Calibre", "High Contrast")
+    assert list((tmp_path / "tmp").glob("yms-*")) == []
+
+
+def test_download_tolerates_a_video_with_no_artists(tmp_path, monkeypatch):
+    monkeypatch.setattr(downloader, "_run_streaming", _fake_run_with_artists("/m/x.opus\n", "NA\n"))
+    result = downloader.download(cfg(data_dir=str(tmp_path)), _entry())
+    assert result.ok and result.artists == ()
+
+
+def _write_tagged_flac(path, artist):
+    """A header-only FLAC file: same Vorbis-comment tags as the Opus files."""
+    import struct
+    from mutagen.flac import FLAC
+    # STREAMINFO: 4096-sample blocks, 44.1 kHz, stereo, 16-bit, 0 samples.
+    info = struct.pack(">HH", 4096, 4096) + b"\0" * 6
+    info += ((44100 << 44) | (1 << 41) | (15 << 36)).to_bytes(8, "big") + b"\0" * 16
+    with open(path, "wb") as fh:
+        fh.write(b"fLaC" + bytes([0x80]) + len(info).to_bytes(3, "big") + info)
+    audio = FLAC(path)
+    audio.add_tags()
+    audio["artist"] = artist
+    audio.save()
+
+
+def test_split_artist_tags_writes_one_tag_per_artist(tmp_path):
+    from mutagen.flac import FLAC
+    path = str(tmp_path / "t.flac")
+    _write_tagged_flac(path, "Calibre, High Contrast")
+    assert downloader.split_artist_tags(path, ("Calibre", "High Contrast"))
+    assert FLAC(path)["artist"] == ["Calibre", "High Contrast"]
+
+
+def test_split_artist_tags_leaves_a_hand_edited_tag_alone(tmp_path):
+    from mutagen.flac import FLAC
+    path = str(tmp_path / "t.flac")
+    _write_tagged_flac(path, "Calibre")
+    assert not downloader.split_artist_tags(path, ("Calibre", "High Contrast"))
+    assert FLAC(path)["artist"] == ["Calibre"]
+
+
+def test_split_artist_tags_ignores_a_single_artist(tmp_path):
+    assert not downloader.split_artist_tags(str(tmp_path / "missing.ogg"), ("Solo",))

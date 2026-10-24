@@ -298,6 +298,7 @@ def _run_downloads(cfg: Config, store: Store, index: LibraryIndex, plan, report:
             continue
 
         downloader.stamp_video_id(result.path, entry.video_id)
+        downloader.split_artist_tags(result.path, result.artists)
         duration, file_video_id, variants = read_file_metadata(result.path)
 
         # Second pass with the real duration. The playlist listing sometimes

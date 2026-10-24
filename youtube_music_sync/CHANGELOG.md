@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4
+
+- Write one artist tag per credited artist. yt-dlp's `--embed-metadata`
+  joins collaborators into a single "Calibre, High Contrast" string, which
+  Music Assistant (rightly - real names contain commas) files as one made-up
+  artist with no image. The app now asks yt-dlp for the artist list itself
+  and, after each download, rewrites that joined tag as a multi-value one
+  (Vorbis/Opus, MP3 and M4A). A tag that is not exactly yt-dlp's joined form
+  is left alone.
+
 ## 0.2.3
 
 - Fix a stale partial download permanently failing with HTTP 416. With
