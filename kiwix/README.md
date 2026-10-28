@@ -203,3 +203,8 @@ on the share keep working offline, which is rather the point.
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
 to add this repository to Home Assistant, then install **Kiwix** from the
 app store.
+
+## Running without Home Assistant
+
+A standalone Docker version of this app, with the same features, lives in
+[docker/](docker/README.md).

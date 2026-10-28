@@ -1,0 +1,37 @@
+# Kiwix Manager - standalone Docker version of the Home Assistant add-on.
+#
+#   1. Point the /zim volume at the folder archives should live in.
+#   2. Set PUID/PGID to the owner of that folder (`id youruser` on the host).
+#   3. Set a username and password, or put the port behind a proxy that
+#      authenticates.
+#   4. docker compose up -d, then open http://<host>:8099
+services:
+  kiwix:
+    image: ghcr.io/nict41/kiwix-manager:latest
+    # Or build it yourself from a checkout of the repository:
+    # build:
+    #   context: ..
+    #   dockerfile: docker/Dockerfile
+    container_name: kiwix
+    restart: unless-stopped
+    ports:
+      - "8099:8099"
+    volumes:
+      - ./kiwix-data:/data          # app state: library selection, download queue, settings
+      - /mnt/storage/kiwix:/zim     # where .zim archives are downloaded and served from
+    environment:
+      TZ: Europe/London
+      PUID: "1000"
+      PGID: "1000"
+      KIWIX_USERNAME: kiwix
+      KIWIX_PASSWORD: change-me
+      # Defaults for the in-app Settings panel (changes made there win):
+      CATALOG_LANGUAGE: eng
+      AUTO_SERVE_NEW: "true"
+      MAX_CONCURRENT_DOWNLOADS: "1"
+      DOWNLOAD_THREADS: "4"
+      DOWNLOAD_WINDOW_ENABLED: "false"
+      DOWNLOAD_WINDOW_START: "23:00"
+      DOWNLOAD_WINDOW_END: "07:00"
+      # LIBRARY_SOURCE: https://library.kiwix.org
+      # BASE_PATH: /kiwix-app   # only if a reverse proxy serves it under a subpath

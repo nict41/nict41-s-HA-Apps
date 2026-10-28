@@ -31,7 +31,9 @@ _monitor_started = False
 
 
 def root_for(ingress_prefix: str | None = None) -> str:
-    prefix = (ingress_prefix if ingress_prefix is not None else settings.INGRESS_ENTRY).rstrip("/")
+    if ingress_prefix is None:
+        ingress_prefix = settings.INGRESS_ENTRY or settings.BASE_PATH
+    prefix = ingress_prefix.rstrip("/")
     return f"{prefix}/kiwix"
 
 

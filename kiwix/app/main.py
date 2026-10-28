@@ -5,8 +5,15 @@ Everything the user sees is served from here on port 8099, which is the
 add-on's ingress port. kiwix-serve stays on loopback and is reached only
 through `/kiwix`, so reading an article goes through Home Assistant's
 authentication exactly like the rest of the panel does.
+
+The same app also runs standalone (kiwix/docker). There, nothing sits in
+front of the port, so optional HTTP Basic credentials guard every route, and
+a reverse proxy's subpath (BASE_PATH) stands in for the ingress prefix.
 """
 
+import base64
+import binascii
+import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +21,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 import catalog
@@ -73,12 +80,65 @@ _kiwix_client = httpx.AsyncClient(
 
 
 def _ingress_prefix(request: Request) -> str:
-    return request.headers.get("X-Ingress-Path", "").rstrip("/")
+    return (request.headers.get("X-Ingress-Path", "") or settings.BASE_PATH).rstrip("/")
+
+
+# Paths a container health check may hit without credentials.
+_AUTH_EXEMPT = {"/healthz"}
+
+
+def _credentials_ok(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        return False
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except (binascii.Error, UnicodeDecodeError):
+        return False
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        return False
+    # Compare both halves every time so a wrong username takes as long as a
+    # wrong password.
+    user_ok = secrets.compare_digest(username.encode(), settings.AUTH_USERNAME.encode())
+    pass_ok = secrets.compare_digest(password.encode(), settings.AUTH_PASSWORD.encode())
+    return user_ok and pass_ok
+
+
+@app.middleware("http")
+async def basic_auth(request: Request, call_next):
+    """Require HTTP Basic credentials when KIWIX_USERNAME/KIWIX_PASSWORD are set.
+
+    Never set under Home Assistant, where ingress has authenticated the
+    request already. The reader's iframe and its assets are same-origin, so
+    the browser resends the credentials there without asking again.
+    """
+    if (
+        settings.AUTH_USERNAME
+        and settings.AUTH_PASSWORD
+        and request.url.path not in _AUTH_EXEMPT
+        and not _credentials_ok(request.headers.get("Authorization", ""))
+    ):
+        return Response(
+            "Authentication required.",
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Kiwix", charset="UTF-8"'},
+        )
+    return await call_next(request)
+
+
+@app.get("/healthz", include_in_schema=False)
+async def healthz():
+    return {"ok": True}
+
+
+def _template_context() -> dict:
+    return {"is_docker": settings.IS_DOCKER}
 
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(request, "index.html", _template_context())
 
 
 @app.get("/read", response_class=HTMLResponse)
@@ -91,7 +151,7 @@ async def read(request: Request):
     ingress iframe, is not where a reader's hand goes). Framing it under our
     own header keeps the way out on screen at all times.
     """
-    return templates.TemplateResponse(request, "read.html")
+    return templates.TemplateResponse(request, "read.html", _template_context())
 
 
 @app.get("/api/state")

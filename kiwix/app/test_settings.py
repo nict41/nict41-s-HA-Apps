@@ -66,6 +66,7 @@ def test_options_are_exposed_for_the_ui():
     assert set(settings.as_dict()) == {
         "zim_path",
         "library_source",
+        "platform",
         "catalog_language",
         "auto_serve_new",
         "max_concurrent_downloads",
