@@ -35,6 +35,26 @@ LIBRARY_SOURCE = os.environ.get("LIBRARY_SOURCE", "https://library.kiwix.org").r
 # see server.py. Empty when the add-on is opened on its direct port.
 INGRESS_ENTRY = os.environ.get("INGRESS_ENTRY", "").rstrip("/")
 
+# Which packaging this is running in: "homeassistant" (the add-on) or
+# "docker" (the standalone image in kiwix/docker). The code is the same; only
+# the wording of storage messages and a few UI hints differ.
+PLATFORM = (os.environ.get("KIWIX_PLATFORM", "homeassistant") or "homeassistant").strip().lower()
+IS_DOCKER = PLATFORM == "docker"
+
+# Standalone only: the path prefix a reverse proxy publishes the app under,
+# e.g. /kiwix-app when it lives at https://example.com/kiwix-app/. The proxy
+# must strip it before forwarding; kiwix-serve still needs to know it so the
+# absolute links in its pages carry it. Empty when served at the root.
+BASE_PATH = os.environ.get("BASE_PATH", "").strip().rstrip("/")
+if BASE_PATH and not BASE_PATH.startswith("/"):
+    BASE_PATH = "/" + BASE_PATH
+
+# Standalone only: optional HTTP Basic credentials for the whole app. Under
+# Home Assistant, ingress already authenticates every request; a bare Docker
+# port has nothing in front of it unless these are set (or a proxy is).
+AUTH_USERNAME = os.environ.get("KIWIX_USERNAME", "")
+AUTH_PASSWORD = os.environ.get("KIWIX_PASSWORD", "")
+
 # Port kiwix-serve listens on, loopback-only - it is never exposed directly,
 # the manager proxies it under /kiwix so everything stays behind HA's auth.
 KIWIX_PORT = int(os.environ.get("KIWIX_PORT", "8090"))
@@ -259,6 +279,10 @@ def storage_status() -> dict:
             "path": "",
             "ok": False,
             "message": (
+                "No ZIM storage path is configured. Set the ZIM_PATH "
+                "environment variable to the folder you mounted for archives "
+                "(e.g. /zim) and recreate the container."
+                if IS_DOCKER else
                 "No ZIM storage path is configured. Set the add-on's "
                 "'ZIM storage path' option to a folder on your network share "
                 "(e.g. NAS1/Kiwix) and restart the add-on."
@@ -287,6 +311,10 @@ def storage_status() -> dict:
                 "state": "unmounted",
                 "ok": False,
                 "message": (
+                    f"'{path.parent}' doesn't exist inside the container. "
+                    "Check the volume mounted for ZIM storage in your compose "
+                    "file, then reload this page."
+                    if IS_DOCKER else
                     f"'{path.parent}' doesn't exist, so the network share "
                     "looks like it isn't mounted. Check Settings -> System -> "
                     "Storage in Home Assistant, then reload this page - no "
@@ -317,6 +345,10 @@ def storage_status() -> dict:
             "state": "read_only",
             "ok": False,
             "message": (
+                f"'{path}' is not writable by the container. Downloads would "
+                "fail; check the volume's permissions and that PUID/PGID "
+                "match the user that owns it."
+                if IS_DOCKER else
                 f"'{path}' is not writable by the add-on. Downloads would "
                 "fail; check the share's permissions and how it is mounted "
                 "in Home Assistant."
@@ -335,4 +367,9 @@ def storage_status() -> dict:
 
 def as_dict() -> dict:
     """The add-on options as configured, for display in the UI."""
-    return {"zim_path": raw_zim_path(), "library_source": LIBRARY_SOURCE, **defaults()}
+    return {
+        "zim_path": raw_zim_path(),
+        "library_source": LIBRARY_SOURCE,
+        "platform": PLATFORM,
+        **defaults(),
+    }

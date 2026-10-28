@@ -1,0 +1,98 @@
+name: Kiwix Docker image
+
+# The standalone (non-Home Assistant) image of the Kiwix app, built from the
+# same app code as the add-on. Pull requests prove it builds for both
+# architectures; a merge to main publishes it to GHCR.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "kiwix/**"
+      - ".github/workflows/kiwix-docker.yml"
+  pull_request:
+    paths:
+      - "kiwix/**"
+      - ".github/workflows/kiwix-docker.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/kiwix-manager
+
+jobs:
+  image:
+    name: Build kiwix-manager
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # The image is versioned with the add-on, since both ship the same app.
+      - name: Read version
+        id: version
+        run: echo "version=$(yq -r '.version' kiwix/config.yaml)" >> "${GITHUB_OUTPUT}"
+
+      # Smoke test before anything is published: the amd64 image must
+      # start, answer its health check without credentials, and refuse the
+      # UI without them.
+      - name: Build amd64 for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: kiwix
+          file: kiwix/docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: kiwix-smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          mkdir -p "${RUNNER_TEMP}/zim"
+          docker run -d --name kiwix-smoke -p 8099:8099 \
+            -e KIWIX_USERNAME=u -e KIWIX_PASSWORD=p \
+            -e PUID="$(id -u)" -e PGID="$(id -g)" \
+            -v "${RUNNER_TEMP}/zim:/zim" kiwix-smoke
+          for i in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8099/healthz && break
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8099/healthz
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8099/)" = 401
+          curl -fs -u u:p http://127.0.0.1:8099/api/state | jq -e '.storage.ok and .options.platform == "docker"'
+          docker exec kiwix-smoke kiwix-serve --version
+          docker logs kiwix-smoke
+
+      - name: Container log on failure
+        if: failure()
+        run: docker logs kiwix-smoke || true
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push from main)
+        uses: docker/build-push-action@v6
+        with:
+          context: kiwix
+          file: kiwix/docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

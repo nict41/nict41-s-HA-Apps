@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+- **Standalone Docker image.** The same app now also ships as a plain
+  Docker image (`ghcr.io/nict41/kiwix-manager`, amd64 + arm64) for hosts
+  without Home Assistant. See [docker/README.md](docker/README.md). It adds
+  what ingress used to provide: an optional login (`KIWIX_USERNAME` /
+  `KIWIX_PASSWORD`), `PUID`/`PGID`, `TZ`, a `BASE_PATH` for reverse proxies
+  at a subpath, and a `/healthz` endpoint.
+- No change to the add-on's behaviour. The login only switches on when
+  those variables are set, and they never are under Home Assistant.
+
 ## 0.2.1
 
 - Ask for the ingress path under whichever name the base image's bashio

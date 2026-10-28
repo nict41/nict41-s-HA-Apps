@@ -312,9 +312,15 @@
     <div id="settings-panel" class="panel" hidden>
       <div class="section-head"><h2>Settings</h2></div>
       <p class="hint">
+        {% if is_docker %}
+        These apply straight away — no container restart, so nothing in flight
+        is interrupted. They start from the container's environment variables
+        and override them while set.
+        {% else %}
         These apply straight away — no add-on restart, so nothing in flight is
         interrupted. They start from the add-on options and override them
         while set.
+        {% endif %}
       </p>
       <div class="settings-grid">
         <div class="field">
@@ -354,7 +360,7 @@
             <input type="time" id="set-window-start" />
             <input type="time" id="set-window-end" />
           </div>
-          <span class="field-note">Home Assistant's timezone. Crossing midnight is fine.</span>
+          <span class="field-note">{% if is_docker %}The container's timezone (TZ){% else %}Home Assistant's timezone{% endif %}. Crossing midnight is fine.</span>
         </div>
       </div>
       <div class="settings-actions">
@@ -635,7 +641,7 @@
           (entry.preview_url
             ? '<p class="hint"><a href="' + escapeHtml(entry.preview_url) +
               '" target="_blank" rel="noopener">Preview this archive on library.kiwix.org</a> ' +
-              "(needs internet; opens outside Home Assistant)</p>"
+              "(needs internet; opens in a new tab)</p>"
             : "") +
           "</div>";
       }
