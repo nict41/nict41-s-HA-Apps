@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Fixed the app failing to start on a fresh install
+  (`invalid options: expected a URL`). `vision_api_base`'s schema was
+  `url?`, but a `?` only makes the *key* optional - the *value* still had
+  to pass URL validation, and the default blank value (`""`) failed it.
+  The option is now a plain string, validated by the app itself.
+
 ## 0.1.0
 
 - Initial release.

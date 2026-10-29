@@ -1,5 +1,5 @@
 name: "Pantry Tracker"
-version: "0.1.0"
+version: "0.1.1"
 slug: "pantry_tracker"
 description: "Scan grocery barcodes to track your pantry, read use-by dates from a photo, and get notified before food expires"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pantry_tracker"
@@ -30,6 +30,6 @@ schema:
   notify_days_before: int(0,30)
   notify_repeat_hours: int(1,168)
   check_interval_hours: int(1,24)
-  vision_api_base: url?
+  vision_api_base: str
   vision_api_key: password?
   vision_model: str
