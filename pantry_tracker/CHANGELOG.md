@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0
+
+- Scanning a barcode and photographing a use-by date now open a live,
+  full-screen camera view in the app itself, instead of handing off to the
+  phone's own photo-capture UI:
+  - **Scan Barcode** opens a live viewfinder that scans frames automatically
+    (via the browser's `BarcodeDetector` API - no library, works out of the
+    box on Android Chrome) and jumps straight to the product lookup the
+    instant a barcode decodes, no shutter tap needed.
+  - **Photo of use-by date** opens the same live view with a **Capture**
+    shutter button, since reading a date needs a deliberate "now" moment
+    rather than auto-detection.
+  - Both fall back to the OS photo-capture file picker on a browser without
+    camera support (or if camera permission is denied), so nothing is lost
+    on unsupported devices.
+- Scanned barcodes are now cached (indefinitely - a product's name/brand
+  rarely changes) after their first successful Open Food Facts lookup, so
+  re-scanning the same item later (the common case - the same milk, the
+  same tins, week after week) is instant and makes no network request at
+  all.
+- Fixed "Add to pantry" being able to save an item before a still-running
+  use-by date photo extraction had finished, silently dropping the date it
+  would have found. The button now waits for extraction to finish (showing
+  "Reading use-by date…") before submitting.
+
 ## 0.1.1
 
 - Fixed the app failing to start on a fresh install

@@ -227,6 +227,62 @@
   details.raw-reply p { font-size: 13px; color: var(--muted); }
 
   .empty-state { text-align: center; color: var(--muted); padding: 40px 10px; }
+
+  .scanner-overlay {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+  }
+  .scanner-video {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .scanner-frame {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 78vw;
+    max-width: 420px;
+    height: 34vw;
+    max-height: 180px;
+    border: 3px solid rgba(255,255,255,0.85);
+    border-radius: 16px;
+    box-shadow: 0 0 0 2000px rgba(0,0,0,0.35);
+    pointer-events: none;
+  }
+  .scanner-hint {
+    position: absolute;
+    top: calc(50% + 100px);
+    left: 50%;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 14px;
+    text-align: center;
+    width: 100%;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+  .scanner-controls {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .scanner-controls button {
+    background: rgba(255,255,255,0.12);
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+    backdrop-filter: blur(4px);
+  }
 </style>
 </head>
 <body>
@@ -302,6 +358,17 @@
 
     <input type="file" id="input-barcode-photo" accept="image/*" capture="environment">
     <input type="file" id="input-date-photo" accept="image/*" capture="environment">
+
+    <div id="camera-overlay" class="scanner-overlay hidden">
+      <video id="camera-video" class="scanner-video" playsinline autoplay muted></video>
+      <div class="scanner-frame"></div>
+      <p id="camera-hint" class="scanner-hint"></p>
+      <div class="scanner-controls">
+        <button type="button" id="btn-camera-shutter" class="primary hidden">📸 Capture</button>
+        <button type="button" id="btn-camera-fallback" class="ghost"></button>
+        <button type="button" id="btn-camera-cancel" class="ghost">Cancel</button>
+      </div>
+    </div>
   </section>
 
   <!-- ───────────────────────── Pantry ───────────────────────── -->
@@ -384,6 +451,7 @@ function toast(message) {
 
 // ── Tabs ─────────────────────────────────────────────────────────────────
 function showView(name) {
+  if (name !== "scan") closeCamera();
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
   $$("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
   if (name === "pantry") loadPantry();
@@ -397,6 +465,7 @@ const scanBusy = $("#scan-busy");
 const reviewForm = $("#review-form");
 
 function resetScan() {
+  closeCamera();
   reviewForm.reset();
   $("#review-not-found").classList.add("hidden");
   $("#review-barcode-line").classList.add("hidden");
@@ -421,14 +490,34 @@ function openReviewForm({ barcode, notFound }) {
   $("#f-name").focus();
 }
 
-$("#btn-scan-start").addEventListener("click", () => $("#input-barcode-photo").click());
-$("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
-$("#btn-review-cancel").addEventListener("click", resetScan);
+// Looks up a barcode that's already been decoded (by either the live
+// scanner or the photo-upload fallback) and opens the review form
+// pre-filled with whatever Open Food Facts knows about it.
+async function handleScannedBarcode(code) {
+  scanIdle.classList.add("hidden");
+  scanBusy.classList.remove("hidden");
+  try {
+    const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
+    const data = await res.json();
+    openReviewForm({ barcode: code, notFound: false });
+    if (data.found) {
+      $("#f-name").value = data.name || "";
+      $("#f-brand").value = data.brand || "";
+      $("#f-quantity").value = data.quantity || "";
+      $("#f-category").value = data.category || "";
+      if (data.cached) {
+        $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
+      }
+    } else {
+      toast("Barcode scanned, but not found in Open Food Facts - fill in the details.");
+    }
+  } catch (err) {
+    openReviewForm({ barcode: code, notFound: false });
+    toast("Scanned, but the product lookup failed - fill in the details.");
+  }
+}
 
-$("#input-barcode-photo").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  e.target.value = "";
-  if (!file) return;
+async function handleBarcodePhoto(file) {
   scanIdle.classList.add("hidden");
   scanBusy.classList.remove("hidden");
 
@@ -447,32 +536,182 @@ $("#input-barcode-photo").addEventListener("change", async (e) => {
     openReviewForm({ barcode: "", notFound: true });
     return;
   }
+  await handleScannedBarcode(code);
+}
+
+// ── Live camera (barcode scanning + use-by date photo capture) ─────────────
+// One shared full-screen camera overlay, used two ways:
+//   - "barcode": continuously scans video frames via BarcodeDetector until
+//     one decodes, with no shutter button.
+//   - "date": a plain live viewfinder with a shutter button, since reading
+//     a use-by date needs a deliberate "now" moment, not auto-detection.
+// Both fall back to the OS photo-capture file inputs on unsupported
+// browsers (no BarcodeDetector, no getUserMedia, or permission denied).
+let cameraStream = null;
+let cameraMode = null; // "barcode" | "date"
+let barcodeScanTimer = null;
+let barcodeScanBusy = false;
+let barcodeDetector = null;
+
+// The in-flight use-by date extraction request, if any - so "Add to
+// pantry" can wait for it instead of racing ahead and submitting before
+// the date has a chance to land in the form. See triggerDatePhotoExtraction.
+let pendingDatePhoto = null;
+
+function cameraSupported() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+function barcodeDetectorSupported() {
+  return "BarcodeDetector" in window;
+}
+
+function openFallbackPicker(mode) {
+  $(mode === "barcode" ? "#input-barcode-photo" : "#input-date-photo").click();
+}
+
+async function openCamera(mode) {
+  const overlay = $("#camera-overlay");
+  const video = $("#camera-video");
+  const hint = $("#camera-hint");
+  const shutter = $("#btn-camera-shutter");
+  const fallbackBtn = $("#btn-camera-fallback");
+
+  cameraMode = mode;
+  barcodeScanBusy = false;
+
+  if (mode === "barcode") {
+    hint.textContent = "Point your camera at a barcode";
+    shutter.classList.add("hidden");
+    fallbackBtn.textContent = "Having trouble? Take a photo instead";
+  } else {
+    hint.textContent = "Line up the use-by date, then tap Capture";
+    shutter.classList.remove("hidden");
+    fallbackBtn.textContent = "Upload a photo instead";
+  }
+  overlay.classList.remove("hidden");
 
   try {
-    const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
-    const data = await res.json();
-    openReviewForm({ barcode: code, notFound: false });
-    if (data.found) {
-      $("#f-name").value = data.name || "";
-      $("#f-brand").value = data.brand || "";
-      $("#f-quantity").value = data.quantity || "";
-      $("#f-category").value = data.category || "";
-    } else {
-      toast("Barcode scanned, but not found in Open Food Facts - fill in the details.");
-    }
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false,
+    });
   } catch (err) {
-    openReviewForm({ barcode: code, notFound: false });
-    toast("Scanned, but the product lookup failed - fill in the details.");
+    closeCamera();
+    toast("Couldn't open the camera - choose a photo instead.");
+    openFallbackPicker(mode);
+    return;
+  }
+
+  video.srcObject = cameraStream;
+  await video.play();
+
+  if (mode === "barcode") {
+    if (!barcodeDetector) {
+      barcodeDetector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e"] });
+    }
+    barcodeScanTimer = setInterval(async () => {
+      if (barcodeScanBusy || video.readyState < 2) return;
+      try {
+        const codes = await barcodeDetector.detect(video);
+        if (codes.length > 0) {
+          barcodeScanBusy = true;
+          const code = codes[0].rawValue;
+          closeCamera();
+          await handleScannedBarcode(code);
+        }
+      } catch (err) {
+        // A frame that fails to decode is routine - ignore and let the
+        // next interval tick try again.
+      }
+    }, 300);
+  }
+}
+
+function closeCamera() {
+  if (barcodeScanTimer) {
+    clearInterval(barcodeScanTimer);
+    barcodeScanTimer = null;
+  }
+  if (cameraStream) {
+    cameraStream.getTracks().forEach((track) => track.stop());
+    cameraStream = null;
+  }
+  $("#camera-overlay").classList.add("hidden");
+  cameraMode = null;
+}
+
+function captureVideoFrame(video) {
+  return new Promise((resolve) => {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
+  });
+}
+
+$("#btn-scan-start").addEventListener("click", () => {
+  if (cameraSupported() && barcodeDetectorSupported()) {
+    openCamera("barcode");
+  } else {
+    openFallbackPicker("barcode");
   }
 });
 
-$("#btn-date-photo").addEventListener("click", () => $("#input-date-photo").click());
+$("#btn-date-photo").addEventListener("click", () => {
+  if (cameraSupported()) {
+    openCamera("date");
+  } else {
+    openFallbackPicker("date");
+  }
+});
 
-$("#input-date-photo").addEventListener("change", async (e) => {
+$("#btn-camera-cancel").addEventListener("click", closeCamera);
+$("#btn-camera-fallback").addEventListener("click", () => {
+  const mode = cameraMode;
+  closeCamera();
+  openFallbackPicker(mode);
+});
+$("#btn-camera-shutter").addEventListener("click", async () => {
+  const video = $("#camera-video");
+  const blob = await captureVideoFrame(video);
+  closeCamera();
+  if (blob) triggerDatePhotoExtraction(blob);
+});
+
+$("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
+$("#btn-review-cancel").addEventListener("click", resetScan);
+
+$("#input-barcode-photo").addEventListener("change", (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (!file) return;
+  if (file) handleBarcodePhoto(file);
+});
 
+$("#input-date-photo").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) triggerDatePhotoExtraction(file);
+});
+
+// Release the camera the moment the tab/app isn't visible, rather than
+// leaving it running (and the recording indicator lit) in the background.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) closeCamera();
+});
+
+// Kicks off date extraction and tracks it as the "pending" one, so the
+// review form's submit handler can wait for it rather than letting "Add to
+// pantry" save the item before the date has landed in the form.
+function triggerDatePhotoExtraction(file) {
+  const run = handleDatePhoto(file);
+  pendingDatePhoto = run;
+  run.finally(() => {
+    if (pendingDatePhoto === run) pendingDatePhoto = null;
+  });
+}
+
+async function handleDatePhoto(file) {
   const thumb = $("#date-photo-thumb");
   thumb.src = URL.createObjectURL(file);
   thumb.classList.remove("hidden");
@@ -482,7 +721,7 @@ $("#input-date-photo").addEventListener("change", async (e) => {
   status.classList.remove("hidden");
 
   const body = new FormData();
-  body.append("photo", file);
+  body.append("photo", file, "use-by.jpg");
   try {
     const res = await fetch("api/extract-date", { method: "POST", body });
     const data = await res.json();
@@ -495,12 +734,24 @@ $("#input-date-photo").addEventListener("change", async (e) => {
   } catch (err) {
     status.textContent = "Date extraction failed - enter it manually below.";
   }
-});
+}
 
 reviewForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const saveBtn = $("#btn-review-save");
+  const originalLabel = saveBtn.textContent;
   saveBtn.disabled = true;
+
+  // Don't let "Add to pantry" race a still-running use-by date extraction -
+  // wait for it so the date it finds actually makes it into the saved item,
+  // instead of the item saving without it and the result landing on a form
+  // that's already gone.
+  if (pendingDatePhoto) {
+    saveBtn.textContent = "Reading use-by date…";
+    await pendingDatePhoto;
+    saveBtn.textContent = originalLabel;
+  }
+
   const body = new FormData(reviewForm);
   body.append("barcode", reviewForm.dataset.barcode || "");
   body.append("source", reviewForm.dataset.barcode ? "barcode" : "manual");

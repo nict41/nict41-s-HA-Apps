@@ -69,6 +69,19 @@ def init_db() -> None:
             """
         )
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS barcode_cache (
+                barcode TEXT PRIMARY KEY,
+                name TEXT,
+                brand TEXT,
+                quantity TEXT,
+                category TEXT,
+                image_url TEXT,
+                cached_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def bucket_for(expiry_date: str | None, notify_days_before: int) -> str:
@@ -174,6 +187,37 @@ def delete_item(item_id: int) -> None:
 
 def mark_notified(item_id: int, bucket: str) -> None:
     update_item(item_id, last_notified_at=now_iso(), last_notified_bucket=bucket)
+
+
+def get_cached_barcode(barcode: str) -> dict | None:
+    """A previously looked-up product, by barcode. Product identity
+    (name/brand/quantity/category) is effectively static once published, so
+    this is cached indefinitely rather than TTL'd - a repeat scan of the
+    same item (the common case in a pantry app: the same milk, the same
+    tins, week after week) skips Open Food Facts entirely."""
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM barcode_cache WHERE barcode = ?", (barcode,)).fetchone()
+        return dict(row) if row else None
+
+
+def cache_barcode(barcode: str, product: dict) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO barcode_cache (barcode, name, brand, quantity, category, image_url, cached_at) "
+            "VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(barcode) DO UPDATE SET name = excluded.name, brand = excluded.brand, "
+            "quantity = excluded.quantity, category = excluded.category, image_url = excluded.image_url, "
+            "cached_at = excluded.cached_at",
+            (
+                barcode,
+                product.get("name", ""),
+                product.get("brand", ""),
+                product.get("quantity", ""),
+                product.get("category", ""),
+                product.get("image_url", ""),
+                now_iso(),
+            ),
+        )
 
 
 def get_state(key: str, default: str | None = None) -> str | None:
