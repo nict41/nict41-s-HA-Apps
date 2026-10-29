@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pantry Tracker</title>
+<style>
+  :root {
+    --bg: #f4f6f2;
+    --surface: #ffffff;
+    --ink: #1c2420;
+    --muted: #677069;
+    --border: #dde3dc;
+    --accent: #2e7d63;
+    --accent-ink: #ffffff;
+    --ok: #2e7d63;
+    --soon: #b5790a;
+    --expired: #b3362c;
+    --unknown: #8a8f8b;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #10140f;
+      --surface: #1a2018;
+      --ink: #eef3ea;
+      --muted: #9aa69c;
+      --border: #2a332a;
+      --accent: #57c498;
+      --accent-ink: #0b1210;
+      --ok: #57c498;
+      --soon: #e0ac3e;
+      --expired: #ec6a5e;
+      --unknown: #7c8680;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.4;
+    padding-bottom: 76px;
+    min-height: 100vh;
+  }
+  header.top {
+    padding: 16px 16px 8px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 5;
+  }
+  header.top h1 {
+    font-size: 20px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  main { padding: 0 16px 24px; max-width: 640px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 14px;
+  }
+
+  button, .btn {
+    font-size: 16px;
+    font-family: inherit;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 12px 16px;
+    min-height: 48px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+  }
+  button.primary {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  button.danger { color: var(--expired); border-color: var(--expired); }
+  button.ghost { background: transparent; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  input[type=text], input[type=date], input[type=number], textarea, select {
+    width: 100%;
+    font-size: 16px;
+    font-family: inherit;
+    padding: 11px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+  }
+  textarea { resize: vertical; min-height: 60px; }
+
+  .muted { color: var(--muted); font-size: 14px; }
+  .hidden { display: none !important; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge.ok { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  .badge.expiring_soon { background: color-mix(in srgb, var(--soon) 20%, transparent); color: var(--soon); }
+  .badge.expired { background: color-mix(in srgb, var(--expired) 20%, transparent); color: var(--expired); }
+  .badge.unknown { background: color-mix(in srgb, var(--unknown) 20%, transparent); color: var(--unknown); }
+
+  .section-title {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted);
+    margin: 20px 0 8px;
+  }
+
+  .item-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-main { flex: 1; min-width: 0; }
+  .item-name { font-weight: 600; }
+  .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .item-actions button { width: auto; min-height: 36px; padding: 6px 10px; font-size: 13px; }
+
+  .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+
+  .photo-step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+  }
+  .photo-thumb {
+    width: 44px; height: 44px; border-radius: 10px; object-fit: cover;
+    border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 86px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--ink);
+    color: var(--bg);
+    padding: 10px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+    z-index: 20;
+    max-width: 90vw;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; }
+
+  nav.tabs {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 10;
+  }
+  nav.tabs button {
+    flex: 1;
+    width: auto;
+    border: none;
+    background: transparent;
+    border-radius: 0;
+    flex-direction: column;
+    gap: 2px;
+    padding: 10px 4px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  nav.tabs button.active { color: var(--accent); font-weight: 600; }
+  nav.tabs button .icon { font-size: 20px; }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  input[type=file] { display: none; }
+
+  details.raw-reply { margin-top: 6px; }
+  details.raw-reply summary { color: var(--muted); font-size: 12px; cursor: pointer; }
+  details.raw-reply p { font-size: 13px; color: var(--muted); }
+
+  .empty-state { text-align: center; color: var(--muted); padding: 40px 10px; }
+</style>
+</head>
+<body>
+
+<header class="top"><h1>🥫 Pantry Tracker</h1></header>
+
+<main>
+
+  <!-- ───────────────────────── Scan ───────────────────────── -->
+  <section id="view-scan" class="view active">
+
+    <div id="scan-idle" class="card">
+      <p class="muted" style="margin-top:0">Scan a barcode to look up the product, then (optionally) snap its use-by date.</p>
+      <button class="primary" id="btn-scan-start">📷 Scan Barcode</button>
+      <div style="margin-top:10px">
+        <button class="ghost" id="btn-manual-start">Enter manually instead</button>
+      </div>
+    </div>
+
+    <div id="scan-busy" class="card hidden">
+      <p><span class="spinner"></span> Reading barcode…</p>
+    </div>
+
+    <form id="review-form" class="card hidden">
+      <div id="review-not-found" class="hidden">
+        <p class="muted" style="margin-top:0">No barcode recognised in that photo. You can try again, or fill the details in by hand.</p>
+      </div>
+      <div id="review-barcode-line" class="muted hidden" style="margin-top:0"></div>
+
+      <label for="f-name">Product name</label>
+      <input type="text" id="f-name" name="name" required>
+
+      <div class="row">
+        <div>
+          <label for="f-brand">Brand</label>
+          <input type="text" id="f-brand" name="brand">
+        </div>
+        <div>
+          <label for="f-quantity">Quantity</label>
+          <input type="text" id="f-quantity" name="quantity" placeholder="e.g. 500g">
+        </div>
+      </div>
+
+      <label for="f-category">Category</label>
+      <input type="text" id="f-category" name="category" list="category-suggestions" placeholder="e.g. Fridge, Freezer, Tinned">
+      <datalist id="category-suggestions">
+        <option value="Fridge">
+        <option value="Freezer">
+        <option value="Cupboard">
+        <option value="Tinned">
+        <option value="Spices">
+        <option value="Snacks">
+        <option value="Drinks">
+      </datalist>
+
+      <div class="photo-step">
+        <img id="date-photo-thumb" class="photo-thumb hidden" alt="">
+        <button type="button" class="ghost" id="btn-date-photo" style="width:auto;flex:1">📅 Photo of use-by date</button>
+      </div>
+      <div id="date-extract-status" class="muted hidden"></div>
+
+      <label for="f-expiry">Use-by / best-before date</label>
+      <input type="date" id="f-expiry" name="expiry_date">
+
+      <label for="f-notes">Notes (optional)</label>
+      <textarea id="f-notes" name="notes"></textarea>
+
+      <div class="row" style="margin-top:16px">
+        <button type="button" class="ghost" id="btn-review-cancel">Cancel</button>
+        <button type="submit" class="primary" id="btn-review-save">Add to pantry</button>
+      </div>
+    </form>
+
+    <input type="file" id="input-barcode-photo" accept="image/*" capture="environment">
+    <input type="file" id="input-date-photo" accept="image/*" capture="environment">
+  </section>
+
+  <!-- ───────────────────────── Pantry ───────────────────────── -->
+  <section id="view-pantry" class="view">
+    <div id="pantry-list"></div>
+  </section>
+
+  <!-- ───────────────────────── Settings ───────────────────────── -->
+  <section id="view-settings" class="view">
+    <form id="settings-form" class="card">
+      <div class="section-title" style="margin-top:0">Notifications</div>
+
+      <label for="s-notify-service">Home Assistant notify service</label>
+      <input type="text" id="s-notify-service" name="notify_service" placeholder="notify.mobile_app_your_phone">
+      <p class="muted">Leave blank to disable notifications. Find the exact service name under <strong>Developer Tools → Actions</strong>.</p>
+
+      <div class="row">
+        <div>
+          <label for="s-days-before">Warn this many days before</label>
+          <input type="number" id="s-days-before" name="notify_days_before" min="0" max="30">
+        </div>
+        <div>
+          <label for="s-repeat-hours">Repeat reminder every (hours)</label>
+          <input type="number" id="s-repeat-hours" name="notify_repeat_hours" min="1" max="168">
+        </div>
+      </div>
+
+      <label for="s-check-interval">Check for expiring items every (hours)</label>
+      <input type="number" id="s-check-interval" name="check_interval_hours" min="1" max="24">
+
+      <div style="margin-top:16px">
+        <button type="submit" class="primary">Save settings</button>
+      </div>
+    </form>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">Status</div>
+      <p class="muted" id="status-vision"></p>
+      <p class="muted" id="status-ha"></p>
+      <p class="muted" id="status-last-check"></p>
+      <button class="ghost" id="btn-check-now">Check now</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title" style="margin-top:0">Data</div>
+      <a class="btn" href="export" style="text-decoration:none">⬇ Export pantry as JSON</a>
+    </div>
+
+    <p class="muted" style="text-align:center">
+      The barcode lookup (Open Food Facts) and use-by photo extraction (your own vision model) are configured
+      under the add-on's own <strong>Configuration</strong> tab, not here.
+    </p>
+  </section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<nav class="tabs">
+  <button data-view="scan" class="active"><span class="icon">📷</span>Scan</button>
+  <button data-view="pantry"><span class="icon">🧺</span>Pantry</button>
+  <button data-view="settings"><span class="icon">⚙️</span>Settings</button>
+</nav>
+
+<script>
+"use strict";
+
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+// ── Toast ────────────────────────────────────────────────────────────────
+let toastTimer = null;
+function toast(message) {
+  const el = $("#toast");
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+// ── Tabs ─────────────────────────────────────────────────────────────────
+function showView(name) {
+  $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
+  $$("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  if (name === "pantry") loadPantry();
+  if (name === "settings") loadSettings();
+}
+$$("nav.tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
+
+// ── Scan flow ────────────────────────────────────────────────────────────
+const scanIdle = $("#scan-idle");
+const scanBusy = $("#scan-busy");
+const reviewForm = $("#review-form");
+
+function resetScan() {
+  reviewForm.reset();
+  $("#review-not-found").classList.add("hidden");
+  $("#review-barcode-line").classList.add("hidden");
+  $("#date-photo-thumb").classList.add("hidden");
+  $("#date-extract-status").classList.add("hidden");
+  reviewForm.dataset.barcode = "";
+  reviewForm.classList.add("hidden");
+  scanBusy.classList.add("hidden");
+  scanIdle.classList.remove("hidden");
+}
+
+function openReviewForm({ barcode, notFound }) {
+  scanIdle.classList.add("hidden");
+  scanBusy.classList.add("hidden");
+  reviewForm.classList.remove("hidden");
+  reviewForm.dataset.barcode = barcode || "";
+  $("#review-not-found").classList.toggle("hidden", !notFound);
+  if (barcode) {
+    $("#review-barcode-line").textContent = `Barcode: ${barcode}`;
+    $("#review-barcode-line").classList.remove("hidden");
+  }
+  $("#f-name").focus();
+}
+
+$("#btn-scan-start").addEventListener("click", () => $("#input-barcode-photo").click());
+$("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
+$("#btn-review-cancel").addEventListener("click", resetScan);
+
+$("#input-barcode-photo").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  scanIdle.classList.add("hidden");
+  scanBusy.classList.remove("hidden");
+
+  const body = new FormData();
+  body.append("photo", file);
+  let code = null;
+  try {
+    const res = await fetch("api/scan", { method: "POST", body });
+    const data = await res.json();
+    code = data.barcode;
+  } catch (err) {
+    toast("Could not read that photo - try again.");
+  }
+
+  if (!code) {
+    openReviewForm({ barcode: "", notFound: true });
+    return;
+  }
+
+  try {
+    const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
+    const data = await res.json();
+    openReviewForm({ barcode: code, notFound: false });
+    if (data.found) {
+      $("#f-name").value = data.name || "";
+      $("#f-brand").value = data.brand || "";
+      $("#f-quantity").value = data.quantity || "";
+      $("#f-category").value = data.category || "";
+    } else {
+      toast("Barcode scanned, but not found in Open Food Facts - fill in the details.");
+    }
+  } catch (err) {
+    openReviewForm({ barcode: code, notFound: false });
+    toast("Scanned, but the product lookup failed - fill in the details.");
+  }
+});
+
+$("#btn-date-photo").addEventListener("click", () => $("#input-date-photo").click());
+
+$("#input-date-photo").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+
+  const thumb = $("#date-photo-thumb");
+  thumb.src = URL.createObjectURL(file);
+  thumb.classList.remove("hidden");
+
+  const status = $("#date-extract-status");
+  status.textContent = "Reading date from photo…";
+  status.classList.remove("hidden");
+
+  const body = new FormData();
+  body.append("photo", file);
+  try {
+    const res = await fetch("api/extract-date", { method: "POST", body });
+    const data = await res.json();
+    if (data.date) {
+      $("#f-expiry").value = data.date;
+      status.textContent = `Found: ${data.date} (double-check and correct if needed)`;
+    } else {
+      status.textContent = `Couldn't read a date (${data.raw || "no reply"}) - enter it manually below.`;
+    }
+  } catch (err) {
+    status.textContent = "Date extraction failed - enter it manually below.";
+  }
+});
+
+reviewForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const saveBtn = $("#btn-review-save");
+  saveBtn.disabled = true;
+  const body = new FormData(reviewForm);
+  body.append("barcode", reviewForm.dataset.barcode || "");
+  body.append("source", reviewForm.dataset.barcode ? "barcode" : "manual");
+  try {
+    const res = await fetch("api/items", { method: "POST", body });
+    if (!res.ok) {
+      const err = await res.json();
+      toast(err.error || "Could not save that item.");
+      return;
+    }
+    toast("Added to pantry");
+    resetScan();
+  } catch (err) {
+    toast("Could not save that item - check your connection.");
+  } finally {
+    saveBtn.disabled = false;
+  }
+});
+
+// ── Pantry list ──────────────────────────────────────────────────────────
+const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Expiring soon", ok: "OK", unknown: "No date set" };
+const BUCKET_ORDER = ["expired", "expiring_soon", "ok", "unknown"];
+
+function humanDays(days) {
+  if (days === null || days === undefined) return "";
+  if (days < 0) return `${Math.abs(days)} day(s) ago`;
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  return `in ${days} days`;
+}
+
+function itemRowHtml(item) {
+  const meta = [item.brand, item.quantity, item.category].filter(Boolean).join(" · ");
+  const dateLine = item.expiry_date
+    ? `${item.expiry_date} (${humanDays(item.days_left)})`
+    : "No use-by date set";
+  return `
+    <div class="item-row" data-id="${item.id}">
+      <div class="item-main">
+        <div class="item-name">${escapeHtml(item.name)}</div>
+        <div class="item-meta">${escapeHtml(meta)}</div>
+        <div class="item-meta">${escapeHtml(dateLine)}</div>
+        <div class="item-actions">
+          <button class="ghost btn-edit" type="button">Edit</button>
+          <button class="ghost btn-consume" type="button">Consumed</button>
+          <button class="danger btn-delete" type="button">Delete</button>
+        </div>
+        <div class="edit-form hidden"></div>
+      </div>
+      <span class="badge ${item.bucket}">${BUCKET_LABELS[item.bucket]}</span>
+    </div>`;
+}
+
+function editFormHtml(item) {
+  return `
+    <label>Product name</label>
+    <input type="text" class="e-name" value="${escapeAttr(item.name)}">
+    <div class="row">
+      <div><label>Brand</label><input type="text" class="e-brand" value="${escapeAttr(item.brand || "")}"></div>
+      <div><label>Quantity</label><input type="text" class="e-quantity" value="${escapeAttr(item.quantity || "")}"></div>
+    </div>
+    <label>Category</label>
+    <input type="text" class="e-category" value="${escapeAttr(item.category || "")}">
+    <label>Use-by date</label>
+    <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
+    <label>Notes</label>
+    <textarea class="e-notes">${escapeHtml(item.notes || "")}</textarea>
+    <div class="row" style="margin-top:10px">
+      <button type="button" class="ghost e-cancel">Cancel</button>
+      <button type="button" class="primary e-save">Save</button>
+    </div>`;
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+}
+function escapeAttr(s) {
+  return escapeHtml(s).replace(/"/g, "&quot;");
+}
+
+let pantryCache = [];
+
+async function loadPantry() {
+  const list = $("#pantry-list");
+  list.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const res = await fetch("api/items");
+    const data = await res.json();
+    pantryCache = data.items || [];
+  } catch (err) {
+    list.innerHTML = '<p class="muted">Could not load your pantry.</p>';
+    return;
+  }
+  renderPantry();
+}
+
+function renderPantry() {
+  const list = $("#pantry-list");
+  if (pantryCache.length === 0) {
+    list.innerHTML = '<div class="empty-state">Nothing tracked yet - scan something to get started.</div>';
+    return;
+  }
+  let html = "";
+  for (const bucket of BUCKET_ORDER) {
+    const items = pantryCache.filter((i) => i.bucket === bucket);
+    if (items.length === 0) continue;
+    html += `<div class="section-title">${BUCKET_LABELS[bucket]} (${items.length})</div><div class="card">`;
+    html += items.map(itemRowHtml).join("");
+    html += "</div>";
+  }
+  list.innerHTML = html;
+
+  $$(".btn-edit").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      const row = btn.closest(".item-row");
+      const id = Number(row.dataset.id);
+      const item = pantryCache.find((i) => i.id === id);
+      const editEl = row.querySelector(".edit-form");
+      editEl.innerHTML = editFormHtml(item);
+      editEl.classList.remove("hidden");
+      editEl.querySelector(".e-cancel").addEventListener("click", () => editEl.classList.add("hidden"));
+      editEl.querySelector(".e-save").addEventListener("click", async () => {
+        const body = new FormData();
+        body.append("name", editEl.querySelector(".e-name").value);
+        body.append("brand", editEl.querySelector(".e-brand").value);
+        body.append("quantity", editEl.querySelector(".e-quantity").value);
+        body.append("category", editEl.querySelector(".e-category").value);
+        body.append("expiry_date", editEl.querySelector(".e-expiry").value);
+        body.append("notes", editEl.querySelector(".e-notes").value);
+        const res = await fetch(`api/items/${id}`, { method: "POST", body });
+        if (res.ok) {
+          toast("Saved");
+          loadPantry();
+        } else {
+          toast("Could not save changes");
+        }
+      });
+    })
+  );
+
+  $$(".btn-consume").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.closest(".item-row").dataset.id);
+      await fetch(`api/items/${id}/consume`, { method: "POST" });
+      toast("Marked as consumed");
+      loadPantry();
+    })
+  );
+
+  $$(".btn-delete").forEach((btn) =>
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.closest(".item-row").dataset.id);
+      if (!confirm("Delete this item? This can't be undone.")) return;
+      await fetch(`api/items/${id}/delete`, { method: "POST" });
+      toast("Deleted");
+      loadPantry();
+    })
+  );
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const res = await fetch("api/settings");
+  const data = await res.json();
+  $("#s-notify-service").value = data.notify_service || "";
+  $("#s-days-before").value = data.notify_days_before;
+  $("#s-repeat-hours").value = data.notify_repeat_hours;
+  $("#s-check-interval").value = data.check_interval_hours;
+  $("#status-vision").textContent = data.vision_configured
+    ? "✅ Use-by photo extraction is configured."
+    : "⚠️ Use-by photo extraction is not configured - set vision_api_base in the add-on Configuration tab.";
+  $("#status-ha").textContent = data.ha_sync_configured
+    ? "✅ Synced to Home Assistant as sensor.pantry_tracker_*."
+    : "⚠️ Not synced to Home Assistant (homeassistant_api permission missing - restart the add-on after upgrading).";
+  $("#status-last-check").textContent = data.last_check_summary
+    ? `Last check: ${data.last_check_summary} (${data.last_check_at || ""})`
+    : "No check has run yet.";
+}
+
+$("#settings-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = new FormData(e.target);
+  const res = await fetch("api/settings", { method: "POST", body });
+  if (res.ok) {
+    toast("Settings saved");
+    loadSettings();
+  } else {
+    toast("Could not save settings");
+  }
+});
+
+$("#btn-check-now").addEventListener("click", async () => {
+  $("#btn-check-now").disabled = true;
+  try {
+    await fetch("api/check-now", { method: "POST" });
+    toast("Check complete");
+  } finally {
+    $("#btn-check-now").disabled = false;
+    loadSettings();
+  }
+});
+</script>
+</body>
+</html>
