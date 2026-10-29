@@ -8,13 +8,19 @@ from a phone-first ingress panel.
 
 ## How it works
 
-1. **Scan** a barcode with your phone's camera. The photo is sent to the
-   add-on, decoded there (via zbar), and the resulting barcode is looked up
-   against [Open Food Facts](https://world.openfoodfacts.org) - a free,
-   keyless, crowd-sourced product database - to pre-fill the product's
-   name, brand, quantity and category.
-2. Optionally take a **photo of the use-by/best-before date**. It's sent to
-   a vision-capable model you run yourself (e.g.
+1. **Scan** a barcode with a live, full-screen camera view that scans
+   automatically as you point it at the barcode (via the browser's
+   `BarcodeDetector` API - works out of the box on Android Chrome, no app
+   permissions dance). The decoded barcode is looked up against
+   [Open Food Facts](https://world.openfoodfacts.org) - a free, keyless,
+   crowd-sourced product database - to pre-fill the product's name, brand,
+   quantity and category. On a browser without live camera support, it
+   falls back to the phone's own photo-capture UI and decodes the barcode
+   (via zbar) on the add-on instead.
+2. Optionally open the same live camera view to **photograph the use-by/
+   best-before date** - this one has a shutter button, since reading a date
+   needs a deliberate "now" moment rather than auto-detection. The photo is
+   sent to a vision-capable model you run yourself (e.g.
    [Open WebUI](https://openwebui.com)/Ollama hosting `qwen2.5vl`), which
    reads the printed date back for you to confirm or correct - no photo
    ever leaves your own network.

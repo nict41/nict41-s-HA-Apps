@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0
+
+- Scanning a barcode and photographing a use-by date now open a live,
+  full-screen camera view in the app itself, instead of handing off to the
+  phone's own photo-capture UI:
+  - **Scan Barcode** opens a live viewfinder that scans frames automatically
+    (via the browser's `BarcodeDetector` API - no library, works out of the
+    box on Android Chrome) and jumps straight to the product lookup the
+    instant a barcode decodes, no shutter tap needed.
+  - **Photo of use-by date** opens the same live view with a **Capture**
+    shutter button, since reading a date needs a deliberate "now" moment
+    rather than auto-detection.
+  - Both fall back to the OS photo-capture file picker on a browser without
+    camera support (or if camera permission is denied), so nothing is lost
+    on unsupported devices.
+
 ## 0.1.1
 
 - Fixed the app failing to start on a fresh install
