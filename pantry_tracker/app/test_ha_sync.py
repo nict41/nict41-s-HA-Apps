@@ -59,7 +59,7 @@ def test_sync_deletes_stale_entities(monkeypatch):
     ha_sync.sync([second_item])
 
     deletes = [c[1] for c in calls if c[0] == "DELETE"]
-    assert deletes == [ha_sync.entity_id_for(first_item)]
+    assert deletes == [f"/states/{ha_sync.entity_id_for(first_item)}"]
 
 
 def test_notify_if_due_requires_configured_service():
