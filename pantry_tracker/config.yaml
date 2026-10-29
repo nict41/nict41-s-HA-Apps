@@ -1,0 +1,35 @@
+name: "Pantry Tracker"
+version: "0.1.0"
+slug: "pantry_tracker"
+description: "Scan grocery barcodes to track your pantry, read use-by dates from a photo, and get notified before food expires"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pantry_tracker"
+arch:
+  - aarch64
+  - amd64
+init: false
+homeassistant_api: true
+startup: services
+ingress: true
+ingress_port: 8000
+panel_icon: mdi:barcode-scan
+panel_title: "Pantry Tracker"
+ports:
+  8000/tcp: null
+ports_description:
+  8000/tcp: "Pantry Tracker UI (optional direct access, e.g. for a phone home-screen shortcut)"
+options:
+  notify_service: ""
+  notify_days_before: 3
+  notify_repeat_hours: 24
+  check_interval_hours: 12
+  vision_api_base: ""
+  vision_api_key: ""
+  vision_model: "qwen2.5vl:3b"
+schema:
+  notify_service: str
+  notify_days_before: int(0,30)
+  notify_repeat_hours: int(1,168)
+  check_interval_hours: int(1,24)
+  vision_api_base: url?
+  vision_api_key: password?
+  vision_model: str

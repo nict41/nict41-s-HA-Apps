@@ -88,6 +88,15 @@ Offline Wikipedia and other ZIM archives: browse the Kiwix catalog, download arc
 
 Watches the NAS1 external drive's USB port in sysfs and publishes an MQTT binary_sensor that flags when the drive's flaky USB data link drops, so drops and recoveries are visible and notifiable.
 
+### [Pantry Tracker](./pantry_tracker)
+
+![Pantry Tracker logo](pantry_tracker/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Scan grocery barcodes to track your pantry, read use-by dates from a photo with a self-hosted vision model, and get notified before food expires.
+
 ### [Parcel Tracker](./parcel_tracker)
 
 ![Parcel Tracker logo](parcel_tracker/logo.png)

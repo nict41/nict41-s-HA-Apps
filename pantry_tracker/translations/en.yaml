@@ -1,0 +1,31 @@
+configuration:
+  notify_service:
+    name: Notify service
+    description: >-
+      Home Assistant notify service to alert through, e.g.
+      notify.mobile_app_your_phone. Leave blank to disable notifications
+      entirely (items are still tracked and shown in the app either way).
+  notify_days_before:
+    name: Warn this many days before
+    description: How many days before an item's use-by date counts as "expiring soon".
+  notify_repeat_hours:
+    name: Repeat reminder every (hours)
+    description: >-
+      How often to resend a reminder for an item that's still expiring soon
+      or expired and hasn't been dealt with yet.
+  check_interval_hours:
+    name: Check interval (hours)
+    description: How often to re-check every item's urgency and send any due notifications.
+  vision_api_base:
+    name: Vision model API base URL
+    description: >-
+      Base URL of an OpenAI-compatible chat completions endpoint (e.g. Open
+      WebUI or Ollama) hosting a vision-capable model, used to read use-by
+      dates from photos. Leave blank to disable photo date extraction - you
+      can still enter dates by hand.
+  vision_api_key:
+    name: Vision model API key
+    description: Optional API key/bearer token for the vision model endpoint above.
+  vision_model:
+    name: Vision model name
+    description: The model to use for reading use-by dates from photos, e.g. qwen2.5vl:3b.
