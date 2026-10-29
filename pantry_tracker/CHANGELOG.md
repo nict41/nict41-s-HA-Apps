@@ -1,6 +1,30 @@
 # Changelog
 
-## 0.2.0
+## 0.3.0
+
+- Live camera scanning now correctly detects when it can't actually work:
+  `getUserMedia` (needed for the live barcode viewfinder) requires a
+  "secure context" (HTTPS, or localhost) - on a Home Assistant instance
+  reached over plain `http://`, browsers refuse it outright, in every
+  browser and app, not a bug this app could route around. The Scan tab now
+  checks this up front instead of attempting it and failing, and shows a
+  short note explaining what's going on - plus, since the Home Assistant
+  app's own in-app browser has also been seen not to honour a file input's
+  "open camera directly" hint (falling back to a generic photo picker
+  instead), a link to open the app directly in your phone's own browser,
+  where photo capture opens the camera properly even without HTTPS.
+- Fixed the live camera overlay not being able to open at all from the
+  Pantry tab (e.g. for the new "Rescan use-by date" below) - it was nested
+  inside the Scan tab's own markup, which is hidden while another tab is
+  active, so a camera opened from elsewhere rendered nothing.
+- Dates are now shown as "1 July 2027" instead of the raw "2027-01-01"
+  everywhere the app displays one as text (the pantry list, and the
+  use-by date extraction result) - storage and the date-picker field
+  itself are unaffected.
+- Editing a pantry item can now **rescan its use-by date** - a new button
+  on the edit form opens the same live camera/photo capture used when
+  first adding an item, instead of only allowing the date to be typed or
+  picked by hand.
 
 - Scanning a barcode and photographing a use-by date now open a live,
   full-screen camera view in the app itself, instead of handing off to the
