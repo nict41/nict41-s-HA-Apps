@@ -116,10 +116,23 @@ async def scan(photo: UploadFile = File(...)):
 
 @app.get("/api/lookup/{code}")
 async def lookup_product(code: str):
+    cached = db.get_cached_barcode(code)
+    if cached:
+        return {
+            "found": True,
+            "cached": True,
+            "name": cached["name"],
+            "brand": cached["brand"],
+            "quantity": cached["quantity"],
+            "category": cached["category"],
+            "image_url": cached["image_url"],
+        }
+
     product = await run_in_threadpool(lookup.lookup_barcode, code)
     if not product:
         return {"found": False}
-    return {"found": True, **product}
+    db.cache_barcode(code, product)
+    return {"found": True, "cached": False, **product}
 
 
 @app.post("/api/extract-date")

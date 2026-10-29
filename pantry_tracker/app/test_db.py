@@ -82,6 +82,28 @@ def test_days_left_for():
     assert db.days_left_for("garbage") is None
 
 
+def test_get_cached_barcode_missing_returns_none():
+    assert db.get_cached_barcode("0000000000000") is None
+
+
+def test_cache_barcode_roundtrip():
+    product = {"name": "Beans", "brand": "Heinz", "quantity": "415g", "category": "Tinned", "image_url": "http://x/img.jpg"}
+    db.cache_barcode("9999999999999", product)
+    cached = db.get_cached_barcode("9999999999999")
+    assert cached["name"] == "Beans"
+    assert cached["brand"] == "Heinz"
+    assert cached["quantity"] == "415g"
+    assert cached["category"] == "Tinned"
+    assert cached["image_url"] == "http://x/img.jpg"
+    assert cached["cached_at"] is not None
+
+
+def test_cache_barcode_overwrites_on_recache():
+    db.cache_barcode("123", {"name": "Old Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    db.cache_barcode("123", {"name": "New Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    assert db.get_cached_barcode("123")["name"] == "New Name"
+
+
 def test_state_roundtrip():
     assert db.get_state("missing") is None
     assert db.get_state("missing", "fallback") == "fallback"

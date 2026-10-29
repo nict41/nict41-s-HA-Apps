@@ -505,6 +505,9 @@ async function handleScannedBarcode(code) {
       $("#f-brand").value = data.brand || "";
       $("#f-quantity").value = data.quantity || "";
       $("#f-category").value = data.category || "";
+      if (data.cached) {
+        $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
+      }
     } else {
       toast("Barcode scanned, but not found in Open Food Facts - fill in the details.");
     }
@@ -549,6 +552,11 @@ let cameraMode = null; // "barcode" | "date"
 let barcodeScanTimer = null;
 let barcodeScanBusy = false;
 let barcodeDetector = null;
+
+// The in-flight use-by date extraction request, if any - so "Add to
+// pantry" can wait for it instead of racing ahead and submitting before
+// the date has a chance to land in the form. See triggerDatePhotoExtraction.
+let pendingDatePhoto = null;
 
 function cameraSupported() {
   return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
@@ -668,7 +676,7 @@ $("#btn-camera-shutter").addEventListener("click", async () => {
   const video = $("#camera-video");
   const blob = await captureVideoFrame(video);
   closeCamera();
-  if (blob) await handleDatePhoto(blob);
+  if (blob) triggerDatePhotoExtraction(blob);
 });
 
 $("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
@@ -683,7 +691,7 @@ $("#input-barcode-photo").addEventListener("change", (e) => {
 $("#input-date-photo").addEventListener("change", (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (file) handleDatePhoto(file);
+  if (file) triggerDatePhotoExtraction(file);
 });
 
 // Release the camera the moment the tab/app isn't visible, rather than
@@ -691,6 +699,17 @@ $("#input-date-photo").addEventListener("change", (e) => {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) closeCamera();
 });
+
+// Kicks off date extraction and tracks it as the "pending" one, so the
+// review form's submit handler can wait for it rather than letting "Add to
+// pantry" save the item before the date has landed in the form.
+function triggerDatePhotoExtraction(file) {
+  const run = handleDatePhoto(file);
+  pendingDatePhoto = run;
+  run.finally(() => {
+    if (pendingDatePhoto === run) pendingDatePhoto = null;
+  });
+}
 
 async function handleDatePhoto(file) {
   const thumb = $("#date-photo-thumb");
@@ -720,7 +739,19 @@ async function handleDatePhoto(file) {
 reviewForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const saveBtn = $("#btn-review-save");
+  const originalLabel = saveBtn.textContent;
   saveBtn.disabled = true;
+
+  // Don't let "Add to pantry" race a still-running use-by date extraction -
+  // wait for it so the date it finds actually makes it into the saved item,
+  // instead of the item saving without it and the result landing on a form
+  // that's already gone.
+  if (pendingDatePhoto) {
+    saveBtn.textContent = "Reading use-by date…";
+    await pendingDatePhoto;
+    saveBtn.textContent = originalLabel;
+  }
+
   const body = new FormData(reviewForm);
   body.append("barcode", reviewForm.dataset.barcode || "");
   body.append("source", reviewForm.dataset.barcode ? "barcode" : "manual");

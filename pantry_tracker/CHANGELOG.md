@@ -15,6 +15,15 @@
   - Both fall back to the OS photo-capture file picker on a browser without
     camera support (or if camera permission is denied), so nothing is lost
     on unsupported devices.
+- Scanned barcodes are now cached (indefinitely - a product's name/brand
+  rarely changes) after their first successful Open Food Facts lookup, so
+  re-scanning the same item later (the common case - the same milk, the
+  same tins, week after week) is instant and makes no network request at
+  all.
+- Fixed "Add to pantry" being able to save an item before a still-running
+  use-by date photo extraction had finished, silently dropping the date it
+  would have found. The button now waits for extraction to finish (showing
+  "Reading use-by date…") before submitting.
 
 ## 0.1.1
 

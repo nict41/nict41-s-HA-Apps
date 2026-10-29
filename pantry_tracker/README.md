@@ -14,9 +14,11 @@ from a phone-first ingress panel.
    permissions dance). The decoded barcode is looked up against
    [Open Food Facts](https://world.openfoodfacts.org) - a free, keyless,
    crowd-sourced product database - to pre-fill the product's name, brand,
-   quantity and category. On a browser without live camera support, it
-   falls back to the phone's own photo-capture UI and decodes the barcode
-   (via zbar) on the add-on instead.
+   quantity and category - a barcode already scanned before is served
+   instantly from a local cache instead of hitting Open Food Facts again.
+   On a browser without live camera support, it falls back to the phone's
+   own photo-capture UI and decodes the barcode (via zbar) on the add-on
+   instead.
 2. Optionally open the same live camera view to **photograph the use-by/
    best-before date** - this one has a shutter button, since reading a date
    needs a deliberate "now" moment rather than auto-detection. The photo is

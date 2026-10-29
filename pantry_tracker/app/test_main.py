@@ -33,6 +33,40 @@ def test_lookup_product_found(monkeypatch):
     res = client.get("/api/lookup/123")
     assert res.json()["found"] is True
     assert res.json()["name"] == "Milk"
+    assert res.json()["cached"] is False
+
+
+def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        main.lookup,
+        "lookup_barcode",
+        lambda code: calls.append(code) or {"name": "Beans", "brand": "Heinz", "quantity": "415g", "category": "Tinned", "image_url": ""},
+    )
+
+    first = client.get("/api/lookup/9999")
+    assert first.json()["found"] is True
+    assert first.json()["cached"] is False
+    assert calls == ["9999"]
+
+    # A second scan of the same barcode must not call lookup_barcode again -
+    # prove the cache path by making a repeat network call fail loudly.
+    def _fail_if_called(code):
+        raise AssertionError("network hit on a cached barcode")
+
+    monkeypatch.setattr(main.lookup, "lookup_barcode", _fail_if_called)
+
+    second = client.get("/api/lookup/9999")
+    assert second.json() == {
+        "found": True,
+        "cached": True,
+        "name": "Beans",
+        "brand": "Heinz",
+        "quantity": "415g",
+        "category": "Tinned",
+        "image_url": "",
+    }
+    assert calls == ["9999"]
 
 
 def test_lookup_product_not_found(monkeypatch):
