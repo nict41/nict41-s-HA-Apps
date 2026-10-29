@@ -69,6 +69,25 @@ Open the app from the Home Assistant sidebar (or add it to your phone's
 home screen for an app-like shortcut) and use the **Scan** tab - it's
 built mobile-first, with big touch targets and native camera capture.
 
+### A note on live camera access
+
+The live, auto-scanning camera view needs a **secure context** - your
+Home Assistant instance reached over `https://` (Nabu Casa remote access,
+or a local reverse proxy/certificate), not plain `http://`. This is a
+browser platform rule (`getUserMedia`), not something this app can work
+around - over plain HTTP, live scanning is unavailable everywhere, not
+just here, and the app detects this and tells you rather than failing
+silently.
+
+Taking a photo (for either the barcode or the use-by date) doesn't need
+HTTPS and always works - but **the Home Assistant companion app's own
+built-in browser has been seen to open a generic photo picker instead of
+jumping straight to the camera**, even though a normal mobile browser
+handles the same page correctly. If that happens, the Scan tab shows a
+link to open the app directly in your phone's browser (its direct port,
+same network only) - the exact same app and data, just without that
+limitation.
+
 ## Using the app
 
 - **Scan** - tap "Scan Barcode" to open your camera, snap the barcode, and
@@ -79,9 +98,12 @@ built mobile-first, with big touch targets and native camera capture.
   is pre-filled into the date field but always stays editable, since OCR
   on packaging print is best-effort. Review everything and tap "Add to
   pantry".
-- **Pantry** - everything you're tracking, grouped by urgency. Each item
-  has **Edit** (correct the date, quantity, etc.), **Consumed** (remove it
-  from active tracking), and **Delete**.
+- **Pantry** - everything you're tracking, grouped by urgency, dates shown
+  as e.g. "1 July 2027". Each item has **Edit** (correct the name,
+  quantity, category, or notes; pick a new date by hand, or tap **Rescan
+  use-by date** to read it from a fresh photo the same way as when first
+  adding the item), **Consumed** (remove it from active tracking), and
+  **Delete**.
 - **Settings** - the notification knobs above, a **Check now** button to
   run a check immediately instead of waiting for the next scheduled one,
   status lines showing whether the vision model and Home Assistant sync

@@ -356,19 +356,7 @@
       </div>
     </form>
 
-    <input type="file" id="input-barcode-photo" accept="image/*" capture="environment">
-    <input type="file" id="input-date-photo" accept="image/*" capture="environment">
-
-    <div id="camera-overlay" class="scanner-overlay hidden">
-      <video id="camera-video" class="scanner-video" playsinline autoplay muted></video>
-      <div class="scanner-frame"></div>
-      <p id="camera-hint" class="scanner-hint"></p>
-      <div class="scanner-controls">
-        <button type="button" id="btn-camera-shutter" class="primary hidden">📸 Capture</button>
-        <button type="button" id="btn-camera-fallback" class="ghost"></button>
-        <button type="button" id="btn-camera-cancel" class="ghost">Cancel</button>
-      </div>
-    </div>
+    <p class="muted" id="camera-hint-note" style="font-size:12px;text-align:center"></p>
   </section>
 
   <!-- ───────────────────────── Pantry ───────────────────────── -->
@@ -424,6 +412,23 @@
   </section>
 
 </main>
+
+<!-- Top-level (not inside any tab's .view section) so they work regardless
+     of which tab is active - e.g. rescanning a use-by date from an item
+     being edited on the Pantry tab. -->
+<input type="file" id="input-barcode-photo" accept="image/*" capture="environment">
+<input type="file" id="input-date-photo" accept="image/*" capture="environment">
+
+<div id="camera-overlay" class="scanner-overlay hidden">
+  <video id="camera-video" class="scanner-video" playsinline autoplay muted></video>
+  <div class="scanner-frame"></div>
+  <p id="camera-hint" class="scanner-hint"></p>
+  <div class="scanner-controls">
+    <button type="button" id="btn-camera-shutter" class="primary hidden">📸 Capture</button>
+    <button type="button" id="btn-camera-fallback" class="ghost"></button>
+    <button type="button" id="btn-camera-cancel" class="ghost">Cancel</button>
+  </div>
+</div>
 
 <div class="toast" id="toast"></div>
 
@@ -559,7 +564,11 @@ let barcodeDetector = null;
 let pendingDatePhoto = null;
 
 function cameraSupported() {
-  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  // getUserMedia only works in a "secure context" (HTTPS, or localhost) -
+  // on a Home Assistant instance reached over plain http://, the browser
+  // refuses it outright, in every browser and app, not just here. Checking
+  // this up front avoids a doomed permission prompt and a confusing error.
+  return window.isSecureContext && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
 }
 function barcodeDetectorSupported() {
   return "BarcodeDetector" in window;
@@ -568,6 +577,22 @@ function barcodeDetectorSupported() {
 function openFallbackPicker(mode) {
   $(mode === "barcode" ? "#input-barcode-photo" : "#input-date-photo").click();
 }
+
+// Where to open this app directly (bypassing the Home Assistant app's own
+// embedded webview, which - independently of the HTTPS issue above - has
+// been seen not to honour a file input's `capture` hint, opening a generic
+// photo picker instead of the camera). Only reachable on the same network
+// as this Home Assistant instance.
+const directAppUrl = `${location.protocol}//${location.hostname}:8000/`;
+
+(function setupCameraHintNote() {
+  const note = $("#camera-hint-note");
+  if (!note) return;
+  const link = `<a href="${directAppUrl}" target="_blank" rel="noopener">your phone's browser</a>`;
+  note.innerHTML = window.isSecureContext
+    ? `Camera not opening properly here? Try this app in ${link} instead of the Home Assistant app.`
+    : `Live barcode scanning needs HTTPS, which this Home Assistant isn't using, so it's off for now - photo capture still works, and opens the camera more reliably in ${link} than in the Home Assistant app.`;
+})();
 
 async function openCamera(mode) {
   const overlay = $("#camera-overlay");
@@ -658,12 +683,27 @@ $("#btn-scan-start").addEventListener("click", () => {
   }
 });
 
-$("#btn-date-photo").addEventListener("click", () => {
+// Which form's fields a use-by date photo (from either the add flow's
+// "Photo of use-by date" button, or an existing item's "Rescan use-by
+// date" button) should update - set by openDatePhotoCapture just before
+// the camera/file-picker opens, read by handleDatePhoto once a photo is in.
+let datePhotoTarget = null;
+
+function openDatePhotoCapture(target) {
+  datePhotoTarget = target;
   if (cameraSupported()) {
     openCamera("date");
   } else {
     openFallbackPicker("date");
   }
+}
+
+$("#btn-date-photo").addEventListener("click", () => {
+  openDatePhotoCapture({
+    expiryInput: $("#f-expiry"),
+    thumbEl: $("#date-photo-thumb"),
+    statusEl: $("#date-extract-status"),
+  });
 });
 
 $("#btn-camera-cancel").addEventListener("click", closeCamera);
@@ -712,13 +752,23 @@ function triggerDatePhotoExtraction(file) {
 }
 
 async function handleDatePhoto(file) {
-  const thumb = $("#date-photo-thumb");
-  thumb.src = URL.createObjectURL(file);
-  thumb.classList.remove("hidden");
+  // Falls back to the add-flow's own fields if somehow called with no
+  // target set (shouldn't normally happen - openDatePhotoCapture always
+  // sets one first).
+  const target = datePhotoTarget || {
+    expiryInput: $("#f-expiry"),
+    thumbEl: $("#date-photo-thumb"),
+    statusEl: $("#date-extract-status"),
+  };
 
-  const status = $("#date-extract-status");
-  status.textContent = "Reading date from photo…";
-  status.classList.remove("hidden");
+  if (target.thumbEl) {
+    target.thumbEl.src = URL.createObjectURL(file);
+    target.thumbEl.classList.remove("hidden");
+  }
+  if (target.statusEl) {
+    target.statusEl.textContent = "Reading date from photo…";
+    target.statusEl.classList.remove("hidden");
+  }
 
   const body = new FormData();
   body.append("photo", file, "use-by.jpg");
@@ -726,13 +776,15 @@ async function handleDatePhoto(file) {
     const res = await fetch("api/extract-date", { method: "POST", body });
     const data = await res.json();
     if (data.date) {
-      $("#f-expiry").value = data.date;
-      status.textContent = `Found: ${data.date} (double-check and correct if needed)`;
-    } else {
-      status.textContent = `Couldn't read a date (${data.raw || "no reply"}) - enter it manually below.`;
+      if (target.expiryInput) target.expiryInput.value = data.date;
+      if (target.statusEl) {
+        target.statusEl.textContent = `Found: ${formatDisplayDate(data.date)} (double-check and correct if needed)`;
+      }
+    } else if (target.statusEl) {
+      target.statusEl.textContent = `Couldn't read a date (${data.raw || "no reply"}) - enter it manually below.`;
     }
   } catch (err) {
-    status.textContent = "Date extraction failed - enter it manually below.";
+    if (target.statusEl) target.statusEl.textContent = "Date extraction failed - enter it manually below.";
   }
 }
 
@@ -783,10 +835,21 @@ function humanDays(days) {
   return `in ${days} days`;
 }
 
+// "2027-07-01" -> "1 July 2027". The stored/wire format stays ISO (sorting,
+// <input type=date> values, and the API all need that) - this is purely
+// for text the app renders for a human to read.
+function formatDisplayDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+}
+
 function itemRowHtml(item) {
   const meta = [item.brand, item.quantity, item.category].filter(Boolean).join(" · ");
   const dateLine = item.expiry_date
-    ? `${item.expiry_date} (${humanDays(item.days_left)})`
+    ? `${formatDisplayDate(item.expiry_date)} (${humanDays(item.days_left)})`
     : "No use-by date set";
   return `
     <div class="item-row" data-id="${item.id}">
@@ -815,6 +878,13 @@ function editFormHtml(item) {
     </div>
     <label>Category</label>
     <input type="text" class="e-category" value="${escapeAttr(item.category || "")}">
+
+    <div class="photo-step">
+      <img class="photo-thumb e-date-thumb hidden" alt="">
+      <button type="button" class="ghost e-rescan-date" style="width:auto;flex:1">📅 Rescan use-by date</button>
+    </div>
+    <div class="muted e-date-status hidden"></div>
+
     <label>Use-by date</label>
     <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
     <label>Notes</label>
@@ -873,7 +943,28 @@ function renderPantry() {
       editEl.innerHTML = editFormHtml(item);
       editEl.classList.remove("hidden");
       editEl.querySelector(".e-cancel").addEventListener("click", () => editEl.classList.add("hidden"));
-      editEl.querySelector(".e-save").addEventListener("click", async () => {
+
+      editEl.querySelector(".e-rescan-date").addEventListener("click", () => {
+        openDatePhotoCapture({
+          expiryInput: editEl.querySelector(".e-expiry"),
+          thumbEl: editEl.querySelector(".e-date-thumb"),
+          statusEl: editEl.querySelector(".e-date-status"),
+        });
+      });
+
+      const saveBtn = editEl.querySelector(".e-save");
+      saveBtn.addEventListener("click", async () => {
+        const originalLabel = saveBtn.textContent;
+        saveBtn.disabled = true;
+
+        // Same race as the add-flow: don't let Save beat a still-running
+        // rescan to the punch - wait for it so its date actually lands.
+        if (pendingDatePhoto) {
+          saveBtn.textContent = "Reading use-by date…";
+          await pendingDatePhoto;
+          saveBtn.textContent = originalLabel;
+        }
+
         const body = new FormData();
         body.append("name", editEl.querySelector(".e-name").value);
         body.append("brand", editEl.querySelector(".e-brand").value);
@@ -881,12 +972,16 @@ function renderPantry() {
         body.append("category", editEl.querySelector(".e-category").value);
         body.append("expiry_date", editEl.querySelector(".e-expiry").value);
         body.append("notes", editEl.querySelector(".e-notes").value);
-        const res = await fetch(`api/items/${id}`, { method: "POST", body });
-        if (res.ok) {
-          toast("Saved");
-          loadPantry();
-        } else {
-          toast("Could not save changes");
+        try {
+          const res = await fetch(`api/items/${id}`, { method: "POST", body });
+          if (res.ok) {
+            toast("Saved");
+            loadPantry();
+          } else {
+            toast("Could not save changes");
+          }
+        } finally {
+          saveBtn.disabled = false;
         }
       });
     })
