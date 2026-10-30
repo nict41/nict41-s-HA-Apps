@@ -165,6 +165,10 @@
     width: 44px; height: 44px; border-radius: 10px; object-fit: cover;
     border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
   }
+  .product-thumb {
+    width: 64px; height: 64px; border-radius: 10px; object-fit: contain;
+    border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
+  }
   a:has(> .photo-thumb) { display: inline-flex; }
 
   .toast {
@@ -313,10 +317,12 @@
     </div>
 
     <form id="review-form" class="card hidden">
+      <input type="hidden" id="f-image-url" name="image_url">
       <div id="review-not-found" class="hidden">
         <p class="muted" style="margin-top:0">No barcode recognised in that photo. You can try again, or fill the details in by hand.</p>
       </div>
       <div id="review-barcode-line" class="muted hidden" style="margin-top:0"></div>
+      <img id="review-product-image" class="product-thumb hidden" alt="" loading="lazy" style="margin:8px 0">
 
       <label for="f-name">Product name</label>
       <input type="text" id="f-name" name="name" required>
@@ -375,9 +381,8 @@
     <form id="settings-form" class="card">
       <div class="section-title" style="margin-top:0">Notifications</div>
 
-      <label for="s-notify-service">Home Assistant notify service</label>
-      <input type="text" id="s-notify-service" name="notify_service" placeholder="notify.mobile_app_your_phone">
-      <p class="muted">Leave blank to disable notifications. Find the exact service name under <strong>Developer Tools → Actions</strong>.</p>
+      <p class="muted" id="status-notify-service" style="margin-top:0"></p>
+      <p class="muted">Set under the add-on's own <strong>Configuration</strong> tab (option <code>notify_service</code>), not here - restart the add-on after changing it. Find the exact service name under <strong>Developer Tools → Actions</strong>. Leave it blank there to disable notifications.</p>
 
       <div class="row">
         <div>
@@ -480,6 +485,8 @@ function resetScan() {
   reviewForm.reset();
   $("#review-not-found").classList.add("hidden");
   $("#review-barcode-line").classList.add("hidden");
+  $("#review-product-image").classList.add("hidden");
+  $("#review-product-image").src = "";
   $("#date-photo-thumb").classList.add("hidden");
   $("#date-extract-status").classList.add("hidden");
   reviewForm.dataset.barcode = "";
@@ -517,6 +524,11 @@ async function handleScannedBarcode(code) {
       $("#f-brand").value = data.brand || "";
       $("#f-quantity").value = data.quantity || "";
       $("#f-category").value = data.category || "";
+      $("#f-image-url").value = data.image_url || "";
+      if (data.image_url) {
+        $("#review-product-image").src = data.image_url;
+        $("#review-product-image").classList.remove("hidden");
+      }
       if (data.cached) {
         $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
       }
@@ -1011,8 +1023,12 @@ function itemRowHtml(item) {
   const photoLink = item.has_date_photo
     ? `<div class="item-meta"><a href="api/items/${item.id}/date-photo" target="_blank" rel="noopener">View use-by photo</a></div>`
     : "";
+  const productImg = item.image_url
+    ? `<img class="product-thumb" src="${escapeAttr(item.image_url)}" alt="" loading="lazy">`
+    : "";
   return `
     <div class="item-row" data-id="${item.id}">
+      ${productImg}
       <div class="item-main">
         <div class="item-name">${escapeHtml(item.name)}</div>
         <div class="item-meta">${escapeHtml(meta)}</div>
@@ -1260,7 +1276,9 @@ function renderPantry() {
 async function loadSettings() {
   const res = await fetch("api/settings");
   const data = await res.json();
-  $("#s-notify-service").value = data.notify_service || "";
+  $("#status-notify-service").textContent = data.notify_service
+    ? `✅ Notifying ${data.notify_service}.`
+    : "⚠️ No notify service configured - notifications are off.";
   $("#s-days-before").value = data.notify_days_before;
   $("#s-repeat-hours").value = data.notify_repeat_hours;
   $("#s-check-interval").value = data.check_interval_hours;
