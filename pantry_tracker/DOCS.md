@@ -25,8 +25,10 @@ from a phone-first ingress panel.
    is also there as a manual override). The photo is cropped to just the
    framed area and sent to a vision-capable model you run yourself (e.g.
    [Open WebUI](https://openwebui.com)/Ollama hosting `qwen2.5vl`), which
-   reads the printed date back for you to confirm or correct - no photo
-   ever leaves your own network.
+   reads the printed date back for you - the date is read **in the
+   background**, so capturing it never stops you moving straight on to
+   scan the next item, and the photo itself is kept so you can open it
+   later and compare it against the date that was read from it.
 3. Review and **add it to your pantry**. Everything is editable before
    saving, and a barcode that isn't found (or isn't scannable) just falls
    back to manual entry - nothing blocks you from tracking an item.
@@ -95,15 +97,21 @@ limitation.
   the product details are looked up automatically. If a barcode can't be
   read or isn't found, you can still fill the form in by hand, or tap
   "Enter manually instead" to skip scanning entirely. Tap "Photo of use-by
-  date" to read the expiry date from a photo of the packaging - the result
-  is pre-filled into the date field but always stays editable, since OCR
-  on packaging print is best-effort. Review everything and tap "Add to
-  pantry".
+  date" to capture the expiry date from a photo of the packaging, then tap
+  "Add to pantry" right away - the date is read in the background and
+  fills in on its own once it's done (check the Pantry tab), since OCR on
+  packaging print is best-effort and isn't worth waiting around for. A
+  date typed into the field by hand always wins over a background read
+  that disagrees with it.
 - **Pantry** - everything you're tracking, grouped by urgency, dates shown
-  as e.g. "1 July 2027". Each item has **Edit** (correct the name,
-  quantity, category, or notes; pick a new date by hand, or tap **Rescan
-  use-by date** to read it from a fresh photo the same way as when first
-  adding the item), **Consumed** (remove it from active tracking), and
+  as e.g. "1 July 2027", with a **Reading use-by date…** spinner shown
+  while a background read is still in progress for that item. Each item
+  with a stored photo has a **View use-by photo** link, so you can compare
+  it against the date that was read from it. Each item has **Edit**
+  (correct the name, quantity, category, or notes; pick a new date by
+  hand, or tap **Rescan use-by date** to read it from a fresh photo the
+  same way as when first adding the item - this also runs in the
+  background), **Consumed** (remove it from active tracking), and
   **Delete**.
 - **Settings** - the notification knobs above, a **Check now** button to
   run a check immediately instead of waiting for the next scheduled one,
@@ -153,9 +161,12 @@ check (governed by `check_interval_hours`) re-creates them.
 
 ## Storage
 
-All pantry data is stored locally in `/data/pantry.db` (SQLite). Nothing
-is sent anywhere except: a barcode digit string to Open Food Facts (to look
-up the product), and a use-by-date photo to the vision model endpoint you
+All pantry data is stored locally in `/data/pantry.db` (SQLite), and each
+item's use-by date photo (if any) in `/data/photos/` - kept so you can
+re-open it later to compare against the date that was read from it, and
+removed automatically if the item itself is deleted. Nothing is sent
+anywhere except: a barcode digit string to Open Food Facts (to look up the
+product), and a use-by-date photo to the vision model endpoint you
 configure yourself.
 
 ## Installation

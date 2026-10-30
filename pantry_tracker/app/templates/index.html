@@ -149,6 +149,7 @@
   .item-main { flex: 1; min-width: 0; }
   .item-name { font-weight: 600; }
   .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .item-meta a { color: var(--accent); text-decoration: underline; }
   .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .item-actions button { width: auto; min-height: 36px; padding: 6px 10px; font-size: 13px; }
 
@@ -164,6 +165,7 @@
     width: 44px; height: 44px; border-radius: 10px; object-fit: cover;
     border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
   }
+  a:has(> .photo-thumb) { display: inline-flex; }
 
   .toast {
     position: fixed;
@@ -484,6 +486,7 @@ function resetScan() {
   reviewForm.classList.add("hidden");
   scanBusy.classList.add("hidden");
   scanIdle.classList.remove("hidden");
+  pendingAddDatePhoto = null;
 }
 
 function openReviewForm({ barcode, notFound }) {
@@ -584,10 +587,14 @@ const DATE_MAX_BRIGHTNESS = 235;
 const STABILITY_SAMPLE_W = 48;
 const STABILITY_SAMPLE_H = 32;
 
-// The in-flight use-by date extraction request, if any - so "Add to
-// pantry" can wait for it instead of racing ahead and submitting before
-// the date has a chance to land in the form. See triggerDatePhotoExtraction.
-let pendingDatePhoto = null;
+// A use-by date photo captured before its item exists yet (the normal
+// case when adding something new - the item is only created once "Add to
+// pantry" is tapped). It's attached to that creation request instead of
+// being extracted up front, so capturing the photo never blocks moving on
+// to scan the next item - extraction itself always runs in the
+// background, server-side, once the item (and so a place to put the
+// result) exists. See onDatePhotoCaptured.
+let pendingAddDatePhoto = null;
 
 function cameraSupported() {
   // getUserMedia only works in a "secure context" (HTTPS, or localhost) -
@@ -769,7 +776,7 @@ async function openCamera(mode) {
       (async () => {
         const blob = await captureVideoFrame(video, cropRect);
         closeCamera();
-        if (blob) triggerDatePhotoExtraction(blob);
+        if (blob) onDatePhotoCaptured(blob);
       })();
     }, DATE_SAMPLE_INTERVAL_MS);
   }
@@ -821,10 +828,13 @@ $("#btn-scan-start").addEventListener("click", () => {
   }
 });
 
-// Which form's fields a use-by date photo (from either the add flow's
-// "Photo of use-by date" button, or an existing item's "Rescan use-by
-// date" button) should update - set by openDatePhotoCapture just before
-// the camera/file-picker opens, read by handleDatePhoto once a photo is in.
+// Which form a captured use-by date photo belongs to (from either the add
+// flow's "Photo of use-by date" button, or an existing item's "Rescan
+// use-by date" button) - set by openDatePhotoCapture just before the
+// camera/file-picker opens, read by onDatePhotoCaptured once a photo is
+// in. `itemId` is only present for an existing item (edit/rescan); its
+// absence means "a brand new item, not created yet" - see
+// onDatePhotoCaptured for what that distinction controls.
 let datePhotoTarget = null;
 
 function openDatePhotoCapture(target) {
@@ -838,7 +848,6 @@ function openDatePhotoCapture(target) {
 
 $("#btn-date-photo").addEventListener("click", () => {
   openDatePhotoCapture({
-    expiryInput: $("#f-expiry"),
     thumbEl: $("#date-photo-thumb"),
     statusEl: $("#date-extract-status"),
   });
@@ -854,7 +863,7 @@ $("#btn-camera-shutter").addEventListener("click", async () => {
   const video = $("#camera-video");
   const blob = await captureVideoFrame(video, frameCropRect(video));
   closeCamera();
-  if (blob) triggerDatePhotoExtraction(blob);
+  if (blob) onDatePhotoCaptured(blob);
 });
 
 $("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
@@ -869,7 +878,7 @@ $("#input-barcode-photo").addEventListener("change", (e) => {
 $("#input-date-photo").addEventListener("change", (e) => {
   const file = e.target.files[0];
   e.target.value = "";
-  if (file) triggerDatePhotoExtraction(file);
+  if (file) onDatePhotoCaptured(file);
 });
 
 // Release the camera the moment the tab/app isn't visible, rather than
@@ -878,23 +887,17 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) closeCamera();
 });
 
-// Kicks off date extraction and tracks it as the "pending" one, so the
-// review form's submit handler can wait for it rather than letting "Add to
-// pantry" save the item before the date has landed in the form.
-function triggerDatePhotoExtraction(file) {
-  const run = handleDatePhoto(file);
-  pendingDatePhoto = run;
-  run.finally(() => {
-    if (pendingDatePhoto === run) pendingDatePhoto = null;
-  });
-}
-
-async function handleDatePhoto(file) {
-  // Falls back to the add-flow's own fields if somehow called with no
-  // target set (shouldn't normally happen - openDatePhotoCapture always
-  // sets one first).
+// Called once a use-by date photo has been captured (auto-capture, the
+// manual shutter, or the fallback file picker). Never blocks on the
+// vision model - extraction always happens in the background, server-side,
+// against an item that exists. For an item that already exists (editing /
+// "Rescan use-by date"), that's immediate: upload it now. For a brand new
+// item - not created yet, since that only happens when "Add to pantry" is
+// tapped - the photo is stashed and attached to that creation request
+// instead, so capturing it never stops the person moving on to scan the
+// next item straight away.
+function onDatePhotoCaptured(file) {
   const target = datePhotoTarget || {
-    expiryInput: $("#f-expiry"),
     thumbEl: $("#date-photo-thumb"),
     statusEl: $("#date-extract-status"),
   };
@@ -903,48 +906,62 @@ async function handleDatePhoto(file) {
     target.thumbEl.src = URL.createObjectURL(file);
     target.thumbEl.classList.remove("hidden");
   }
-  if (target.statusEl) {
-    target.statusEl.textContent = "Reading date from photo…";
-    target.statusEl.classList.remove("hidden");
-  }
 
+  if (target.itemId) {
+    uploadDatePhoto(target.itemId, file, target.statusEl);
+  } else {
+    pendingAddDatePhoto = file;
+    if (target.statusEl) {
+      target.statusEl.textContent = "Photo captured - the date will be read in the background once added.";
+      target.statusEl.classList.remove("hidden");
+    }
+  }
+}
+
+// Fire-and-forget from the caller's point of view - uploads the photo for
+// an item that already exists and lets the server's background task read
+// it whenever it's done, instead of waiting here.
+async function uploadDatePhoto(itemId, file, statusEl) {
+  if (statusEl) {
+    statusEl.textContent = "Uploaded - reading the date in the background…";
+    statusEl.classList.remove("hidden");
+  }
   const body = new FormData();
   body.append("photo", file, "use-by.jpg");
   try {
-    const res = await fetch("api/extract-date", { method: "POST", body });
-    const data = await res.json();
-    if (data.date) {
-      if (target.expiryInput) target.expiryInput.value = data.date;
-      if (target.statusEl) {
-        target.statusEl.textContent = `Found: ${formatDisplayDate(data.date)} (double-check and correct if needed)`;
-      }
-    } else if (target.statusEl) {
-      target.statusEl.textContent = `Couldn't read a date (${data.raw || "no reply"}) - enter it manually below.`;
-    }
+    await fetch(`api/items/${itemId}/date-photo`, { method: "POST", body });
+    if (statusEl) statusEl.textContent = "Reading the date in the background - check back in the Pantry tab.";
+    // Not a plain loadPantry(): this is normally called while this very
+    // item's edit panel is still open, and re-rendering the list would
+    // collapse it right under the person's thumb. ensurePantryPolling()
+    // makes sure the usual pending-poll loop is running (even if nothing
+    // in the currently-loaded pantryCache looks pending yet) so the
+    // moment the panel is closed, a fresh pending state shows up without
+    // needing a manual tab switch to notice it.
+    ensurePantryPolling();
+    // If that panel is still open right now, also watch this one item
+    // directly so its own fields (especially the date input) update the
+    // moment extraction finishes - otherwise tapping Save before then
+    // would submit the stale pre-rescan date and overwrite the fresh one.
+    const openEditEl = document.querySelector(`.item-row[data-id="${itemId}"] .edit-form`);
+    if (openEditEl && !openEditEl.classList.contains("hidden")) watchEditFormExtraction(itemId, openEditEl);
   } catch (err) {
-    if (target.statusEl) target.statusEl.textContent = "Date extraction failed - enter it manually below.";
+    if (statusEl) statusEl.textContent = "Could not upload that photo - try again.";
+    toast("Could not upload the use-by photo - try again.");
   }
 }
 
 reviewForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const saveBtn = $("#btn-review-save");
-  const originalLabel = saveBtn.textContent;
   saveBtn.disabled = true;
-
-  // Don't let "Add to pantry" race a still-running use-by date extraction -
-  // wait for it so the date it finds actually makes it into the saved item,
-  // instead of the item saving without it and the result landing on a form
-  // that's already gone.
-  if (pendingDatePhoto) {
-    saveBtn.textContent = "Reading use-by date…";
-    await pendingDatePhoto;
-    saveBtn.textContent = originalLabel;
-  }
 
   const body = new FormData(reviewForm);
   body.append("barcode", reviewForm.dataset.barcode || "");
   body.append("source", reviewForm.dataset.barcode ? "barcode" : "manual");
+  if (pendingAddDatePhoto) {
+    body.append("date_photo", pendingAddDatePhoto, "use-by.jpg");
+  }
   try {
     const res = await fetch("api/items", { method: "POST", body });
     if (!res.ok) {
@@ -952,7 +969,7 @@ reviewForm.addEventListener("submit", async (e) => {
       toast(err.error || "Could not save that item.");
       return;
     }
-    toast("Added to pantry");
+    toast(pendingAddDatePhoto ? "Added - reading use-by date in the background…" : "Added to pantry");
     resetScan();
   } catch (err) {
     toast("Could not save that item - check your connection.");
@@ -986,15 +1003,21 @@ function formatDisplayDate(iso) {
 
 function itemRowHtml(item) {
   const meta = [item.brand, item.quantity, item.category].filter(Boolean).join(" · ");
-  const dateLine = item.expiry_date
-    ? `${formatDisplayDate(item.expiry_date)} (${humanDays(item.days_left)})`
-    : "No use-by date set";
+  const dateLine = item.date_extraction_pending
+    ? '<span class="spinner" style="width:12px;height:12px;vertical-align:middle"></span> Reading use-by date…'
+    : escapeHtml(
+        item.expiry_date ? `${formatDisplayDate(item.expiry_date)} (${humanDays(item.days_left)})` : "No use-by date set"
+      );
+  const photoLink = item.has_date_photo
+    ? `<div class="item-meta"><a href="api/items/${item.id}/date-photo" target="_blank" rel="noopener">View use-by photo</a></div>`
+    : "";
   return `
     <div class="item-row" data-id="${item.id}">
       <div class="item-main">
         <div class="item-name">${escapeHtml(item.name)}</div>
         <div class="item-meta">${escapeHtml(meta)}</div>
-        <div class="item-meta">${escapeHtml(dateLine)}</div>
+        <div class="item-meta">${dateLine}</div>
+        ${photoLink}
         <div class="item-actions">
           <button class="ghost btn-edit" type="button">Edit</button>
           <button class="ghost btn-consume" type="button">Consumed</button>
@@ -1007,6 +1030,14 @@ function itemRowHtml(item) {
 }
 
 function editFormHtml(item) {
+  // Cache-busted with updated_at so re-opening Edit after a rescan shows
+  // the new photo instead of the browser's cached copy of the old one.
+  const photoUrl = `api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}`;
+  const statusText = item.date_extraction_pending
+    ? "Reading use-by date in the background…"
+    : item.date_extraction_raw
+    ? `Last read from photo: "${item.date_extraction_raw}"`
+    : "";
   return `
     <label>Product name</label>
     <input type="text" class="e-name" value="${escapeAttr(item.name)}">
@@ -1018,10 +1049,14 @@ function editFormHtml(item) {
     <input type="text" class="e-category" value="${escapeAttr(item.category || "")}">
 
     <div class="photo-step">
-      <img class="photo-thumb e-date-thumb hidden" alt="">
+      ${
+        item.has_date_photo
+          ? `<a href="${photoUrl}" target="_blank" rel="noopener"><img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}"></a>`
+          : `<img class="photo-thumb e-date-thumb hidden" alt="">`
+      }
       <button type="button" class="ghost e-rescan-date" style="width:auto;flex:1">📅 Rescan use-by date</button>
     </div>
-    <div class="muted e-date-status hidden"></div>
+    <div class="muted e-date-status ${statusText ? "" : "hidden"}">${escapeHtml(statusText)}</div>
 
     <label>Use-by date</label>
     <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
@@ -1041,10 +1076,82 @@ function escapeAttr(s) {
 }
 
 let pantryCache = [];
+// While any item has a background date extraction still running, poll for
+// it to finish instead of leaving the "Reading use-by date…" spinner
+// showing stale state until the next manual visit to this tab - cleared
+// automatically once nothing is pending any more.
+let pantryPollTimer = null;
+
+// Skips a poll tick entirely while an edit panel is open, rather than
+// re-rendering out from under it - that would either collapse it or wipe
+// out whatever the person has typed so far. The next tick (or the next
+// time this tab is opened) picks up whatever changed in the meantime.
+function pollPantryIfIdle() {
+  if ($$(".edit-form").some((el) => !el.classList.contains("hidden"))) return;
+  loadPantry();
+}
+
+function ensurePantryPolling() {
+  if (!pantryPollTimer) pantryPollTimer = setInterval(pollPantryIfIdle, 4000);
+}
+
+// Polls just one item (not the whole list, so nothing else on screen is
+// disturbed) while its edit panel is open and a background date
+// extraction is still running for it, and updates that panel's own date
+// field, status line and thumbnail in place once it resolves. Without
+// this, the date input only ever shows whatever it had when the panel
+// was opened - tapping Save before a rescan finishes would otherwise
+// submit that stale value and silently overwrite the freshly-read date.
+function watchEditFormExtraction(id, editEl) {
+  if (editEl.dataset.watching === "1") return;
+  editEl.dataset.watching = "1";
+
+  const timer = setInterval(async () => {
+    if (editEl.classList.contains("hidden") || !document.body.contains(editEl)) {
+      clearInterval(timer);
+      delete editEl.dataset.watching;
+      return;
+    }
+    let item;
+    try {
+      const res = await fetch(`api/items/${id}`);
+      if (!res.ok) {
+        clearInterval(timer);
+        delete editEl.dataset.watching;
+        return;
+      }
+      item = await res.json();
+    } catch (err) {
+      return; // transient network hiccup - try again next tick
+    }
+
+    const cachedIndex = pantryCache.findIndex((i) => i.id === id);
+    if (cachedIndex !== -1) pantryCache[cachedIndex] = item;
+    if (item.date_extraction_pending) return;
+
+    clearInterval(timer);
+    delete editEl.dataset.watching;
+
+    const expiryInput = editEl.querySelector(".e-expiry");
+    if (expiryInput) expiryInput.value = item.expiry_date || "";
+
+    const statusEl = editEl.querySelector(".e-date-status");
+    if (statusEl) {
+      const text = item.date_extraction_raw ? `Last read from photo: "${item.date_extraction_raw}"` : "";
+      statusEl.textContent = text;
+      statusEl.classList.toggle("hidden", !text);
+    }
+
+    const thumb = editEl.querySelector(".e-date-thumb");
+    if (thumb && item.has_date_photo) {
+      thumb.src = `api/items/${id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}`;
+    }
+  }, 3000);
+}
 
 async function loadPantry() {
   const list = $("#pantry-list");
-  list.innerHTML = '<p class="muted">Loading…</p>';
+  if (pantryCache.length === 0) list.innerHTML = '<p class="muted">Loading…</p>';
   try {
     const res = await fetch("api/items");
     const data = await res.json();
@@ -1058,6 +1165,15 @@ async function loadPantry() {
 
 function renderPantry() {
   const list = $("#pantry-list");
+
+  const anyPending = pantryCache.some((i) => i.date_extraction_pending);
+  if (anyPending) {
+    ensurePantryPolling();
+  } else if (pantryPollTimer) {
+    clearInterval(pantryPollTimer);
+    pantryPollTimer = null;
+  }
+
   if (pantryCache.length === 0) {
     list.innerHTML = '<div class="empty-state">Nothing tracked yet - scan something to get started.</div>';
     return;
@@ -1081,10 +1197,11 @@ function renderPantry() {
       editEl.innerHTML = editFormHtml(item);
       editEl.classList.remove("hidden");
       editEl.querySelector(".e-cancel").addEventListener("click", () => editEl.classList.add("hidden"));
+      if (item.date_extraction_pending) watchEditFormExtraction(id, editEl);
 
       editEl.querySelector(".e-rescan-date").addEventListener("click", () => {
         openDatePhotoCapture({
-          expiryInput: editEl.querySelector(".e-expiry"),
+          itemId: id,
           thumbEl: editEl.querySelector(".e-date-thumb"),
           statusEl: editEl.querySelector(".e-date-status"),
         });
@@ -1092,17 +1209,11 @@ function renderPantry() {
 
       const saveBtn = editEl.querySelector(".e-save");
       saveBtn.addEventListener("click", async () => {
-        const originalLabel = saveBtn.textContent;
         saveBtn.disabled = true;
 
-        // Same race as the add-flow: don't let Save beat a still-running
-        // rescan to the punch - wait for it so its date actually lands.
-        if (pendingDatePhoto) {
-          saveBtn.textContent = "Reading use-by date…";
-          await pendingDatePhoto;
-          saveBtn.textContent = originalLabel;
-        }
-
+        // A rescan uploads and starts reading in the background the
+        // moment it's captured (see uploadDatePhoto) - Save never needs to
+        // wait on it, it just saves whatever's currently in the form.
         const body = new FormData();
         body.append("name", editEl.querySelector(".e-name").value);
         body.append("brand", editEl.querySelector(".e-brand").value);

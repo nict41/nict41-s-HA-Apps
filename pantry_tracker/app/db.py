@@ -44,6 +44,16 @@ def _connect():
         conn.close()
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """Adds a column to an existing table if it's not already there - lets
+    a column added in a later version show up on an add-on upgrade without
+    losing any existing pantry data (CREATE TABLE IF NOT EXISTS alone only
+    covers a brand new database)."""
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     with _connect() as conn:
         conn.execute(
@@ -64,10 +74,16 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 consumed_at TEXT,
                 last_notified_at TEXT,
-                last_notified_bucket TEXT
+                last_notified_bucket TEXT,
+                has_date_photo INTEGER NOT NULL DEFAULT 0,
+                date_extraction_pending INTEGER NOT NULL DEFAULT 0,
+                date_extraction_raw TEXT
             )
             """
         )
+        _ensure_column(conn, "items", "has_date_photo", "has_date_photo INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "items", "date_extraction_pending", "date_extraction_pending INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(conn, "items", "date_extraction_raw", "date_extraction_raw TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
         conn.execute(
             """
@@ -183,6 +199,57 @@ def consume_item(item_id: int) -> None:
 def delete_item(item_id: int) -> None:
     with _connect() as conn:
         conn.execute("DELETE FROM items WHERE id = ?", (item_id,))
+    delete_date_photo(item_id)
+
+
+def date_photo_path(item_id: int) -> Path:
+    # Derived from DATA_DIR on every call (rather than cached at import
+    # time) so tests that monkeypatch DATA_DIR per-run land in the right
+    # throwaway directory instead of the real add-on data dir.
+    return DATA_DIR / "photos" / f"{item_id}.jpg"
+
+
+def save_date_photo(item_id: int, image_bytes: bytes) -> None:
+    path = date_photo_path(item_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(image_bytes)
+
+
+def delete_date_photo(item_id: int) -> None:
+    path = date_photo_path(item_id)
+    if path.exists():
+        path.unlink()
+
+
+def start_date_extraction(item_id: int) -> None:
+    """Marks an item as having a use-by date photo queued for background
+    extraction. Called the moment the photo is saved, before the vision
+    model has even been asked - see main.py's _extract_and_update."""
+    update_item(item_id, has_date_photo=1, date_extraction_pending=1)
+
+
+def finish_date_extraction(item_id: int, expiry_date: str | None, raw: str, *, only_if_blank: bool = False) -> None:
+    """Called once background extraction completes. Only touches
+    expiry_date when a date was actually found - a failed or "no date
+    visible" read leaves whatever the item already had alone.
+
+    `only_if_blank` (used when adding a brand new item with a photo
+    attached) skips writing the found date if the item already has one -
+    otherwise a date typed in by hand before tapping "Add to pantry" could
+    get silently clobbered once the background read finishes, with no
+    form left open to notice or correct it. Rescanning an existing item
+    leaves this False, since overwriting whatever date was already there
+    (right or wrong) is the whole point of a rescan.
+    """
+    fields = {"date_extraction_pending": 0, "date_extraction_raw": raw}
+    if expiry_date:
+        if only_if_blank:
+            current = get_item(item_id)
+            if current and not current.get("expiry_date"):
+                fields["expiry_date"] = expiry_date
+        else:
+            fields["expiry_date"] = expiry_date
+    update_item(item_id, **fields)
 
 
 def mark_notified(item_id: int, bucket: str) -> None:
