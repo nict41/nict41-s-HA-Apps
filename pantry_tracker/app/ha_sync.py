@@ -158,16 +158,15 @@ def _notify_message(item: dict, bucket: str) -> tuple[str, str]:
     )
 
 
-def _ingress_click_action() -> str:
-    """The stable sidebar path Home Assistant uses to open this add-on's
-    own ingress panel, landing on its Pantry tab (see index.html's
-    `#pantry` hash handling) - set as a notification's clickAction so
-    tapping it opens straight there instead of wherever Home Assistant
-    last was. Supervisor always names an add-on's own container after its
-    slug, so reading our own hostname needs no extra permissions beyond
-    what this add-on already has.
+def _pantry_panel_path() -> str:
+    """This add-on's sidebar panel, on its Pantry tab. Home Assistant
+    registers the panel at /<slug>, and passes anything after that to the
+    add-on as its route (see the home-assistant/properties handling in
+    index.html). Supervisor sets the container hostname to the slug with
+    underscores swapped for hyphens, so this needs no extra permissions.
     """
-    return f"/hassio/ingress/{socket.gethostname()}#pantry"
+    slug = socket.gethostname().replace("-", "_")
+    return f"/{slug}/pantry"
 
 
 def _due_for_notification(item: dict, bucket: str) -> bool:
@@ -195,10 +194,12 @@ def notify_if_due(item: dict, bucket: str) -> bool:
 
     domain, _, service_name = service.partition(".")
     title, message = _notify_message(item, bucket)
+    path = _pantry_panel_path()
     _request(
         "POST",
         f"/services/{domain}/{service_name}",
-        {"title": title, "message": message, "data": {"clickAction": _ingress_click_action()}},
+        # clickAction is the Android companion app's key, url the iOS one.
+        {"title": title, "message": message, "data": {"clickAction": path, "url": path}},
     )
     db.mark_notified(item["id"], bucket)
     return True

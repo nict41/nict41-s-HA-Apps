@@ -4,6 +4,7 @@ full workflow.
 """
 
 import json
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -19,10 +20,14 @@ import barcode
 import db
 import ha_sync
 import lookup
+import photos
 import settings
 import vision
 
 _CHECK_JOB_ID = "check_cycle"
+_IMAGE_BACKFILL_STATE_KEY = "image_backfill_done"
+# Open Food Facts asks clients to keep product lookups well under 100/minute.
+_BACKFILL_LOOKUP_DELAY_SECONDS = 1
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -84,6 +89,30 @@ def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
     _sync_now()
 
 
+def run_image_backfill() -> None:
+    """Fills in product images for items added before 0.6.0, when the add
+    form never submitted one. Runs once: a lookup that fails or finds
+    nothing leaves the flag unset so it's retried on the next start, since
+    "not found" and "Open Food Facts was unreachable" look the same here."""
+    if db.get_state(_IMAGE_BACKFILL_STATE_KEY):
+        return
+    complete = True
+    for barcode in db.barcodes_missing_image():
+        cached = db.get_cached_barcode(barcode)
+        image_url = cached["image_url"] if cached else ""
+        if not image_url:
+            product = lookup.lookup_barcode(barcode)
+            time.sleep(_BACKFILL_LOOKUP_DELAY_SECONDS)
+            if product is None:
+                complete = False
+                continue
+            image_url = product["image_url"]
+        if image_url:
+            db.apply_barcode_image(barcode, image_url)
+    if complete:
+        db.set_state(_IMAGE_BACKFILL_STATE_KEY, db.now_iso())
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     scheduler.add_job(
@@ -93,6 +122,7 @@ async def lifespan(_app: FastAPI):
         next_run_time=datetime.now(),
         id=_CHECK_JOB_ID,
     )
+    scheduler.add_job(run_image_backfill, next_run_time=datetime.now())
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -114,6 +144,17 @@ app = FastAPI(title="Pantry Tracker", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 
+def _display_image_url(barcode: str | None, image_url: str | None) -> str:
+    """What to actually show for a product: a photo taken in the app wins
+    over the Open Food Facts one, which often doesn't exist at all for
+    own-brand items. Relative, so it works under ingress and direct access."""
+    if db.valid_barcode(barcode):
+        path = db.product_photo_path(barcode)
+        if path.exists():
+            return f"api/barcodes/{barcode}/photo?v={int(path.stat().st_mtime)}"
+    return image_url or ""
+
+
 def _item_view(item: dict) -> dict:
     notify_days_before = settings.get_int("notify_days_before")
     bucket = db.bucket_for(item["expiry_date"], notify_days_before)
@@ -121,6 +162,7 @@ def _item_view(item: dict) -> dict:
         **item,
         "bucket": bucket,
         "days_left": db.days_left_for(item["expiry_date"]),
+        "display_image_url": _display_image_url(item.get("barcode"), item.get("image_url")),
         "has_date_photo": bool(item.get("has_date_photo")),
         "date_extraction_pending": bool(item.get("date_extraction_pending")),
     }
@@ -154,13 +196,37 @@ async def lookup_product(code: str):
             "quantity": cached["quantity"],
             "category": cached["category"],
             "image_url": cached["image_url"],
+            "display_image_url": _display_image_url(code, cached["image_url"]),
         }
 
     product = await run_in_threadpool(lookup.lookup_barcode, code)
     if not product:
-        return {"found": False}
+        return {"found": False, "display_image_url": _display_image_url(code, "")}
     db.cache_barcode(code, product)
-    return {"found": True, "cached": False, **product}
+    return {
+        "found": True,
+        "cached": False,
+        **product,
+        "display_image_url": _display_image_url(code, product["image_url"]),
+    }
+
+
+@app.post("/api/barcodes/{code}/photo")
+async def upload_product_photo(code: str, photo: UploadFile = File(...)):
+    if not db.valid_barcode(code):
+        return JSONResponse({"error": "Not a valid barcode."}, status_code=400)
+    normalised = await run_in_threadpool(photos.normalise_product_photo, await photo.read())
+    if normalised is None:
+        return JSONResponse({"error": "That file isn't a readable image."}, status_code=400)
+    db.save_product_photo(code, normalised)
+    return {"display_image_url": _display_image_url(code, "")}
+
+
+@app.get("/api/barcodes/{code}/photo")
+async def get_product_photo(code: str):
+    if not db.valid_barcode(code) or not db.product_photo_path(code).exists():
+        return JSONResponse({"error": "No photo stored for this barcode."}, status_code=404)
+    return FileResponse(db.product_photo_path(code), media_type="image/jpeg")
 
 
 @app.get("/api/vision-configured")

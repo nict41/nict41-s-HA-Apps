@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.0
+
+- Fixed tapping a notification not opening the Pantry tab. The link added
+  in 0.7.0 never worked: it used the container hostname (which has hyphens)
+  as the add-on's slug, and relied on a `#pantry` hash that Home Assistant
+  doesn't pass to an add-on's iframe. It now points at the panel's real
+  path (`/<slug>/pantry`) and reads the route Home Assistant sends the page.
+  Also sets the iOS `url` key alongside Android's `clickAction`.
+- Added **Photo of product**, in the review form and the Pantry tab's Edit,
+  for products Open Food Facts has no photo of. The photo is stored against
+  the barcode and reused by every later scan. Items without a barcode can't
+  use this, since there's nothing to key it to.
+- Items added before 0.6.0 now get their product photos: the add form didn't
+  submit an image back then, so none was saved even when one was available.
+  A one-off background job fills these in on startup, without touching
+  corrected names or brands.
+
 ## 0.7.0
 
 - Tapping a due-item notification now opens straight to the Pantry tab

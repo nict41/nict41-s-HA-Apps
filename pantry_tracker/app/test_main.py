@@ -1,8 +1,17 @@
+from io import BytesIO
+
 import db
 import main
 from fastapi.testclient import TestClient
+from PIL import Image
 
 client = TestClient(main.app)
+
+
+def _jpeg_bytes() -> bytes:
+    buf = BytesIO()
+    Image.new("RGB", (1600, 1200), "white").save(buf, format="JPEG")
+    return buf.getvalue()
 
 
 def test_index_page_loads():
@@ -65,6 +74,7 @@ def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
         "quantity": "415g",
         "category": "Tinned",
         "image_url": "",
+        "display_image_url": "",
     }
     assert calls == ["9999"]
 
@@ -72,7 +82,77 @@ def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
 def test_lookup_product_not_found(monkeypatch):
     monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: None)
     res = client.get("/api/lookup/123")
-    assert res.json() == {"found": False}
+    assert res.json() == {"found": False, "display_image_url": ""}
+
+
+def test_product_photo_roundtrip_is_shrunk_and_wins_over_open_food_facts():
+    db.cache_barcode("5000000000001", {"name": "Tin", "brand": "", "quantity": "", "category": "", "image_url": "https://x/off.jpg"})
+    assert client.get("/api/lookup/5000000000001").json()["display_image_url"] == "https://x/off.jpg"
+
+    res = client.post("/api/barcodes/5000000000001/photo", files={"photo": ("p.jpg", _jpeg_bytes(), "image/jpeg")})
+    assert res.status_code == 200
+    url = res.json()["display_image_url"]
+    assert url.startswith("api/barcodes/5000000000001/photo")
+    assert client.get("/api/lookup/5000000000001").json()["display_image_url"] == url
+
+    stored = client.get("/api/barcodes/5000000000001/photo")
+    assert stored.status_code == 200
+    assert max(Image.open(BytesIO(stored.content)).size) == 800
+
+
+def test_product_photo_shows_for_a_barcode_open_food_facts_does_not_know(monkeypatch):
+    monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: None)
+    client.post("/api/barcodes/5000000000002/photo", files={"photo": ("p.jpg", _jpeg_bytes(), "image/jpeg")})
+    res = client.get("/api/lookup/5000000000002").json()
+    assert res["found"] is False
+    assert res["display_image_url"].startswith("api/barcodes/5000000000002/photo")
+
+
+def test_product_photo_survives_item_deletion_and_shows_on_items():
+    client.post("/api/barcodes/5000000000003/photo", files={"photo": ("p.jpg", _jpeg_bytes(), "image/jpeg")})
+    item = client.post("/api/items", data={"barcode": "5000000000003", "name": "Beans"}).json()
+    assert item["display_image_url"].startswith("api/barcodes/5000000000003/photo")
+
+    client.post(f"/api/items/{item['id']}/delete")
+    assert client.get("/api/barcodes/5000000000003/photo").status_code == 200
+
+
+def test_product_photo_rejects_bad_barcodes_and_non_images():
+    bad = client.post("/api/barcodes/abc/photo", files={"photo": ("p.jpg", _jpeg_bytes(), "image/jpeg")})
+    assert bad.status_code == 400
+    not_image = client.post("/api/barcodes/5000000000004/photo", files={"photo": ("p.jpg", b"nope", "image/jpeg")})
+    assert not_image.status_code == 400
+    assert client.get("/api/barcodes/5000000000004/photo").status_code == 404
+
+
+def test_image_backfill_uses_cache_then_open_food_facts_and_keeps_corrections(monkeypatch):
+    monkeypatch.setattr(main, "_BACKFILL_LOOKUP_DELAY_SECONDS", 0)
+    db.cache_barcode("6000000000001", {"name": "Corrected", "brand": "", "quantity": "", "category": "", "image_url": "https://x/cached.jpg"})
+    db.cache_barcode("6000000000002", {"name": "Corrected Too", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    from_cache = db.add_item(barcode="6000000000001", name="Corrected")
+    from_lookup = db.add_item(barcode="6000000000002", name="Corrected Too")
+    monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: {"name": "Garbled", "image_url": "https://x/off.jpg"})
+
+    main.run_image_backfill()
+
+    assert db.get_item(from_cache)["image_url"] == "https://x/cached.jpg"
+    assert db.get_item(from_lookup)["image_url"] == "https://x/off.jpg"
+    assert db.get_item(from_lookup)["name"] == "Corrected Too"
+    assert db.get_cached_barcode("6000000000002")["name"] == "Corrected Too"
+    assert db.get_cached_barcode("6000000000002")["image_url"] == "https://x/off.jpg"
+
+
+def test_image_backfill_retries_after_a_failed_lookup_then_stops(monkeypatch):
+    monkeypatch.setattr(main, "_BACKFILL_LOOKUP_DELAY_SECONDS", 0)
+    item_id = db.add_item(barcode="6000000000003", name="Soup")
+    monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: None)
+    main.run_image_backfill()
+    assert db.get_state(main._IMAGE_BACKFILL_STATE_KEY) is None
+
+    monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: {"name": "Soup", "image_url": "https://x/soup.jpg"})
+    main.run_image_backfill()
+    assert db.get_item(item_id)["image_url"] == "https://x/soup.jpg"
+    assert db.get_state(main._IMAGE_BACKFILL_STATE_KEY) is not None
 
 
 def test_add_item_requires_name():

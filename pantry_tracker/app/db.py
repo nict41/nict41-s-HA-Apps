@@ -7,6 +7,7 @@ untyped `app_state` table for runtime settings and sync bookkeeping.
 
 import json
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
@@ -225,6 +226,47 @@ def delete_date_photo(item_id: int) -> None:
     path = date_photo_path(item_id)
     if path.exists():
         path.unlink()
+
+
+def valid_barcode(barcode: str | None) -> bool:
+    # Barcodes become filenames below, so only plain EAN/UPC digits qualify.
+    return bool(barcode and re.fullmatch(r"\d{6,14}", barcode))
+
+
+def product_photo_path(barcode: str) -> Path:
+    return DATA_DIR / "product_photos" / f"{barcode}.jpg"
+
+
+def save_product_photo(barcode: str, image_bytes: bytes) -> None:
+    """Keyed by barcode rather than item, and deliberately kept when an item
+    is deleted or consumed: the point is that the next scan of the same
+    product reuses it."""
+    path = product_photo_path(barcode)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(image_bytes)
+
+
+def barcodes_missing_image() -> list[str]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT barcode FROM items WHERE barcode IS NOT NULL AND barcode != '' "
+            "AND (image_url IS NULL OR image_url = '')"
+        ).fetchall()
+        return [r["barcode"] for r in rows]
+
+
+def apply_barcode_image(barcode: str, image_url: str) -> None:
+    """Fills in a missing image only, leaving any corrected name or brand
+    (on the items or in the cache) untouched."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE items SET image_url = ? WHERE barcode = ? AND (image_url IS NULL OR image_url = '')",
+            (image_url, barcode),
+        )
+        conn.execute(
+            "UPDATE barcode_cache SET image_url = ? WHERE barcode = ? AND (image_url IS NULL OR image_url = '')",
+            (image_url, barcode),
+        )
 
 
 def start_date_extraction(item_id: int) -> None:
