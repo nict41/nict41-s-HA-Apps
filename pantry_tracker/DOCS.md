@@ -20,9 +20,10 @@ from a phone-first ingress panel.
    own photo-capture UI and decodes the barcode (via zbar) on the add-on
    instead.
 2. Optionally open the same live camera view to **photograph the use-by/
-   best-before date** - this one has a shutter button, since reading a date
-   needs a deliberate "now" moment rather than auto-detection. The photo is
-   sent to a vision-capable model you run yourself (e.g.
+   best-before date** - line the date up in the on-screen frame and it
+   captures automatically once held steady for a moment (a shutter button
+   is also there as a manual override). The photo is cropped to just the
+   framed area and sent to a vision-capable model you run yourself (e.g.
    [Open WebUI](https://openwebui.com)/Ollama hosting `qwen2.5vl`), which
    reads the printed date back for you to confirm or correct - no photo
    ever leaves your own network.

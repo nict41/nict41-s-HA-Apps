@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+- The use-by date camera now **auto-captures**: once the on-screen frame is
+  held steady over something for a moment (and isn't too dark, too bright,
+  or blank), it snaps automatically - no shutter tap needed, though the
+  shutter button is still there to capture on demand instead. This is a
+  steadiness heuristic, not real date detection, so it occasionally
+  triggers on anything held still - a cheap false positive, since a bad
+  capture just falls back to "couldn't read a date, enter manually" like
+  it always has.
+- Every use-by date photo (auto- or manually-captured) is now **cropped to
+  the on-screen guide frame** before being sent for extraction, instead of
+  the much wider full camera frame around it - giving the vision model a
+  tighter, more legible image to read.
+
 ## 0.3.0
 
 - Live camera scanning now correctly detects when it can't actually work:
