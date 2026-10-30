@@ -16,7 +16,8 @@ from a phone-first ingress panel.
    crowd-sourced product database - to pre-fill the product's name, brand,
    quantity, category and photo (shown once found, if Open Food Facts has
    one on file for that barcode - not every product does, especially
-   own-brand/discount items) - a barcode already scanned before is served
+   own-brand/discount items; tap **Photo of product** to take your own,
+   which is kept for that barcode and reused on every later scan) - a barcode already scanned before is served
    instantly from a local cache instead of hitting Open Food Facts again.
    Crowd-sourced data is sometimes wrong or garbled for a
    particular barcode; correcting it before tapping "Add to pantry" (or
@@ -175,7 +176,10 @@ check (governed by `check_interval_hours`) re-creates them.
 All pantry data is stored locally in `/data/pantry.db` (SQLite), and each
 item's use-by date photo (if any) in `/data/photos/` - kept so you can
 re-open it later to compare against the date that was read from it, and
-removed automatically if the item itself is deleted. Nothing is sent
+removed automatically if the item itself is deleted. Product photos you
+take are stored per barcode in `/data/product_photos/` and kept even after
+an item is deleted, so the next scan of that product still has one.
+Nothing is sent
 anywhere except: a barcode digit string to Open Food Facts (to look up the
 product), and a use-by-date photo to the vision model endpoint you
 configure yourself.

@@ -322,7 +322,10 @@
         <p class="muted" style="margin-top:0">No barcode recognised in that photo. You can try again, or fill the details in by hand.</p>
       </div>
       <div id="review-barcode-line" class="muted hidden" style="margin-top:0"></div>
-      <img id="review-product-image" class="product-thumb hidden" alt="" loading="lazy" style="margin:8px 0">
+      <div id="product-photo-step" class="photo-step hidden">
+        <img id="review-product-image" class="product-thumb hidden" alt="">
+        <button type="button" class="ghost" id="btn-product-photo" style="width:auto;flex:1">📷 Photo of product</button>
+      </div>
 
       <label for="f-name">Product name</label>
       <input type="text" id="f-name" name="name" required>
@@ -429,6 +432,7 @@
      being edited on the Pantry tab. -->
 <input type="file" id="input-barcode-photo" accept="image/*" capture="environment">
 <input type="file" id="input-date-photo" accept="image/*" capture="environment">
+<input type="file" id="input-product-photo" accept="image/*" capture="environment">
 
 <div id="camera-overlay" class="scanner-overlay hidden">
   <video id="camera-video" class="scanner-video" playsinline autoplay muted></video>
@@ -502,6 +506,7 @@ function openReviewForm({ barcode, notFound }) {
   reviewForm.classList.remove("hidden");
   reviewForm.dataset.barcode = barcode || "";
   $("#review-not-found").classList.toggle("hidden", !notFound);
+  $("#product-photo-step").classList.toggle("hidden", !barcode);
   if (barcode) {
     $("#review-barcode-line").textContent = `Barcode: ${barcode}`;
     $("#review-barcode-line").classList.remove("hidden");
@@ -519,16 +524,16 @@ async function handleScannedBarcode(code) {
     const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
     const data = await res.json();
     openReviewForm({ barcode: code, notFound: false });
+    if (data.display_image_url) {
+      $("#review-product-image").src = data.display_image_url;
+      $("#review-product-image").classList.remove("hidden");
+    }
     if (data.found) {
       $("#f-name").value = data.name || "";
       $("#f-brand").value = data.brand || "";
       $("#f-quantity").value = data.quantity || "";
       $("#f-category").value = data.category || "";
       $("#f-image-url").value = data.image_url || "";
-      if (data.image_url) {
-        $("#review-product-image").src = data.image_url;
-        $("#review-product-image").classList.remove("hidden");
-      }
       if (data.cached) {
         $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
       }
@@ -570,10 +575,12 @@ async function handleBarcodePhoto(file) {
 //   - "date": a live viewfinder that auto-captures once held steady over
 //     the framed area for a moment (see the stability check below), with a
 //     shutter button alongside as a manual override.
+//   - "product": a plain viewfinder with a shutter button and no guide frame,
+//     keeping the whole shot rather than the narrow strip a date needs.
 // Both fall back to the OS photo-capture file inputs on unsupported
 // browsers (no BarcodeDetector, no getUserMedia, or permission denied).
 let cameraStream = null;
-let cameraMode = null; // "barcode" | "date"
+let cameraMode = null; // "barcode" | "date" | "product"
 let barcodeScanTimer = null;
 let barcodeScanBusy = false;
 let barcodeDetector = null;
@@ -620,7 +627,7 @@ function barcodeDetectorSupported() {
 }
 
 function openFallbackPicker(mode) {
-  $(mode === "barcode" ? "#input-barcode-photo" : "#input-date-photo").click();
+  $(`#input-${mode}-photo`).click();
 }
 
 // Where to open this app directly (bypassing the Home Assistant app's own
@@ -721,11 +728,16 @@ async function openCamera(mode) {
     hint.textContent = "Point your camera at a barcode";
     shutter.classList.add("hidden");
     fallbackBtn.textContent = "Having trouble? Take a photo instead";
+  } else if (mode === "product") {
+    hint.textContent = "Fit the product in view, then tap Capture";
+    shutter.classList.remove("hidden");
+    fallbackBtn.textContent = "Upload a photo instead";
   } else {
     hint.textContent = "Line up the use-by date - it captures automatically once held steady, or tap Capture";
     shutter.classList.remove("hidden");
     fallbackBtn.textContent = "Upload a photo instead";
   }
+  $("#camera-frame").classList.toggle("hidden", mode === "product");
   overlay.classList.remove("hidden");
 
   try {
@@ -762,7 +774,7 @@ async function openCamera(mode) {
         // next interval tick try again.
       }
     }, 300);
-  } else {
+  } else if (mode === "date") {
     dateStabilitySince = null;
     prevStabilitySample = null;
     dateScanBusy = false;
@@ -872,11 +884,54 @@ $("#btn-camera-fallback").addEventListener("click", () => {
   openFallbackPicker(mode);
 });
 $("#btn-camera-shutter").addEventListener("click", async () => {
+  const mode = cameraMode;
   const video = $("#camera-video");
-  const blob = await captureVideoFrame(video, frameCropRect(video));
+  const blob = await captureVideoFrame(video, mode === "date" ? frameCropRect(video) : null);
   closeCamera();
-  if (blob) onDatePhotoCaptured(blob);
+  if (!blob) return;
+  if (mode === "product") onProductPhotoCaptured(blob);
+  else onDatePhotoCaptured(blob);
 });
+
+// The product a photo belongs to, set just before the camera/file-picker
+// opens. Photos are stored per barcode rather than per item, so they're
+// reused by every later scan of the same product.
+let productPhotoTarget = null;
+
+function openProductPhotoCapture(target) {
+  productPhotoTarget = target;
+  if (cameraSupported()) {
+    openCamera("product");
+  } else {
+    openFallbackPicker("product");
+  }
+}
+
+$("#btn-product-photo").addEventListener("click", () => {
+  openProductPhotoCapture({ barcode: reviewForm.dataset.barcode, imgEl: $("#review-product-image") });
+});
+
+async function onProductPhotoCaptured(file) {
+  const { barcode, imgEl } = productPhotoTarget;
+  imgEl.src = URL.createObjectURL(file);
+  imgEl.classList.remove("hidden");
+
+  const body = new FormData();
+  body.append("photo", file, "product.jpg");
+  try {
+    const res = await fetch(`api/barcodes/${encodeURIComponent(barcode)}/photo`, { method: "POST", body });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    pantryCache
+      .filter((i) => i.barcode === barcode)
+      .forEach((i) => {
+        i.display_image_url = data.display_image_url;
+      });
+    toast("Product photo saved for future scans");
+  } catch (err) {
+    toast("Could not save that photo - try again.");
+  }
+}
 
 $("#btn-manual-start").addEventListener("click", () => openReviewForm({ barcode: "", notFound: false }));
 $("#btn-review-cancel").addEventListener("click", resetScan);
@@ -891,6 +946,12 @@ $("#input-date-photo").addEventListener("change", (e) => {
   const file = e.target.files[0];
   e.target.value = "";
   if (file) onDatePhotoCaptured(file);
+});
+
+$("#input-product-photo").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (file) onProductPhotoCaptured(file);
 });
 
 // Release the camera the moment the tab/app isn't visible, rather than
@@ -1023,8 +1084,8 @@ function itemRowHtml(item) {
   const photoLink = item.has_date_photo
     ? `<div class="item-meta"><a href="api/items/${item.id}/date-photo" target="_blank" rel="noopener">View use-by photo</a></div>`
     : "";
-  const productImg = item.image_url
-    ? `<img class="product-thumb" src="${escapeAttr(item.image_url)}" alt="" loading="lazy">`
+  const productImg = item.display_image_url
+    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
     : "";
   return `
     <div class="item-row" data-id="${item.id}">
@@ -1063,6 +1124,17 @@ function editFormHtml(item) {
     </div>
     <label>Category</label>
     <input type="text" class="e-category" value="${escapeAttr(item.category || "")}">
+
+    ${
+      item.barcode
+        ? `<div class="photo-step">
+             <img class="product-thumb e-product-thumb ${item.display_image_url ? "" : "hidden"}" alt=""${
+               item.display_image_url ? ` src="${escapeAttr(item.display_image_url)}"` : ""
+             }>
+             <button type="button" class="ghost e-product-photo" style="width:auto;flex:1">📷 Photo of product</button>
+           </div>`
+        : ""
+    }
 
     <div class="photo-step">
       ${
@@ -1212,7 +1284,17 @@ function renderPantry() {
       const editEl = row.querySelector(".edit-form");
       editEl.innerHTML = editFormHtml(item);
       editEl.classList.remove("hidden");
-      editEl.querySelector(".e-cancel").addEventListener("click", () => editEl.classList.add("hidden"));
+      editEl.querySelector(".e-cancel").addEventListener("click", () => {
+        editEl.classList.add("hidden");
+        // Picks up a product photo taken while the panel was open.
+        pollPantryIfIdle();
+      });
+      const productPhotoBtn = editEl.querySelector(".e-product-photo");
+      if (productPhotoBtn) {
+        productPhotoBtn.addEventListener("click", () => {
+          openProductPhotoCapture({ barcode: item.barcode, imgEl: editEl.querySelector(".e-product-thumb") });
+        });
+      }
       if (item.date_extraction_pending) watchEditFormExtraction(id, editEl);
 
       editEl.querySelector(".e-rescan-date").addEventListener("click", () => {
@@ -1316,12 +1398,30 @@ $("#btn-check-now").addEventListener("click", async () => {
   }
 });
 
-// Deep-link support: a Home Assistant notification's clickAction points
-// here with a tab name as the URL hash (see ha_sync.py's
-// _ingress_click_action), so tapping a due-item notification opens
-// straight to that tab instead of wherever the app last was.
+// Deep links. Inside Home Assistant this page is an iframe at a fixed
+// ingress URL, so a notification's /<slug>/pantry path (see ha_sync.py's
+// _pantry_panel_path) never reaches location - the parent passes it over
+// postMessage instead. Reached directly on port 8000, a #pantry hash works.
+const APP_VIEWS = ["scan", "pantry", "settings"];
+
+window.addEventListener("message", (e) => {
+  if (e.source !== window.parent || e.data?.type !== "home-assistant/properties") return;
+  const { route } = e.data;
+  const view = (route?.path || "").split("/")[1];
+  if (!APP_VIEWS.includes(view)) return;
+  showView(view);
+  // Properties are re-sent on every resize, and a repeat tap of the same
+  // notification wouldn't count as a route change - so consume the path,
+  // leaving the person free to switch tabs and the next tap to work.
+  window.parent.postMessage({ type: "home-assistant/navigate", path: route.prefix, options: { replace: true } }, "*");
+});
+
+if (window.parent !== window) {
+  window.parent.postMessage({ type: "home-assistant/subscribe-properties" }, "*");
+}
+
 const deepLinkView = location.hash.replace("#", "");
-if (["scan", "pantry", "settings"].includes(deepLinkView)) {
+if (APP_VIEWS.includes(deepLinkView)) {
   showView(deepLinkView);
 }
 </script>

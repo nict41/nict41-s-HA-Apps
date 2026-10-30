@@ -93,14 +93,16 @@ def test_notify_if_due_sends_and_marks_notified(monkeypatch):
 
 def test_notify_if_due_sets_click_action_to_own_ingress_panel(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
-    monkeypatch.setattr(ha_sync.socket, "gethostname", lambda: "beb500c8_pantry_tracker")
+    # The real hostname format, from `ha apps info` - hyphens, not the slug.
+    monkeypatch.setattr(ha_sync.socket, "gethostname", lambda: "beb500c8-pantry-tracker")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append((method, path, body)) or True)
 
     item_id = db.add_item(barcode=None, name="Yoghurt", expiry_date="2020-01-01")
     ha_sync.notify_if_due(db.get_item(item_id), db.BUCKET_EXPIRED)
 
-    assert calls[0][2]["data"]["clickAction"] == "/hassio/ingress/beb500c8_pantry_tracker#pantry"
+    assert calls[0][2]["data"]["clickAction"] == "/beb500c8_pantry_tracker/pantry"
+    assert calls[0][2]["data"]["url"] == "/beb500c8_pantry_tracker/pantry"
 
 
 def test_notify_if_due_respects_repeat_window(monkeypatch):
