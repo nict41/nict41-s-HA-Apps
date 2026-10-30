@@ -112,6 +112,36 @@ def test_edit_missing_item_returns_404():
     assert res.status_code == 404
 
 
+def test_add_item_with_barcode_refreshes_cached_product():
+    # A garbled/wrong Open Food Facts entry corrected before tapping "Add
+    # to pantry" should fix the cache too, not just this one item.
+    db.cache_barcode("4000000000000", {"name": "Garbled Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    client.post(
+        "/api/items",
+        data={"barcode": "4000000000000", "name": "Corrected Name", "brand": "Fixed Brand", "source": "barcode"},
+    )
+    cached = db.get_cached_barcode("4000000000000")
+    assert cached["name"] == "Corrected Name"
+    assert cached["brand"] == "Fixed Brand"
+
+
+def test_edit_item_with_barcode_refreshes_cached_product():
+    db.cache_barcode("4000000000001", {"name": "Garbled Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    created = client.post(
+        "/api/items", data={"barcode": "4000000000001", "name": "Garbled Name", "source": "barcode"}
+    ).json()
+
+    client.post(f"/api/items/{created['id']}", data={"name": "Fixed After The Fact"})
+
+    cached = db.get_cached_barcode("4000000000001")
+    assert cached["name"] == "Fixed After The Fact"
+
+
+def test_add_item_without_barcode_does_not_touch_cache():
+    client.post("/api/items", data={"name": "No Barcode Item"})
+    assert db.get_cached_barcode("") is None
+
+
 def test_get_single_item():
     created = client.post("/api/items", data={"name": "Solo"}).json()
     res = client.get(f"/api/items/{created['id']}")
@@ -211,7 +241,6 @@ def test_settings_roundtrip():
             "notify_days_before": 5,
             "notify_repeat_hours": 48,
             "check_interval_hours": 8,
-            "notify_service": "notify.mobile_app_phone",
         },
     )
     assert res.status_code == 200
@@ -219,10 +248,30 @@ def test_settings_roundtrip():
     assert body["notify_days_before"] == 5
     assert body["notify_repeat_hours"] == 48
     assert body["check_interval_hours"] == 8
-    assert body["notify_service"] == "notify.mobile_app_phone"
 
     res = client.get("/api/settings")
     assert res.json()["notify_days_before"] == 5
+
+
+def test_settings_reflects_notify_service_from_environment_not_the_database(monkeypatch):
+    # notify_service is add-on-configuration-only - posting one here (even
+    # if a client still sent it) must never store or reflect it; only the
+    # environment (what the add-on's Configuration tab sets) counts.
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
+    res = client.post(
+        "/api/settings",
+        data={
+            "notify_days_before": 5,
+            "notify_repeat_hours": 48,
+            "check_interval_hours": 8,
+            "notify_service": "notify.mobile_app_a_completely_different_one",
+        },
+    )
+    assert res.status_code == 200
+    assert res.json()["notify_service"] == "notify.mobile_app_phone"
+
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_other")
+    assert client.get("/api/settings").json()["notify_service"] == "notify.mobile_app_other"
 
 
 def test_check_now_runs_without_ha_configured():

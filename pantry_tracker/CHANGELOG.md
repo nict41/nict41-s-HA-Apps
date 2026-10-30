@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+- Fixed the Home Assistant notify service appearing to get lost after
+  every app update. It wasn't actually about updates: `notify_service`
+  could be set two ways (the add-on's own Configuration tab, or the
+  app's in-app Settings page), and once anything was ever saved via the
+  in-app page - even accidentally blank, e.g. from visiting Settings
+  before Configuration had been set up yet - that saved value silently
+  shadowed the Configuration tab forever after, no matter what was
+  subsequently set there. `notify_service` is now add-on-configuration-
+  only (restart the add-on after changing it), the same as the vision
+  model connection already was, removing the possibility of this
+  altogether. A stale saved override from before this fix is cleared
+  out automatically on upgrade.
+- Product photos from Open Food Facts are now shown - in the review form
+  right after a barcode's looked up (handy for spotting a barcode that
+  matched the wrong product), and on each Pantry list row.
+- Correcting a barcode's product details (handy when Open Food Facts'
+  crowd-sourced data is wrong or garbled for a particular barcode) now
+  also updates the local cache for that barcode, whether the correction
+  is made before tapping "Add to pantry" or later from the Pantry tab's
+  Edit - so the same barcode serves the correction next time instead of
+  the original bad data.
+
 ## 0.5.0
 
 - Use-by date photos are now kept (`/data/photos/`, removed automatically

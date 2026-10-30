@@ -202,17 +202,29 @@ async def add_item(
     name = name.strip()
     if not name:
         return JSONResponse({"error": "A product name is required."}, status_code=400)
+    barcode = barcode.strip()
+    brand = brand.strip()
+    quantity = quantity.strip()
+    category = category.strip()
+    image_url = image_url.strip()
     item_id = db.add_item(
-        barcode=barcode.strip() or None,
+        barcode=barcode or None,
         name=name,
-        brand=brand.strip(),
-        quantity=quantity.strip(),
-        category=category.strip(),
+        brand=brand,
+        quantity=quantity,
+        category=category,
         expiry_date=expiry_date.strip() or None,
         notes=notes.strip(),
-        image_url=image_url.strip(),
+        image_url=image_url,
         source=source.strip() or "manual",
     )
+    # Whatever was confirmed here - corrected or not - becomes the new
+    # cached product for this barcode, so a garbled or wrong Open Food
+    # Facts entry (crowd-sourced data is sometimes just bad) only has to
+    # be fixed once: the next scan of the same barcode serves this
+    # corrected version straight from the cache instead of the original.
+    if barcode:
+        db.cache_barcode(barcode, {"name": name, "brand": brand, "quantity": quantity, "category": category, "image_url": image_url})
     # A use-by date photo captured before the item existed (the normal case
     # when adding something new) is attached here instead - reading it is
     # queued in the background rather than making "Add to pantry" wait on
@@ -268,17 +280,30 @@ async def edit_item(
     name = name.strip()
     if not name:
         return JSONResponse({"error": "A product name is required."}, status_code=400)
-    if not db.get_item(item_id):
+    existing = db.get_item(item_id)
+    if not existing:
         return JSONResponse({"error": "Item not found."}, status_code=404)
+    brand = brand.strip()
+    quantity = quantity.strip()
+    category = category.strip()
     db.update_item(
         item_id,
         name=name,
-        brand=brand.strip(),
-        quantity=quantity.strip(),
-        category=category.strip(),
+        brand=brand,
+        quantity=quantity,
+        category=category,
         expiry_date=expiry_date.strip() or None,
         notes=notes.strip(),
     )
+    # Same reasoning as add_item: a correction made here (e.g. fixing a
+    # garbled Open Food Facts name after the fact, from the Pantry tab
+    # instead of at add-time) should also fix this barcode's cached
+    # product, not just this one item.
+    if existing["barcode"]:
+        db.cache_barcode(
+            existing["barcode"],
+            {"name": name, "brand": brand, "quantity": quantity, "category": category, "image_url": existing["image_url"] or ""},
+        )
     await run_in_threadpool(_sync_now)
     return _item_view(db.get_item(item_id))
 
@@ -314,14 +339,14 @@ async def save_settings(
     notify_days_before: int = Form(...),
     notify_repeat_hours: int = Form(...),
     check_interval_hours: int = Form(...),
-    notify_service: str = Form(""),
 ):
+    # notify_service isn't settable here - see settings.py's module
+    # docstring for why it's add-on-configuration-only.
     settings.set_many(
         {
             "notify_days_before": notify_days_before,
             "notify_repeat_hours": notify_repeat_hours,
             "check_interval_hours": check_interval_hours,
-            "notify_service": notify_service,
         }
     )
     _reschedule_check_job()

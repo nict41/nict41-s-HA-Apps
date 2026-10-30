@@ -62,19 +62,19 @@ def test_sync_deletes_stale_entities(monkeypatch):
     assert deletes == [f"/states/{ha_sync.entity_id_for(first_item)}"]
 
 
-def test_notify_if_due_requires_configured_service():
-    settings.set_many({"notify_service": ""})
+def test_notify_if_due_requires_configured_service(monkeypatch):
+    monkeypatch.setenv("NOTIFY_SERVICE", "")
     assert ha_sync.notify_if_due(_make_item(), db.BUCKET_EXPIRED) is False
 
 
 def test_notify_if_due_skips_ok_bucket(monkeypatch):
-    settings.set_many({"notify_service": "notify.mobile_app_phone"})
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     monkeypatch.setattr(ha_sync, "_request", lambda *a, **k: True)
     assert ha_sync.notify_if_due(_make_item(), db.BUCKET_OK) is False
 
 
 def test_notify_if_due_sends_and_marks_notified(monkeypatch):
-    settings.set_many({"notify_service": "notify.mobile_app_phone"})
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append((method, path, body)) or True)
 
@@ -92,7 +92,8 @@ def test_notify_if_due_sends_and_marks_notified(monkeypatch):
 
 
 def test_notify_if_due_respects_repeat_window(monkeypatch):
-    settings.set_many({"notify_service": "notify.mobile_app_phone", "notify_repeat_hours": 24})
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
+    settings.set_many({"notify_repeat_hours": 24})
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(1) or True)
 
@@ -106,7 +107,8 @@ def test_notify_if_due_respects_repeat_window(monkeypatch):
 
 
 def test_notify_if_due_sends_again_after_repeat_window(monkeypatch):
-    settings.set_many({"notify_service": "notify.mobile_app_phone", "notify_repeat_hours": 24})
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
+    settings.set_many({"notify_repeat_hours": 24})
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(1) or True)
 
@@ -120,7 +122,8 @@ def test_notify_if_due_sends_again_after_repeat_window(monkeypatch):
 
 
 def test_notify_if_due_bucket_change_bypasses_repeat_window(monkeypatch):
-    settings.set_many({"notify_service": "notify.mobile_app_phone", "notify_repeat_hours": 24})
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
+    settings.set_many({"notify_repeat_hours": 24})
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(1) or True)
 

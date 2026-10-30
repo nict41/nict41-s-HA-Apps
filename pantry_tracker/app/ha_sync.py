@@ -174,7 +174,7 @@ def notify_if_due(item: dict, bucket: str) -> bool:
     this item is in an alertable bucket and is due one (new bucket, or a
     repeat reminder once `notify_repeat_hours` has passed). Returns whether
     a notification was sent."""
-    service = settings.get_str("notify_service").strip()
+    service = settings.notify_service()
     if not service or "." not in service or bucket not in _NOTIFIABLE_BUCKETS:
         return False
     if not _due_for_notification(item, bucket):

@@ -206,3 +206,13 @@ def test_state_roundtrip():
     assert db.get_state("key") == "value"
     db.set_state("key", "updated")
     assert db.get_state("key") == "updated"
+
+
+def test_init_db_clears_stale_notify_service_override():
+    # Left over from when notify_service was DB-overridable - a value
+    # saved here (even blank) would otherwise go on shadowing the add-on's
+    # Configuration tab forever, which is exactly the "notify service
+    # keeps getting lost after an update" bug this cleans up.
+    db.set_state("setting:notify_service", "notify.mobile_app_stale")
+    db.init_db()
+    assert db.get_state("setting:notify_service") is None

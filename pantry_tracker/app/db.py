@@ -85,6 +85,12 @@ def init_db() -> None:
         _ensure_column(conn, "items", "date_extraction_pending", "date_extraction_pending INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "items", "date_extraction_raw", "date_extraction_raw TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
+        # notify_service moved to add-on-configuration-only (settings.py) -
+        # a value saved here from an older version would otherwise go on
+        # silently shadowing the add-on's Configuration tab forever, which
+        # is exactly the "my notification service keeps getting lost"
+        # symptom this cleans up.
+        conn.execute("DELETE FROM app_state WHERE key = 'setting:notify_service'")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS barcode_cache (

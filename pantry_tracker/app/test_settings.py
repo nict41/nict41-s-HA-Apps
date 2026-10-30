@@ -6,7 +6,6 @@ def test_get_int_falls_back_to_default_when_nothing_stored():
     # not re-read live - get_int only falls back to it when no override has
     # ever been saved, which is what's being exercised here.
     assert settings.get_int("notify_days_before") == settings._DEFAULTS["notify_days_before"]
-    assert settings.get_str("notify_service") == settings._DEFAULTS["notify_service"]
 
 
 def test_set_many_persists_and_clamps():
@@ -15,13 +14,11 @@ def test_set_many_persists_and_clamps():
             "notify_days_before": 999,
             "notify_repeat_hours": 0,
             "check_interval_hours": 6,
-            "notify_service": "  notify.mobile_app_phone  ",
         }
     )
     assert result["notify_days_before"] == 30  # clamped to max
     assert result["notify_repeat_hours"] == 1  # clamped to min
     assert result["check_interval_hours"] == 6
-    assert result["notify_service"] == "notify.mobile_app_phone"
 
 
 def test_set_many_ignores_invalid_numbers():
@@ -35,10 +32,26 @@ def test_set_many_ignores_unknown_keys():
     assert "unknown_key" not in result
 
 
+def test_set_many_does_not_accept_notify_service():
+    # notify_service is add-on-configuration-only now - see the module
+    # docstring for why (a DB-saved override, even blank, used to be able
+    # to permanently shadow the Configuration tab).
+    settings.set_many({"notify_service": "notify.mobile_app_phone"})
+    assert settings.all_settings()["notify_service"] == settings.notify_service()
+
+
+def test_notify_service_reads_environment_live(monkeypatch):
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
+    assert settings.notify_service() == "notify.mobile_app_phone"
+    monkeypatch.setenv("NOTIFY_SERVICE", "")
+    assert settings.notify_service() == ""
+
+
 def test_all_settings_returns_every_key():
     values = settings.all_settings()
-    for key in settings.INT_KEYS + settings.STR_KEYS:
+    for key in settings.INT_KEYS:
         assert key in values
+    assert "notify_service" in values
 
 
 def test_vision_helpers_read_environment(monkeypatch):

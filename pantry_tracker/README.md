@@ -14,11 +14,15 @@ from a phone-first ingress panel.
    permissions dance). The decoded barcode is looked up against
    [Open Food Facts](https://world.openfoodfacts.org) - a free, keyless,
    crowd-sourced product database - to pre-fill the product's name, brand,
-   quantity and category - a barcode already scanned before is served
-   instantly from a local cache instead of hitting Open Food Facts again.
-   On a browser without live camera support, it falls back to the phone's
-   own photo-capture UI and decodes the barcode (via zbar) on the add-on
-   instead.
+   quantity, category and photo - a barcode already scanned before is
+   served instantly from a local cache instead of hitting Open Food Facts
+   again. Crowd-sourced data is sometimes wrong or garbled for a
+   particular barcode; correcting it before tapping "Add to pantry" (or
+   later, editing the item from the Pantry tab) fixes the cache too, so
+   the same barcode serves your correction next time instead of the
+   original. On a browser without live camera support, it falls back to
+   the phone's own photo-capture UI and decodes the barcode (via zbar) on
+   the add-on instead.
 2. Optionally open the same live camera view to **photograph the use-by/
    best-before date** - line the date up in the on-screen frame and it
    captures automatically once held steady for a moment (a shutter button
@@ -48,13 +52,17 @@ from a phone-first ingress panel.
 ### 1. Configure the app
 
 Set the options below (**Settings → Add-ons → Pantry Tracker →
-Configuration**), then start the app. All of them can be left at their
-defaults and changed later from the app's own **Settings** tab, except the
-vision model connection, which lives in this configuration only.
+Configuration**), then start the app. `notify_days_before`,
+`notify_repeat_hours` and `check_interval_hours` can be left at their
+defaults here and changed later from the app's own **Settings** tab
+without a restart - `notify_service` and the vision model connection
+live in this Configuration tab only (restart the add-on after changing
+either), so a value saved once can never end up silently overriding a
+later change made here, across an app update or otherwise.
 
 | Option | Default | Description |
 |---|---|---|
-| `notify_service` | _(blank)_ | A Home Assistant `notify.*` service, e.g. `notify.mobile_app_your_phone`. Blank disables notifications. |
+| `notify_service` | _(blank)_ | A Home Assistant `notify.*` service, e.g. `notify.mobile_app_your_phone`. Blank disables notifications. Restart the add-on after changing it. |
 | `notify_days_before` | `3` | How many days before the use-by date counts as "expiring soon". |
 | `notify_repeat_hours` | `24` | How often to resend a reminder for an item still due. |
 | `check_interval_hours` | `12` | How often to re-check every item and send any due notifications. |
