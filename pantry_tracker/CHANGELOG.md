@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0
+
+- Use-by date photos are now kept (`/data/photos/`, removed automatically
+  if the item is deleted) and can be opened from the Pantry list (**View
+  use-by photo**) or the edit panel's thumbnail, to compare against the
+  date that was actually read from it.
+- Reading a use-by date now always happens **in the background**, on the
+  add-on itself, instead of blocking the app's UI while it waits on the
+  vision model:
+  - **Add to pantry** no longer waits on a photo's extraction - capture
+    the photo, tap Add, and go straight on to scanning the next item. The
+    date fills in on its own (check the Pantry tab) once it's ready.
+  - **Rescan use-by date** (on an existing item) works the same way -
+    capture the new photo and the edit panel can be closed immediately,
+    there's nothing left to wait for.
+  - A date typed into the field by hand before tapping "Add to pantry"
+    always wins over a background read that disagrees with it. Rescanning
+    an existing item still always replaces whatever date was there, since
+    that's the whole point of a rescan.
+  - The Pantry list shows a **Reading use-by date…** spinner for an item
+    while this is in progress, and refreshes itself automatically once
+    it's done.
+- Removed the now-unused `/api/extract-date` endpoint - date extraction is
+  always tied to an item (so there's somewhere to save the photo and a
+  result to write to) rather than a one-off, disconnected request.
+
 ## 0.4.1
 
 - Fixed a use-by date with no year printed near it (e.g. packaging that

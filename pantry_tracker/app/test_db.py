@@ -47,6 +47,101 @@ def test_delete_item():
     assert db.get_item(item_id) is None
 
 
+def test_save_and_delete_date_photo():
+    item_id = db.add_item(barcode=None, name="Photo Item")
+    db.save_date_photo(item_id, b"fake-bytes")
+    path = db.date_photo_path(item_id)
+    assert path.exists()
+    assert path.read_bytes() == b"fake-bytes"
+
+    db.delete_date_photo(item_id)
+    assert not path.exists()
+
+
+def test_delete_item_also_deletes_its_date_photo():
+    item_id = db.add_item(barcode=None, name="Photo Item")
+    db.save_date_photo(item_id, b"fake-bytes")
+    db.delete_item(item_id)
+    assert not db.date_photo_path(item_id).exists()
+
+
+def test_start_and_finish_date_extraction():
+    item_id = db.add_item(barcode=None, name="Soup")
+    db.start_date_extraction(item_id)
+    item = db.get_item(item_id)
+    assert item["has_date_photo"] == 1
+    assert item["date_extraction_pending"] == 1
+
+    db.finish_date_extraction(item_id, "2026-12-01", "2026-12-01")
+    item = db.get_item(item_id)
+    assert item["date_extraction_pending"] == 0
+    assert item["expiry_date"] == "2026-12-01"
+    assert item["date_extraction_raw"] == "2026-12-01"
+
+
+def test_finish_date_extraction_without_date_keeps_existing_expiry():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2099-01-01")
+    db.start_date_extraction(item_id)
+    db.finish_date_extraction(item_id, None, "UNKNOWN")
+    item = db.get_item(item_id)
+    assert item["date_extraction_pending"] == 0
+    assert item["expiry_date"] == "2099-01-01"
+    assert item["date_extraction_raw"] == "UNKNOWN"
+
+
+def test_finish_date_extraction_only_if_blank_does_not_overwrite_a_typed_in_date():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2099-01-01")
+    db.start_date_extraction(item_id)
+    db.finish_date_extraction(item_id, "2026-12-01", "2026-12-01", only_if_blank=True)
+    item = db.get_item(item_id)
+    assert item["expiry_date"] == "2099-01-01"  # the typed-in value wins
+    assert item["date_extraction_raw"] == "2026-12-01"
+
+
+def test_finish_date_extraction_only_if_blank_fills_in_when_there_is_nothing_to_protect():
+    item_id = db.add_item(barcode=None, name="Soup")
+    db.start_date_extraction(item_id)
+    db.finish_date_extraction(item_id, "2026-12-01", "2026-12-01", only_if_blank=True)
+    assert db.get_item(item_id)["expiry_date"] == "2026-12-01"
+
+
+def test_init_db_migrates_an_older_schema_missing_new_columns():
+    import sqlite3
+
+    with sqlite3.connect(db.DB_PATH) as conn:
+        conn.execute("DROP TABLE items")
+        conn.execute(
+            """
+            CREATE TABLE items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                barcode TEXT,
+                name TEXT NOT NULL,
+                brand TEXT,
+                quantity TEXT,
+                category TEXT,
+                expiry_date TEXT,
+                notes TEXT,
+                image_url TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                consumed_at TEXT,
+                last_notified_at TEXT,
+                last_notified_bucket TEXT
+            )
+            """
+        )
+
+    db.init_db()  # simulates an add-on upgrade over an existing, older database
+
+    item_id = db.add_item(barcode=None, name="Migrated")
+    db.start_date_extraction(item_id)
+    item = db.get_item(item_id)
+    assert item["has_date_photo"] == 1
+    assert item["date_extraction_pending"] == 1
+
+
 def test_mark_notified_sets_bucket_and_timestamp():
     item_id = db.add_item(barcode=None, name="Cheese")
     db.mark_notified(item_id, db.BUCKET_EXPIRING_SOON)

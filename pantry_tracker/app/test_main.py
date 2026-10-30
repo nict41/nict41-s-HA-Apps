@@ -75,12 +75,6 @@ def test_lookup_product_not_found(monkeypatch):
     assert res.json() == {"found": False}
 
 
-def test_extract_date(monkeypatch):
-    monkeypatch.setattr(main.vision, "extract_use_by_date", lambda image_bytes: {"date": "2026-12-01", "raw": "2026-12-01"})
-    res = client.post("/api/extract-date", files={"photo": ("p.jpg", b"fake-bytes", "image/jpeg")})
-    assert res.json() == {"date": "2026-12-01", "raw": "2026-12-01"}
-
-
 def test_add_item_requires_name():
     res = client.post("/api/items", data={"name": "   "})
     assert res.status_code == 400
@@ -116,6 +110,98 @@ def test_add_list_and_item_lifecycle():
 def test_edit_missing_item_returns_404():
     res = client.post("/api/items/999999", data={"name": "Ghost"})
     assert res.status_code == 404
+
+
+def test_get_single_item():
+    created = client.post("/api/items", data={"name": "Solo"}).json()
+    res = client.get(f"/api/items/{created['id']}")
+    assert res.status_code == 200
+    assert res.json()["name"] == "Solo"
+
+
+def test_get_single_item_missing_returns_404():
+    res = client.get("/api/items/999999")
+    assert res.status_code == 404
+
+
+def test_add_item_with_date_photo_extracts_in_background(monkeypatch):
+    monkeypatch.setattr(
+        main.vision, "extract_use_by_date", lambda image_bytes: {"date": "2026-12-01", "raw": "2026-12-01"}
+    )
+    res = client.post(
+        "/api/items",
+        data={"name": "Yoghurt"},
+        files={"date_photo": ("use-by.jpg", b"fake-bytes", "image/jpeg")},
+    )
+    assert res.status_code == 200
+    item = res.json()
+    assert item["has_date_photo"] is True
+    # The response is built before the background task runs, so it still
+    # reflects "pending" - that's the point: "Add to pantry" doesn't wait.
+    assert item["date_extraction_pending"] is True
+
+    # TestClient drives a request's background tasks to completion before
+    # returning, so by now extraction has already happened for real.
+    stored = db.get_item(item["id"])
+    assert stored["date_extraction_pending"] == 0
+    assert stored["expiry_date"] == "2026-12-01"
+
+
+def test_add_item_with_date_photo_does_not_override_a_typed_in_date(monkeypatch):
+    monkeypatch.setattr(
+        main.vision, "extract_use_by_date", lambda image_bytes: {"date": "2026-12-01", "raw": "2026-12-01"}
+    )
+    res = client.post(
+        "/api/items",
+        data={"name": "Yoghurt", "expiry_date": "2099-01-01"},
+        files={"date_photo": ("use-by.jpg", b"fake-bytes", "image/jpeg")},
+    )
+    item_id = res.json()["id"]
+    stored = db.get_item(item_id)
+    assert stored["expiry_date"] == "2099-01-01"  # the typed-in value wins
+    assert stored["date_extraction_raw"] == "2026-12-01"
+
+
+def test_upload_date_photo_for_existing_item(monkeypatch):
+    monkeypatch.setattr(main.vision, "extract_use_by_date", lambda image_bytes: {"date": None, "raw": "UNKNOWN"})
+    res = client.post("/api/items", data={"name": "Soup", "expiry_date": "2099-01-01"})
+    item_id = res.json()["id"]
+
+    res = client.post(f"/api/items/{item_id}/date-photo", files={"photo": ("p.jpg", b"fake-bytes", "image/jpeg")})
+    assert res.status_code == 200
+    assert res.json()["has_date_photo"] is True
+
+    # No date found - the existing expiry_date is left alone, not cleared.
+    stored = db.get_item(item_id)
+    assert stored["expiry_date"] == "2099-01-01"
+    assert stored["date_extraction_raw"] == "UNKNOWN"
+
+
+def test_upload_date_photo_missing_item_returns_404():
+    res = client.post("/api/items/999999/date-photo", files={"photo": ("p.jpg", b"fake-bytes", "image/jpeg")})
+    assert res.status_code == 404
+
+
+def test_date_photo_roundtrip_and_404_when_absent():
+    res = client.post("/api/items", data={"name": "Tin"})
+    item_id = res.json()["id"]
+
+    assert client.get(f"/api/items/{item_id}/date-photo").status_code == 404
+
+    client.post(f"/api/items/{item_id}/date-photo", files={"photo": ("p.jpg", b"fake-bytes", "image/jpeg")})
+    fetched = client.get(f"/api/items/{item_id}/date-photo")
+    assert fetched.status_code == 200
+    assert fetched.content == b"fake-bytes"
+
+
+def test_delete_item_removes_its_stored_date_photo():
+    res = client.post("/api/items", data={"name": "ToDelete"})
+    item_id = res.json()["id"]
+    client.post(f"/api/items/{item_id}/date-photo", files={"photo": ("p.jpg", b"fake-bytes", "image/jpeg")})
+    assert db.date_photo_path(item_id).exists()
+
+    client.post(f"/api/items/{item_id}/delete")
+    assert not db.date_photo_path(item_id).exists()
 
 
 def test_settings_roundtrip():

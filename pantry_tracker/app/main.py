@@ -10,9 +10,9 @@ from pathlib import Path
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, Form, UploadFile, File, Request
+from fastapi import BackgroundTasks, FastAPI, Form, UploadFile, File, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 import barcode
@@ -62,6 +62,28 @@ def _sync_now() -> None:
     ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
 
 
+def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
+    """Runs in the background after a use-by date photo is saved, so the
+    request that uploaded it (adding a new item, or rescanning an existing
+    one) returns immediately rather than making the client wait on the
+    vision model's round trip - the person is free to go on scanning the
+    next item straight away. Reads the photo back off disk rather than
+    carrying the bytes through the task closure, since that's already
+    where it needs to end up for the "view the photo" feature, and it
+    means a restart mid-extraction can't lose the photo itself.
+    """
+    if not db.get_item(item_id):
+        return  # deleted before extraction got a chance to run
+    path = db.date_photo_path(item_id)
+    if not path.exists():
+        return
+    result = vision.extract_use_by_date(path.read_bytes())
+    if not db.get_item(item_id):
+        return  # deleted while extraction was running
+    db.finish_date_extraction(item_id, result.get("date"), result.get("raw") or "", only_if_blank=only_if_blank)
+    _sync_now()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     scheduler.add_job(
@@ -95,7 +117,13 @@ templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 def _item_view(item: dict) -> dict:
     notify_days_before = settings.get_int("notify_days_before")
     bucket = db.bucket_for(item["expiry_date"], notify_days_before)
-    return {**item, "bucket": bucket, "days_left": db.days_left_for(item["expiry_date"])}
+    return {
+        **item,
+        "bucket": bucket,
+        "days_left": db.days_left_for(item["expiry_date"]),
+        "has_date_photo": bool(item.get("has_date_photo")),
+        "date_extraction_pending": bool(item.get("date_extraction_pending")),
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -135,12 +163,6 @@ async def lookup_product(code: str):
     return {"found": True, "cached": False, **product}
 
 
-@app.post("/api/extract-date")
-async def extract_date(photo: UploadFile = File(...)):
-    image_bytes = await photo.read()
-    return await run_in_threadpool(vision.extract_use_by_date, image_bytes)
-
-
 @app.get("/api/vision-configured")
 async def vision_configured():
     return {"configured": vision.configured()}
@@ -152,8 +174,20 @@ async def list_items():
     return {"items": [_item_view(i) for i in items]}
 
 
+@app.get("/api/items/{item_id}")
+async def get_single_item(item_id: int):
+    """A single item's current state - used by the edit panel to poll for
+    a rescan's background extraction finishing, without re-fetching (and
+    the dashboard re-rendering) the whole list just to check one item."""
+    item = db.get_item(item_id)
+    if not item:
+        return JSONResponse({"error": "Item not found."}, status_code=404)
+    return _item_view(item)
+
+
 @app.post("/api/items")
 async def add_item(
+    background_tasks: BackgroundTasks,
     barcode: str = Form(""),
     name: str = Form(...),
     brand: str = Form(""),
@@ -163,6 +197,7 @@ async def add_item(
     notes: str = Form(""),
     image_url: str = Form(""),
     source: str = Form("manual"),
+    date_photo: UploadFile | None = File(None),
 ):
     name = name.strip()
     if not name:
@@ -178,8 +213,46 @@ async def add_item(
         image_url=image_url.strip(),
         source=source.strip() or "manual",
     )
+    # A use-by date photo captured before the item existed (the normal case
+    # when adding something new) is attached here instead - reading it is
+    # queued in the background rather than making "Add to pantry" wait on
+    # the vision model, so scanning the next item can start immediately.
+    # only_if_blank=True: an expiry_date already typed into the form before
+    # submitting wins over whatever the background read finds later.
+    if date_photo is not None:
+        image_bytes = await date_photo.read()
+        db.save_date_photo(item_id, image_bytes)
+        db.start_date_extraction(item_id)
+        background_tasks.add_task(_extract_and_update, item_id, only_if_blank=True)
     await run_in_threadpool(_sync_now)
     return _item_view(db.get_item(item_id))
+
+
+@app.post("/api/items/{item_id}/date-photo")
+async def upload_date_photo(item_id: int, background_tasks: BackgroundTasks, photo: UploadFile = File(...)):
+    """Attaches (or replaces) a use-by date photo on an existing item - used
+    by the Pantry tab's "Rescan use-by date". Saves the photo and returns
+    immediately; extraction itself runs in the background exactly like a
+    newly added item's does, so closing the edit panel right away doesn't
+    lose it."""
+    if not db.get_item(item_id):
+        return JSONResponse({"error": "Item not found."}, status_code=404)
+    image_bytes = await photo.read()
+    db.save_date_photo(item_id, image_bytes)
+    db.start_date_extraction(item_id)
+    background_tasks.add_task(_extract_and_update, item_id)
+    return _item_view(db.get_item(item_id))
+
+
+@app.get("/api/items/{item_id}/date-photo")
+async def get_date_photo(item_id: int):
+    """Serves the photo a use-by date was (or is being) read from, so it
+    can be compared against the extracted date - best-effort OCR on
+    packaging print is always worth a sanity check."""
+    path = db.date_photo_path(item_id)
+    if not path.exists():
+        return JSONResponse({"error": "No photo stored for this item."}, status_code=404)
+    return FileResponse(path, media_type="image/jpeg")
 
 
 @app.post("/api/items/{item_id}")
