@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1
+
+- Fixed a use-by date with no year printed near it (e.g. packaging that
+  just says "31 OCT") sometimes coming back with a hallucinated, wrong
+  year that's already in the past (reported: a "31 Oct" photo came back
+  as 2023-10-31 instead of the intended 2026). The vision model is now
+  told to reply with a 0000 placeholder year instead of guessing one when
+  it can't see a year, and the app resolves that itself to the nearest
+  occurrence of that day/month that isn't already in the past - so an
+  item just bought no longer extracts as already expired. A date that
+  does have a real printed year is unaffected either way.
+
 ## 0.4.0
 
 - The use-by date camera now **auto-captures**: once the on-screen frame is
