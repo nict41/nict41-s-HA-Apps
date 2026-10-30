@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.0
+
+- Tapping a due-item notification now opens straight to the Pantry tab
+  instead of wherever Home Assistant last was - the notification's
+  `clickAction` now points at this add-on's own ingress panel.
+- No code change for product photos (confirmed working end-to-end against
+  Open Food Facts, including a real-world example) - if a particular
+  barcode still doesn't show one, Open Food Facts itself doesn't have a
+  front-of-pack photo for that product (common for own-brand/discount
+  items; well-known branded products are far more likely to have one).
+
 ## 0.6.0
 
 - Fixed the Home Assistant notify service appearing to get lost after

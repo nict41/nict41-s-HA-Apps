@@ -20,6 +20,7 @@ immediately).
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -157,6 +158,18 @@ def _notify_message(item: dict, bucket: str) -> tuple[str, str]:
     )
 
 
+def _ingress_click_action() -> str:
+    """The stable sidebar path Home Assistant uses to open this add-on's
+    own ingress panel, landing on its Pantry tab (see index.html's
+    `#pantry` hash handling) - set as a notification's clickAction so
+    tapping it opens straight there instead of wherever Home Assistant
+    last was. Supervisor always names an add-on's own container after its
+    slug, so reading our own hostname needs no extra permissions beyond
+    what this add-on already has.
+    """
+    return f"/hassio/ingress/{socket.gethostname()}#pantry"
+
+
 def _due_for_notification(item: dict, bucket: str) -> bool:
     last_bucket = item.get("last_notified_bucket")
     last_at = item.get("last_notified_at")
@@ -182,6 +195,10 @@ def notify_if_due(item: dict, bucket: str) -> bool:
 
     domain, _, service_name = service.partition(".")
     title, message = _notify_message(item, bucket)
-    _request("POST", f"/services/{domain}/{service_name}", {"title": title, "message": message})
+    _request(
+        "POST",
+        f"/services/{domain}/{service_name}",
+        {"title": title, "message": message, "data": {"clickAction": _ingress_click_action()}},
+    )
     db.mark_notified(item["id"], bucket)
     return True

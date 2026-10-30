@@ -1315,6 +1315,15 @@ $("#btn-check-now").addEventListener("click", async () => {
     loadSettings();
   }
 });
+
+// Deep-link support: a Home Assistant notification's clickAction points
+// here with a tab name as the URL hash (see ha_sync.py's
+// _ingress_click_action), so tapping a due-item notification opens
+// straight to that tab instead of wherever the app last was.
+const deepLinkView = location.hash.replace("#", "");
+if (["scan", "pantry", "settings"].includes(deepLinkView)) {
+  showView(deepLinkView);
+}
 </script>
 </body>
 </html>
