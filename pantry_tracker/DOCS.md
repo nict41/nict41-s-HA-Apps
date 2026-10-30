@@ -112,14 +112,17 @@ limitation.
   date" to capture the expiry date from a photo of the packaging, then tap
   "Add to pantry" right away - the date is read in the background and
   fills in on its own once it's done (check the Pantry tab), since OCR on
-  packaging print is best-effort and isn't worth waiting around for. A
+  packaging print is best-effort and isn't worth waiting around for. If
+  no year is printed, the app uses the nearest upcoming date (or one up
+  to 30 days ago, so forgotten food still shows as expired), and a date
+  over 180 days in the past is treated as a misread year. A
   date typed into the field by hand always wins over a background read
   that disagrees with it.
 - **Pantry** - everything you're tracking, grouped by urgency, dates shown
   as e.g. "1 July 2027", with a **Reading use-by date…** spinner shown
   while a background read is still in progress for that item. Each item
-  with a stored photo has a **View use-by photo** link, so you can compare
-  it against the date that was read from it. Each item has **Edit**
+  with a stored photo has a **View use-by photo** link, opening it in
+  the app so you can compare it against the date that was read from it. Each item has **Edit**
   (correct the name, quantity, category, or notes; pick a new date by
   hand, or tap **Rescan use-by date** to read it from a fresh photo the
   same way as when first adding the item - this also runs in the

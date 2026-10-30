@@ -14,7 +14,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-from datetime import date
+from datetime import date, timedelta
 from io import BytesIO
 
 from PIL import Image, ImageOps
@@ -22,24 +22,27 @@ from PIL import Image, ImageOps
 import settings
 
 _TIMEOUT_SECONDS = 60
-# A phone photo carries far more detail than a vision model needs to read a
-# printed date; downscaling first makes the round trip to the model much
-# faster without hurting legibility.
-_MAX_DIMENSION = 1024
+# Photos arrive already cropped to a date, so most of their pixels are the
+# print itself - this only reins in an uncropped photo from the file picker.
+_MAX_DIMENSION = 2048
 
+# Asks for a copy of the print rather than a formatted date. Told to output
+# YYYY-MM-DD, the model invents a year for packaging that doesn't print one
+# (2021 and 2023 in real scans), so working out the year is left to
+# _resolve_unknown_year below.
 _PROMPT = (
-    "This photo shows a food package. Find the printed use-by, best-before, "
-    "or expiry date on it. Reply with ONLY that date in strict YYYY-MM-DD "
-    "format (assume the 21st century for a 2-digit year). If the day and "
-    "month are printed but no year is printed anywhere near them, reply "
-    "with 0000 as the year instead of guessing one, e.g. 0000-10-31. If no "
-    "such date is visible or legible, reply with exactly: UNKNOWN"
+    "This is a photo of a printed use-by or best-before date on food "
+    "packaging. Copy that date exactly as it is printed, character for "
+    "character. Do not add a year if none is printed, and do not convert "
+    "the format. Ignore times, batch codes and lot numbers. Reply with only "
+    "the copied date. If no date is legible, reply with exactly: UNKNOWN"
 )
 
 _ISO_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 # DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY - the convention almost all UK/EU
 # packaging prints dates in, which is what this app is primarily built for.
 _DMY_RE = re.compile(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b")
+_DM_RE = re.compile(r"\b(\d{1,2})[./-](\d{1,2})\b")
 
 _MONTH_NAMES = (
     ("jan", "january"),
@@ -56,14 +59,21 @@ _MONTH_NAMES = (
     ("dec", "december"),
 )
 _MONTHS = {name: index + 1 for index, names in enumerate(_MONTH_NAMES) for name in names}
-_TEXT_DATE_RE = re.compile(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{2,4})\b")
-# Last-resort: a day + month name with no year token at all nearby (the
-# model ignored the "reply with 0000" instruction and just said e.g.
-# "31 Oct" or "31st October"). Only checked after every year-aware pattern
-# above has failed to match.
-_TEXT_DATE_NO_YEAR_RE = re.compile(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\b")
+_MONTH_PATTERN = "(" + "|".join(names[0] for names in _MONTH_NAMES) + ")[a-z]*"
+_DAY_PATTERN = r"(\d{1,2})(?:st|nd|rd|th)?"
+# Spaces are optional because the model sometimes runs the print together,
+# e.g. "L0828JAN2702:48". The lookahead stops a time being taken for a year:
+# "02 Nov 11:26" is not 2011.
+_TEXT_DATE_RE = re.compile(rf"{_DAY_PATTERN}\s*{_MONTH_PATTERN}\s*(\d{{4}}|\d{{2}})(?![\d:])", re.IGNORECASE)
+_TEXT_DATE_NO_YEAR_RE = re.compile(rf"{_DAY_PATTERN}\s*{_MONTH_PATTERN}", re.IGNORECASE)
 
-_UNKNOWN_YEAR = "0000"
+# How far past a date with no year can be and still mean this year's - long
+# enough that something bought and forgotten still shows as expired, instead
+# of silently gaining a year.
+_NO_YEAR_GRACE_DAYS = 30
+# Past this, a date with a year is treated as a misread year. Food this old
+# isn't being added to a pantry, but a model does sometimes invent a year.
+_MAX_PAST_DAYS = 180
 
 
 def _normalise_year(year: int) -> int:
@@ -72,74 +82,70 @@ def _normalise_year(year: int) -> int:
 
 
 def _resolve_unknown_year(month: int, day: int) -> int:
-    """Picks a year for a day/month with no printed year, favouring the
-    nearest occurrence that is today or still to come. Packaging almost
-    never actually omits the year - a model reply with none usually means
-    it couldn't read it and would otherwise guess, and a guessed year
-    landing in the past (e.g. "31 Oct" coming back as 31 Oct 2023) is a
-    worse default than assuming an item just bought is not already
-    expired. Scans forward a few years to also cover 29 February.
-    """
-    today = date.today()
-    candidates = []
-    for year in range(today.year, today.year + 8):
+    """The year of the nearest occurrence of a day and month that isn't
+    long past. Scans forward a few years to also cover 29 February."""
+    earliest = date.today() - timedelta(days=_NO_YEAR_GRACE_DAYS)
+    for year in range(earliest.year, earliest.year + 9):
         try:
-            candidates.append(date(year, month, day))
+            if date(year, month, day) >= earliest:
+                return year
         except ValueError:
-            continue  # 29 Feb in a non-leap year
-    for candidate in candidates:
-        if candidate >= today:
-            return candidate.year
-    return candidates[0].year if candidates else today.year
+            continue  # 29 Feb in a non-leap year, or not a real date at all
+    return earliest.year
 
 
-def _parse_date_text(text: str) -> str | None:
-    text = text.strip()
-
+def _read_date(text: str) -> date | None:
     match = _ISO_RE.search(text)
     if match:
-        year_s, month_s, day_s = match.groups()
-        month, day = int(month_s), int(day_s)
-        year = _resolve_unknown_year(month, day) if year_s == _UNKNOWN_YEAR else int(year_s)
         try:
-            return date(year, month, day).isoformat()
+            return date(*(int(g) for g in match.groups()))
         except ValueError:
             pass
 
     match = _TEXT_DATE_RE.search(text)
     if match:
-        day_s, month_name, year_s = match.groups()
-        month = _MONTHS.get(month_name.lower()[:3])
-        day = int(day_s)
-        if month:
-            year = _resolve_unknown_year(month, day) if year_s == _UNKNOWN_YEAR else _normalise_year(int(year_s))
-            try:
-                return date(year, month, day).isoformat()
-            except ValueError:
-                pass
+        try:
+            return date(_normalise_year(int(match[3])), _MONTHS[match[2].lower()], int(match[1]))
+        except ValueError:
+            pass
 
     match = _DMY_RE.search(text)
     if match:
-        day_s, month_s, year_s = match.groups()
-        day, month = int(day_s), int(month_s)
-        year = _resolve_unknown_year(month, day) if year_s == _UNKNOWN_YEAR else _normalise_year(int(year_s))
+        day, month, year = (int(g) for g in match.groups())
         try:
-            return date(year, month, day).isoformat()
+            return date(_normalise_year(year), month, day)
         except ValueError:
             pass
 
     match = _TEXT_DATE_NO_YEAR_RE.search(text)
     if match:
-        day_s, month_name = match.groups()
-        month = _MONTHS.get(month_name.lower()[:3])
-        day = int(day_s)
-        if month:
-            try:
-                return date(_resolve_unknown_year(month, day), month, day).isoformat()
-            except ValueError:
-                pass
+        day, month = int(match[1]), _MONTHS[match[2].lower()]
+        try:
+            return date(_resolve_unknown_year(month, day), month, day)
+        except ValueError:
+            pass
+
+    match = _DM_RE.search(text)
+    if match:
+        day, month = int(match[1]), int(match[2])
+        try:
+            return date(_resolve_unknown_year(month, day), month, day)
+        except ValueError:
+            pass
 
     return None
+
+
+def _parse_date_text(text: str) -> str | None:
+    parsed = _read_date(text.strip())
+    if parsed is None:
+        return None
+    if (date.today() - parsed).days > _MAX_PAST_DAYS:
+        try:
+            parsed = date(_resolve_unknown_year(parsed.month, parsed.day), parsed.month, parsed.day)
+        except ValueError:
+            return None
+    return parsed.isoformat()
 
 
 def configured() -> bool:

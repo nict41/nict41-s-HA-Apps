@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.9.0
+
+- Use-by photos and product photos now open in a viewer inside the app.
+  The old link opened a new browser tab, which isn't part of the Home
+  Assistant session and failed with `401: Unauthorized`.
+- Fixed wrong use-by dates such as `2023-03-14` for a pack printed `03 NOV`:
+  - The camera now asks for up to 4K for date and product photos instead of
+    the browser's low default, which left a cropped date about 250 pixels
+    wide, and uses continuous focus where the phone supports it. The size
+    limit on photos sent to the vision model went from 1024 to 2048 pixels.
+  - The model is now asked to copy the date as printed rather than reformat
+    it, because it was inventing a year when none was printed. The app works
+    out the year itself.
+  - A time after a date is no longer read as a year (`02 Nov 11:26` became
+    2011), and dates run together with other print are now understood.
+  - A date more than 180 days in the past is now treated as a misread year
+    and moved to its next occurrence.
+- A date with no year that passed within the last 30 days now stays in the
+  past, so forgotten food shows as expired instead of gaining a year.
+
 ## 0.8.0
 
 - Fixed tapping a notification not opening the Pantry tab. The link added

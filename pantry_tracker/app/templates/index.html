@@ -149,7 +149,11 @@
   .item-main { flex: 1; min-width: 0; }
   .item-name { font-weight: 600; }
   .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
-  .item-meta a { color: var(--accent); text-decoration: underline; }
+  .link-btn {
+    width: auto; min-height: 0; padding: 0; border: none; border-radius: 0;
+    background: none; color: var(--accent); font-size: inherit; text-decoration: underline;
+  }
+  [data-photo-url] { cursor: zoom-in; }
   .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .item-actions button { width: auto; min-height: 36px; padding: 6px 10px; font-size: 13px; }
 
@@ -169,7 +173,6 @@
     width: 64px; height: 64px; border-radius: 10px; object-fit: contain;
     border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
   }
-  a:has(> .photo-thumb) { display: inline-flex; }
 
   .toast {
     position: fixed;
@@ -289,6 +292,22 @@
     color: #fff;
     backdrop-filter: blur(4px);
   }
+  .photo-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 16px;
+    color: #fff;
+  }
+  .photo-modal img { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 10px; }
+  .photo-modal p { margin: 0; text-align: center; }
+  .photo-modal button { width: auto; min-width: 120px; color: #fff; border-color: rgba(255,255,255,0.3); }
   .scanner-frame.steady {
     border-color: #4ade80;
     box-shadow: 0 0 0 2000px rgba(0,0,0,0.35), 0 0 18px 3px rgba(74,222,128,0.65);
@@ -445,6 +464,12 @@
   </div>
 </div>
 
+<div id="photo-modal" class="photo-modal hidden">
+  <img id="photo-modal-img" alt="">
+  <p id="photo-modal-caption"></p>
+  <button type="button" class="ghost" id="btn-photo-modal-close">Close</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <nav class="tabs">
@@ -468,6 +493,24 @@ function toast(message) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
 }
+
+// ── Photo viewer ─────────────────────────────────────────────────────────
+// Photos open here, in the page, because a link to one would leave Home
+// Assistant: the ingress session is only valid inside the app, so a new
+// browser tab gets a 401.
+function setViewablePhoto(imgEl, url) {
+  imgEl.src = url;
+  imgEl.dataset.photoUrl = url;
+}
+
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("[data-photo-url]");
+  if (!el) return;
+  $("#photo-modal-img").src = el.dataset.photoUrl;
+  $("#photo-modal-caption").textContent = el.dataset.photoCaption || "";
+  $("#photo-modal").classList.remove("hidden");
+});
+$("#photo-modal").addEventListener("click", () => $("#photo-modal").classList.add("hidden"));
 
 // ── Tabs ─────────────────────────────────────────────────────────────────
 function showView(name) {
@@ -525,7 +568,7 @@ async function handleScannedBarcode(code) {
     const data = await res.json();
     openReviewForm({ barcode: code, notFound: false });
     if (data.display_image_url) {
-      $("#review-product-image").src = data.display_image_url;
+      setViewablePhoto($("#review-product-image"), data.display_image_url);
       $("#review-product-image").classList.remove("hidden");
     }
     if (data.found) {
@@ -741,15 +784,25 @@ async function openCamera(mode) {
   overlay.classList.remove("hidden");
 
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false,
-    });
+    const videoConstraints = { facingMode: { ideal: "environment" } };
+    // With no size requested the browser picks a low default around 640x480,
+    // which leaves a cropped date only about 250 pixels wide - too few to
+    // read reliably. A barcode doesn't need this, so that stays cheap.
+    if (mode !== "barcode") {
+      videoConstraints.width = { ideal: 3840 };
+      videoConstraints.height = { ideal: 2160 };
+    }
+    cameraStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
   } catch (err) {
     closeCamera();
     toast("Couldn't open the camera - choose a photo instead.");
     openFallbackPicker(mode);
     return;
+  }
+
+  const [track] = cameraStream.getVideoTracks();
+  if (track.getCapabilities?.().focusMode?.includes("continuous")) {
+    track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
   }
 
   video.srcObject = cameraStream;
@@ -840,7 +893,7 @@ function captureVideoFrame(video, cropRect) {
       canvas.height = video.videoHeight || 720;
       ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
     }
-    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95);
   });
 }
 
@@ -913,7 +966,7 @@ $("#btn-product-photo").addEventListener("click", () => {
 
 async function onProductPhotoCaptured(file) {
   const { barcode, imgEl } = productPhotoTarget;
-  imgEl.src = URL.createObjectURL(file);
+  setViewablePhoto(imgEl, URL.createObjectURL(file));
   imgEl.classList.remove("hidden");
 
   const body = new FormData();
@@ -976,7 +1029,7 @@ function onDatePhotoCaptured(file) {
   };
 
   if (target.thumbEl) {
-    target.thumbEl.src = URL.createObjectURL(file);
+    setViewablePhoto(target.thumbEl, URL.createObjectURL(file));
     target.thumbEl.classList.remove("hidden");
   }
 
@@ -1081,11 +1134,12 @@ function itemRowHtml(item) {
     : escapeHtml(
         item.expiry_date ? `${formatDisplayDate(item.expiry_date)} (${humanDays(item.days_left)})` : "No use-by date set"
       );
+  const photoCaption = item.expiry_date ? `Read as ${formatDisplayDate(item.expiry_date)}` : "No date read yet";
   const photoLink = item.has_date_photo
-    ? `<div class="item-meta"><a href="api/items/${item.id}/date-photo" target="_blank" rel="noopener">View use-by photo</a></div>`
+    ? `<div class="item-meta"><button type="button" class="link-btn" data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
     : "";
   const productImg = item.display_image_url
-    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
+    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
     : "";
   return `
     <div class="item-row" data-id="${item.id}">
@@ -1129,7 +1183,9 @@ function editFormHtml(item) {
       item.barcode
         ? `<div class="photo-step">
              <img class="product-thumb e-product-thumb ${item.display_image_url ? "" : "hidden"}" alt=""${
-               item.display_image_url ? ` src="${escapeAttr(item.display_image_url)}"` : ""
+               item.display_image_url
+                 ? ` src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}"`
+                 : ""
              }>
              <button type="button" class="ghost e-product-photo" style="width:auto;flex:1">📷 Photo of product</button>
            </div>`
@@ -1139,7 +1195,7 @@ function editFormHtml(item) {
     <div class="photo-step">
       ${
         item.has_date_photo
-          ? `<a href="${photoUrl}" target="_blank" rel="noopener"><img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}"></a>`
+          ? `<img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}" data-photo-url="${photoUrl}">`
           : `<img class="photo-thumb e-date-thumb hidden" alt="">`
       }
       <button type="button" class="ghost e-rescan-date" style="width:auto;flex:1">📅 Rescan use-by date</button>
@@ -1232,7 +1288,7 @@ function watchEditFormExtraction(id, editEl) {
 
     const thumb = editEl.querySelector(".e-date-thumb");
     if (thumb && item.has_date_photo) {
-      thumb.src = `api/items/${id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}`;
+      setViewablePhoto(thumb, `api/items/${id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}`);
     }
   }, 3000);
 }
