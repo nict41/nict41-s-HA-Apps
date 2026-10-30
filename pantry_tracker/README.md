@@ -14,9 +14,11 @@ from a phone-first ingress panel.
    permissions dance). The decoded barcode is looked up against
    [Open Food Facts](https://world.openfoodfacts.org) - a free, keyless,
    crowd-sourced product database - to pre-fill the product's name, brand,
-   quantity, category and photo - a barcode already scanned before is
-   served instantly from a local cache instead of hitting Open Food Facts
-   again. Crowd-sourced data is sometimes wrong or garbled for a
+   quantity, category and photo (shown once found, if Open Food Facts has
+   one on file for that barcode - not every product does, especially
+   own-brand/discount items) - a barcode already scanned before is served
+   instantly from a local cache instead of hitting Open Food Facts again.
+   Crowd-sourced data is sometimes wrong or garbled for a
    particular barcode; correcting it before tapping "Add to pantry" (or
    later, editing the item from the Pantry tab) fixes the cache too, so
    the same barcode serves your correction next time instead of the
@@ -42,7 +44,8 @@ from a phone-first ingress panel.
 5. A background check (configurable interval) re-evaluates every item and
    sends a **Home Assistant notification** through a `notify.*` service of
    your choice when something newly becomes due - with a repeat reminder
-   until you deal with it.
+   until you deal with it. Tapping the notification opens straight to the
+   **Pantry** tab.
 6. Every active item is also exposed as a Home Assistant sensor entity (no
    extra setup), so you can build your own automations or dashboards
    around your pantry too - see [Home Assistant entities](#home-assistant-entities).
