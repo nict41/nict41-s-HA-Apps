@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import functools
 import hmac
 import json
 import logging
@@ -8,6 +9,7 @@ import shutil
 import uuid
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from mcp_types import ImageContent, TextContent
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -25,7 +27,36 @@ from paths import project_file, project_path
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("android_dev")
-server = MCPServer("android-dev", version="0.1.0")
+INSTRUCTIONS = """Android builds and real-phone control. No emulator: this host has no KVM.
+Projects are in /share/android_dev/projects/<name>. If your own container mounts /share, edit them there directly.
+New project: write settings.gradle.kts and the build files, then call gradle_wrapper, then gradle_run.
+Known good: AGP 9.5.0 with its built-in Kotlin, compileSdk 36, Gradle 9.8.2, JDK 21.
+gradle_run only starts a job: poll job_status until it leaves running, then use list_artifacts.
+Phone: pair once with adb_pair (the pairing port and code), then adb_connect (a different port, which can change).
+Then install_apk, launch, logcat, screenshot, ui_dump, tap, swipe, input_text, key_event. adb_shell runs on the phone.
+input_text is ASCII only, and a literal %s types a space.
+Release signing: keystore_create once, then pass signing_keystore to gradle_run and read the ANDROID_SIGNING_* variables in signingConfigs. Keystores cannot be overwritten or exported.
+Call status first if anything looks unset. Full guide: DOCS.md in nict41/nict41-s-HA-Apps/android_dev."""
+server = MCPServer("android-dev", version="0.1.1", instructions=INSTRUCTIONS)
+
+
+def tool(description):
+    """Register a tool whose failures reach the caller.
+
+    The SDK replaces any exception other than ToolError with a bare
+    "Error executing tool <name>", which would hide why adb or a check failed.
+    """
+    def register(function):
+        @functools.wraps(function)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await function(*args, **kwargs)
+            except ToolError:
+                raise
+            except Exception as exc:
+                raise ToolError(str(exc) or type(exc).__name__) from exc
+        return server.tool(description=description)(wrapper)
+    return register
 
 
 def text_result(value):
@@ -33,7 +64,7 @@ def text_result(value):
     return [TextContent(type="text", text=value)]
 
 
-@server.tool(description="Show SDK setup, Java, storage, connected devices, and current build job status.")
+@tool("Show SDK setup, Java, storage, connected devices, and current build job status.")
 async def status() -> list:
     setup_state = dict(setup.state)
     try:
@@ -48,18 +79,18 @@ async def status() -> list:
     return text_result(info)
 
 
-@server.tool(description="Start or rerun verified Android SDK and Gradle setup in the background; poll status for progress. This requires the licence option to be enabled.")
+@tool("Start or rerun verified Android SDK and Gradle setup in the background; poll status for progress. This requires the licence option to be enabled.")
 async def sdk_setup() -> list:
     setup.start_setup()
     return text_result(dict(setup.state))
 
 
-@server.tool(description="List Android SDK packages installed in the runtime SDK.")
+@tool("List Android SDK packages installed in the runtime SDK.")
 async def sdk_list() -> list:
     return text_result(await asyncio.to_thread(setup.installed_packages))
 
 
-@server.tool(description="Install Android SDK packages whose names use letters, digits, dot, underscore, semicolon, and dash.")
+@tool("Install Android SDK packages whose names use letters, digits, dot, underscore, semicolon, and dash.")
 async def sdk_install(packages: list[str]) -> list:
     if any(not re.fullmatch(r"[A-Za-z0-9._;-]+", item) for item in packages): raise ValueError("Invalid package name")
     if not setup.LICENSE_ACCEPTED: raise ValueError("Enable accept_android_sdk_license before installing SDK packages")
@@ -70,14 +101,14 @@ async def sdk_install(packages: list[str]) -> list:
     return text_result({"exit_code": p.returncode, "output": output, "truncated": "earlier output truncated" in output})
 
 
-@server.tool(description="List project directories under /share/android_dev/projects.")
+@tool("List project directories under /share/android_dev/projects.")
 async def list_projects() -> list:
     PROJECTS.mkdir(parents=True, exist_ok=True)
     names = sorted(p.name for p in PROJECTS.iterdir() if p.is_dir() and p.resolve().parent == PROJECTS.resolve())
     return text_result({"projects": names[:500], "truncated": len(names) > 500})
 
 
-@server.tool(description="Create Gradle wrapper files using the pinned system Gradle installation.")
+@tool("Create Gradle wrapper files using the pinned system Gradle installation.")
 async def gradle_wrapper(project: str, gradle_version: str | None = None) -> list:
     path = project_path(project)
     command = [str(GRADLE), "wrapper"]
@@ -89,7 +120,7 @@ async def gradle_wrapper(project: str, gradle_version: str | None = None) -> lis
     return text_result({"exit_code": p.returncode, "output": "\n".join(output[-100:]), "truncated": len(output) > 100 or any("earlier output truncated" in line for line in output)})
 
 
-@server.tool(description="Run Gradle tasks asynchronously in a project; one job runs at a time.")
+@tool("Run Gradle tasks asynchronously in a project; one job runs at a time.")
 async def gradle_run(project: str, tasks: list[str], args: list[str] = [], signing_keystore: str | None = None) -> list:
     path = project_path(project)
     if not (path / "gradlew").is_file(): raise ValueError("Project has no ./gradlew; run gradle_wrapper first")
@@ -105,17 +136,17 @@ async def gradle_run(project: str, tasks: list[str], args: list[str] = [], signi
     return text_result(jobs.start_job(project, ["sh", "./gradlew", *tasks, *args], env, JOB_TIMEOUT))
 
 
-@server.tool(description="Get build job state and a bounded tail of its log.")
+@tool("Get build job state and a bounded tail of its log.")
 async def job_status(job_id: str, tail_lines: int = 100) -> list:
     return text_result(jobs.status(job_id, tail_lines))
 
 
-@server.tool(description="Cancel a running Gradle build and its child process group.")
+@tool("Cancel a running Gradle build and its child process group.")
 async def job_cancel(job_id: str) -> list:
     return text_result(jobs.cancel(job_id))
 
 
-@server.tool(description="Find APKs, AABs, and test reports under project build output directories.")
+@tool("Find APKs, AABs, and test reports under project build output directories.")
 async def list_artifacts(project: str) -> list:
     root = project_path(project)
     items = []
@@ -128,25 +159,25 @@ async def list_artifacts(project: str) -> list:
     return text_result({"artifacts": items[:500], "truncated": len(items) > 500})
 
 
-@server.tool(description="Pair an Android phone using the wireless debugging pairing host:port and code.")
+@tool("Pair an Android phone using the wireless debugging pairing host:port and code.")
 async def adb_pair(host_port: str, code: str) -> list: return text_result(await asyncio.to_thread(adb.pair, host_port, code))
 
 
-@server.tool(description="Connect adb to a phone's wireless debugging connect host:port.")
+@tool("Connect adb to a phone's wireless debugging connect host:port.")
 async def adb_connect(host_port: str) -> list: return text_result(await asyncio.to_thread(adb.connect, host_port))
 
 
-@server.tool(description="Disconnect adb from a wireless phone host:port.")
+@tool("Disconnect adb from a wireless phone host:port.")
 async def adb_disconnect(host_port: str) -> list:
     adb.validate_host_port(host_port)
     return text_result(await asyncio.to_thread(adb.run, ["disconnect", host_port]))
 
 
-@server.tool(description="List adb devices.")
+@tool("List adb devices.")
 async def adb_devices() -> list: return text_result(await asyncio.to_thread(adb.devices))
 
 
-@server.tool(description="Install an APK located inside the projects root on the selected phone.")
+@tool("Install an APK located inside the projects root on the selected phone.")
 async def install_apk(path: str, device: str | None = None, replace: bool = True, grant_permissions: bool = False) -> list:
     apk = project_file(path)
     args = ["install", "-t"]
@@ -160,12 +191,12 @@ def valid_package(value):
     if not adb.PKG.fullmatch(value): raise ValueError("Invalid Android package name")
 
 
-@server.tool(description="Uninstall an Android package from a phone.")
+@tool("Uninstall an Android package from a phone.")
 async def uninstall(package: str, device: str | None = None) -> list:
     valid_package(package); return text_result(await asyncio.to_thread(adb.device_run, device, ["uninstall", package]))
 
 
-@server.tool(description="Launch an Android package, optionally specifying its activity.")
+@tool("Launch an Android package, optionally specifying its activity.")
 async def launch(package: str, activity: str | None = None, device: str | None = None) -> list:
     valid_package(package)
     if activity and not re.fullmatch(r"(?:\.[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*|[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*)", activity):
@@ -174,12 +205,12 @@ async def launch(package: str, activity: str | None = None, device: str | None =
     return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"] if not activity else ["shell", "am", "start", "-n", component]))
 
 
-@server.tool(description="Force stop an Android package.")
+@tool("Force stop an Android package.")
 async def force_stop(package: str, device: str | None = None) -> list:
     valid_package(package); return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "am", "force-stop", package]))
 
 
-@server.tool(description="Read bounded Android logcat output, optionally filtered to a running package process.")
+@tool("Read bounded Android logcat output, optionally filtered to a running package process.")
 async def logcat(device: str | None = None, lines: int = 300, package: str | None = None, min_priority: str = "V") -> list:
     args = ["logcat", "-d", "-v", "threadtime"]
     if package:
@@ -194,13 +225,13 @@ async def logcat(device: str | None = None, lines: int = 300, package: str | Non
     return text_result({"output": "\n".join(rows[-count:]), "truncated": len(rows) > count})
 
 
-@server.tool(description="Save a full-resolution phone screenshot and return a preview image resized to at most 1280 pixels.")
+@tool("Save a full-resolution phone screenshot and return a preview image resized to at most 1280 pixels.")
 async def screenshot(device: str | None = None) -> list:
     result = await asyncio.to_thread(adb.screenshot, device)
     return [TextContent(type="text", text=f"Screenshot: {result['path']}"), ImageContent(type="image", data=result["data"], mime_type="image/png")]
 
 
-@server.tool(description="Return bounded uiautomator XML for the phone's current screen.")
+@tool("Return bounded uiautomator XML for the phone's current screen.")
 async def ui_dump(device: str | None = None) -> list:
     def capture():
         remote = f"/sdcard/android_dev_{uuid.uuid4().hex}.xml"
@@ -215,29 +246,29 @@ async def ui_dump(device: str | None = None) -> list:
     return text_result(await asyncio.to_thread(capture))
 
 
-@server.tool(description="Tap screen coordinates.")
+@tool("Tap screen coordinates.")
 async def tap(x: int, y: int, device: str | None = None) -> list:
     return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "input", "tap", str(x), str(y)]))
 
 
-@server.tool(description="Swipe between screen coordinates.")
+@tool("Swipe between screen coordinates.")
 async def swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300, device: str | None = None) -> list:
     if not 1 <= duration_ms <= 60000: raise ValueError("duration_ms must be 1..60000")
     return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration_ms)]))
 
 
-@server.tool(description="Type text into the focused Android field.")
+@tool("Type text into the focused Android field.")
 async def input_text(text: str, device: str | None = None) -> list:
     return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "input", "text", adb.input_escape(text)]))
 
 
-@server.tool(description="Send an Android key event by key code or documented key name.")
+@tool("Send an Android key event by key code or documented key name.")
 async def key_event(key: str, device: str | None = None) -> list:
     if not re.fullmatch(r"[A-Za-z0-9_]+", key): raise ValueError("Invalid key event")
     return text_result(await asyncio.to_thread(adb.device_run, device, ["shell", "input", "keyevent", key]))
 
 
-@server.tool(description="Run an explicitly requested command in the phone's shell.")
+@tool("Run an explicitly requested command in the phone's shell.")
 async def adb_shell(command: str, device: str | None = None, timeout_seconds: int = 30) -> list:
     if not 1 <= timeout_seconds <= 300: raise ValueError("timeout_seconds must be 1..300")
     p = await asyncio.to_thread(adb.device_subprocess, device, ["shell", command], timeout_seconds, max_bytes=12000)
@@ -245,12 +276,12 @@ async def adb_shell(command: str, device: str | None = None, timeout_seconds: in
     return text_result({"exit_code": p.returncode, "output": "\n".join(output[-200:]), "truncated": len(output) > 200 or any("earlier output truncated" in line for line in output)})
 
 
-@server.tool(description="Create a release signing keystore. Passwords are generated privately and never returned.")
+@tool("Create a release signing keystore. Passwords are generated privately and never returned.")
 async def keystore_create(name: str, alias: str = "release", dname: str | None = None) -> list:
     return text_result(await asyncio.to_thread(keystore.create, name, alias, dname))
 
 
-@server.tool(description="List signing keystore names and SHA-256 fingerprints.")
+@tool("List signing keystore names and SHA-256 fingerprints.")
 async def keystore_list() -> list:
     items = await asyncio.to_thread(keystore.listing)
     return text_result({"keystores": items[:100], "truncated": len(items) > 100})

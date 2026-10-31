@@ -48,6 +48,9 @@ def test_http_auth_health_and_mcp_protocol(monkeypatch):
         shot = client.post("/mcp", headers=headers, json={"jsonrpc":"2.0", "id":4, "method":"tools/call",
             "params":{"name":"screenshot", "arguments":{}}}).json()["result"]["content"]
         assert [item["type"] for item in shot] == ["text", "image"] and shot[1]["data"] == "aGk="
+        failed = client.post("/mcp", headers=headers, json={"jsonrpc":"2.0", "id":5, "method":"tools/call",
+            "params":{"name":"gradle_run", "arguments":{"project":"../x", "tasks":["a"]}}}).json()["result"]
+        assert failed["isError"] and "Invalid project name" in failed["content"][0]["text"]
         foreign = client.post("/mcp", headers={"Authorization": f"Bearer {TOKEN}", "Host": "attacker.invalid:8200"}, json={})
         assert foreign.status_code == 421
 

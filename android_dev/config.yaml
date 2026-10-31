@@ -1,5 +1,5 @@
 name: "Android Dev"
-version: "0.1.0"
+version: "0.1.1"
 slug: "android_dev"
 description: "Android development tools and wireless device control for Claude Code"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/android_dev"
