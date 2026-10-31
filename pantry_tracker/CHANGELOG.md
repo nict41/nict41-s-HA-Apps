@@ -1,3 +1,11 @@
+## 0.14.0
+
+- Moved Home Assistant state refreshes off request handling into a coalescing background worker; added a 00:05 local sync and retained five-minute republishing.
+- Added explicit Check now outcomes, Open Food Facts unavailable reporting, and local product image caching.
+- Restricted HTTP access to Supervisor ingress and loopback peers, and removed direct port options and obsolete routes.
+- Added daily retention for old consumed-item date photos and reduced list rendering database queries.
+- Removed the configurable check interval; notification repeats remain configured in hours.
+
 ## 0.13.0
 
 - Track printed and effective use-by dates, opened dates, fridge/cupboard/freezer

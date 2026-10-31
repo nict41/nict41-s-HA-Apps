@@ -35,7 +35,6 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "")
     monkeypatch.setenv("NOTIFY_DAYS_BEFORE", "3")
     monkeypatch.setenv("NOTIFY_REPEAT_HOURS", "24")
-    monkeypatch.setenv("CHECK_INTERVAL_HOURS", "12")
     monkeypatch.setenv("VISION_API_BASE", "")
     monkeypatch.setenv("VISION_API_KEY", "")
     monkeypatch.setenv("VISION_MODEL", "glm-ocr:latest")

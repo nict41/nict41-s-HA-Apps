@@ -13,18 +13,17 @@ def test_set_many_persists_and_clamps():
         {
             "notify_days_before": 999,
             "notify_repeat_hours": 0,
-            "check_interval_hours": 6,
         }
     )
     assert result["notify_days_before"] == 30  # clamped to max
     assert result["notify_repeat_hours"] == 1  # clamped to min
-    assert result["check_interval_hours"] == 6
+
 
 
 def test_set_many_ignores_invalid_numbers():
-    before = settings.get_int("check_interval_hours")
-    settings.set_many({"check_interval_hours": "not-a-number"})
-    assert settings.get_int("check_interval_hours") == before
+    before = settings.get_int("notify_repeat_hours")
+    settings.set_many({"notify_repeat_hours": "not-a-number"})
+    assert settings.get_int("notify_repeat_hours") == before
 
 
 def test_set_many_ignores_unknown_keys():

@@ -20,6 +20,8 @@ import json
 import os
 import re
 import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -45,6 +47,54 @@ _BUCKET_ICONS = {
 # Buckets worth alerting on. OK, unknown, and frozen items have no current
 # use-by warning to send.
 _NOTIFIABLE_BUCKETS = (db.BUCKET_EXPIRING_SOON, db.BUCKET_EXPIRED)
+_SYNC_REQUESTED = threading.Event()
+_SYNC_STOP = threading.Event()
+_SYNC_THREAD = None
+_SYNC_LOCK = threading.Lock()
+
+
+def request_sync() -> None:
+    """Requests a background refresh; repeated requests are coalesced."""
+    if configured() and _SYNC_THREAD is not None and _SYNC_THREAD.is_alive():
+        _SYNC_REQUESTED.set()
+
+
+def _sync_worker() -> None:
+    while not _SYNC_STOP.is_set():
+        if not _SYNC_REQUESTED.wait(0.5):
+            continue
+        # Let a burst of mutations settle, then read the latest item list.
+        time.sleep(0.1)
+        _SYNC_REQUESTED.clear()
+        try:
+            sync(db.list_items([db.STATUS_ACTIVE]))
+        except Exception as exc:
+            print(f"[pantry_tracker] Background sync failed: {type(exc).__name__}", flush=True)
+
+
+def start_sync_worker() -> None:
+    global _SYNC_THREAD
+    if not configured():
+        return
+    with _SYNC_LOCK:
+        if _SYNC_THREAD is not None and _SYNC_THREAD.is_alive():
+            return
+        _SYNC_STOP.clear()
+        _SYNC_REQUESTED.clear()
+        _SYNC_THREAD = threading.Thread(target=_sync_worker, name="pantry-ha-sync", daemon=True)
+        _SYNC_THREAD.start()
+
+
+def stop_sync_worker() -> None:
+    global _SYNC_THREAD
+    with _SYNC_LOCK:
+        thread = _SYNC_THREAD
+        _SYNC_STOP.set()
+    if thread is not None:
+        thread.join()
+    with _SYNC_LOCK:
+        if _SYNC_THREAD is thread:
+            _SYNC_THREAD = None
 
 
 def configured() -> bool:
@@ -153,7 +203,8 @@ def sync(active_items: list[dict]) -> None:
     notify_days_before = settings.get_int("notify_days_before")
     items_with_buckets = [(item, db.bucket_for(item, notify_days_before)) for item in active_items]
 
-    _request("POST", f"/states/{_SUMMARY_ENTITY_ID}", _summary_state(items_with_buckets))
+    if not _request("POST", f"/states/{_SUMMARY_ENTITY_ID}", _summary_state(items_with_buckets)):
+        return
 
     current_ids = set()
     for item, bucket in items_with_buckets:
@@ -194,17 +245,19 @@ def _due_for_notification(item: dict, bucket: str) -> bool:
     return elapsed >= timedelta(hours=repeat_hours) - timedelta(hours=1)
 
 
-def notify_summary(items: list[dict]) -> int:
+def notify_summary(items: list[dict]) -> str:
     service = settings.notify_service()
+    if not configured():
+        return "not_configured"
     if not service or "." not in service:
-        return 0
+        return "not_configured"
     due = []
     for item in items:
         bucket = db.bucket_for(item, settings.get_int("notify_days_before"))
         if bucket in _NOTIFIABLE_BUCKETS and _due_for_notification(item, bucket):
             due.append((item, bucket))
     if not due:
-        return 0
+        return "nothing_due"
     grouped = {"Expired": [], "Today": [], "Tomorrow": []}
     for item, bucket in due:
         days = db.days_left_for(item)
@@ -233,4 +286,4 @@ def notify_summary(items: list[dict]) -> int:
     if ok:
         for item, bucket in due:
             db.mark_notified(item["id"], bucket)
-    return 1 if ok else 0
+    return "sent" if ok else "failed"

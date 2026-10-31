@@ -30,9 +30,11 @@ import vision
 import tidy
 import ha_events
 
-_CHECK_JOB_ID = "check_cycle"
 _REPUBLISH_JOB_ID = "republish_after_restart"
 _NOTIFY_JOB_ID = "daily_notification"
+_SYNC_JOB_ID = "midnight_sync"
+_RETENTION_JOB_ID = "photo_retention"
+_PRODUCT_IMAGE_BACKFILL_STATE_KEY = "product_image_backfill_done"
 _IMAGE_BACKFILL_STATE_KEY = "image_backfill_done"
 # Open Food Facts asks clients to keep product lookups well under 100/minute.
 _BACKFILL_LOOKUP_DELAY_SECONDS = 1
@@ -56,20 +58,24 @@ db.init_db()
 scheduler = BackgroundScheduler(timezone=db.local_zone())
 
 
-def run_check_cycle() -> None:
-    """Sends one due-item summary and pushes current state to Home Assistant.
-    Runs daily at `notify_hour` and on demand from "Check now"."""
+def run_check_cycle() -> str:
+    """Sends due-item summary and queues a current-state sync."""
     items = db.list_items([db.STATUS_ACTIVE])
-    notified = ha_sync.notify_summary(items)
-
-    # Re-fetch: notify_summary() may have updated last_notified_* on some
-    # items, and the summary/entity sync doesn't need that field, but
-    # keeping the list fresh avoids syncing stale in-memory copies.
-    items = db.list_items([db.STATUS_ACTIVE])
-    ha_sync.sync(items)
-
+    result = ha_sync.notify_summary(items)
     db.set_state("last_check_at", db.now_iso())
-    db.set_state("last_check_summary", f"checked {len(items)} item(s), sent {notified} notification(s)")
+    summaries = {
+        "sent": "Summary sent",
+        "nothing_due": "Nothing is due right now",
+        "failed": "Couldn't send the summary",
+        "not_configured": "Notifications aren't set up",
+    }
+    db.set_state("last_check_summary", summaries[result])
+    ha_sync.request_sync()
+    return result
+
+
+def run_full_sync() -> None:
+    ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
 
 
 def run_republish_check() -> None:
@@ -77,12 +83,6 @@ def run_republish_check() -> None:
     if ha_sync.summary_state_exists() is False:
         ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
 
-
-def _sync_now() -> None:
-    """A lighter sync for immediate feedback after a dashboard mutation -
-    pushes current Home Assistant sensor state without touching
-    notifications, which stay governed by the scheduled/manual check cycle."""
-    ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
 
 
 def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
@@ -112,14 +112,14 @@ def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
         return  # deleted while extraction was running
     candidates = result.get("candidates") or ([{"date": result["date"], "repaired": False}] if result.get("date") else [])
     db.finish_date_extraction(item_id, candidates, result.get("raw") or "", only_if_blank=only_if_blank)
-    _sync_now()
+    ha_sync.request_sync()
 
 
 def run_image_backfill() -> None:
-    """Fills in product images for items added before 0.6.0, when the add
-    form never submitted one. Runs once: a lookup that fails or finds
-    nothing leaves the flag unset so it's retried on the next start, since
-    "not found" and "Open Food Facts was unreachable" look the same here."""
+    """Fills in product image URLs for items added before 0.6.0.
+
+    Lookup failures leave the flag unset so the backfill retries on restart.
+    """
     if db.get_state(_IMAGE_BACKFILL_STATE_KEY):
         return
     complete = True
@@ -127,16 +127,58 @@ def run_image_backfill() -> None:
         cached = db.get_cached_barcode(barcode)
         image_url = cached["image_url"] if cached else ""
         if not image_url:
-            product = lookup.lookup_barcode(barcode)
+            try:
+                product = lookup.lookup_barcode(barcode)
+            except lookup.LookupUnavailable:
+                product = None
             time.sleep(_BACKFILL_LOOKUP_DELAY_SECONDS)
             if product is None:
                 complete = False
                 continue
             image_url = product["image_url"]
+            if image_url:
+                photos.download_product_image(image_url, barcode)
         if image_url:
             db.apply_barcode_image(barcode, image_url)
     if complete:
         db.set_state(_IMAGE_BACKFILL_STATE_KEY, db.now_iso())
+
+
+def run_product_image_backfill() -> None:
+    """Caches product images for active barcodes once per installation."""
+    if db.get_state(_PRODUCT_IMAGE_BACKFILL_STATE_KEY):
+        return
+    complete = True
+    barcodes = sorted({
+        item["barcode"]
+        for item in db.list_items([db.STATUS_ACTIVE])
+        if db.valid_barcode(item.get("barcode"))
+    })
+    for code in barcodes:
+        if db.product_image_path(code).exists():
+            continue
+        cached = db.get_cached_barcode(code)
+        image_url = cached.get("image_url") if cached else ""
+        if not image_url:
+            try:
+                product = lookup.lookup_barcode(code)
+            except lookup.LookupUnavailable:
+                complete = False
+                time.sleep(_BACKFILL_LOOKUP_DELAY_SECONDS)
+                continue
+            time.sleep(_BACKFILL_LOOKUP_DELAY_SECONDS)
+            if product is None:
+                continue
+            image_url = product.get("image_url", "")
+        if image_url:
+            photos.download_product_image(image_url, code)
+        time.sleep(_BACKFILL_LOOKUP_DELAY_SECONDS)
+    if complete:
+        db.set_state(_PRODUCT_IMAGE_BACKFILL_STATE_KEY, db.now_iso())
+
+
+def run_photo_retention() -> None:
+    db.expire_old_date_photos()
 
 
 def run_pending_date_extractions() -> None:
@@ -149,12 +191,15 @@ def run_pending_date_extractions() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     tidy_existing_data()
+    scheduler.add_job(run_full_sync, next_run_time=datetime.now())
     scheduler.add_job(
-        lambda: ha_sync.sync(db.list_items([db.STATUS_ACTIVE])),
-        "interval",
-        hours=settings.get_int("check_interval_hours"),
-        next_run_time=datetime.now(),
-        id=_CHECK_JOB_ID,
+        run_full_sync,
+        "cron",
+        hour=0,
+        minute=5,
+        id=_SYNC_JOB_ID,
+        misfire_grace_time=3600,
+        coalesce=True,
     )
     scheduler.add_job(run_republish_check, "interval", minutes=5, next_run_time=datetime.now(), id=_REPUBLISH_JOB_ID)
     scheduler.add_job(run_check_cycle, "cron", hour=settings.get_int("notify_hour"), id=_NOTIFY_JOB_ID,
@@ -164,30 +209,23 @@ async def lifespan(_app: FastAPI):
         flush=True,
     )
     scheduler.add_job(run_image_backfill, next_run_time=datetime.now())
+    scheduler.add_job(run_product_image_backfill, next_run_time=datetime.now())
+    scheduler.add_job(run_photo_retention, "cron", hour=0, minute=15, id=_RETENTION_JOB_ID, coalesce=True)
     scheduler.add_job(run_pending_date_extractions, next_run_time=datetime.now())
     scheduler.start()
     stop_events = threading.Event()
     event_thread = None
     if ha_sync.configured():
+        ha_sync.start_sync_worker()
         event_thread = threading.Thread(target=ha_events.run, args=(stop_events,), daemon=True)
         event_thread.start()
     yield
     stop_events.set()
     if event_thread is not None:
         event_thread.join(timeout=2)
+    ha_sync.stop_sync_worker()
     scheduler.shutdown(wait=False)
 
-
-def _reschedule_check_job() -> None:
-    """Applies a changed check interval to the running scheduler immediately,
-    without an add-on restart. A no-op under the test client, which doesn't
-    run the lifespan."""
-    if not scheduler.running:
-        return
-    try:
-        scheduler.reschedule_job(_CHECK_JOB_ID, trigger="interval", hours=settings.get_int("check_interval_hours"))
-    except JobLookupError:
-        pass
 
 
 def tidy_existing_data() -> None:
@@ -238,25 +276,42 @@ class _StaticFiles(StaticFiles):
 
 
 app = FastAPI(title="Pantry Tracker", lifespan=lifespan)
+_ALLOWED_PEERS = {"172.30.32.2", "127.0.0.1", "::1", "testclient"}
+
+
+@app.middleware("http")
+async def ingress_only(request: Request, call_next):
+    peer = request.client.host if request.client else ""
+    if peer not in _ALLOWED_PEERS:
+        return Response(status_code=403)
+    return await call_next(request)
+
 app.mount("/static", _StaticFiles(directory=APP_DIR / "static", check_dir=False), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 
 def _display_image_url(barcode: str | None, image_url: str | None) -> str:
-    """What to actually show for a product: a photo taken in the app wins
-    over the Open Food Facts one, which often doesn't exist at all for
-    own-brand items. Relative, so it works under ingress and direct access."""
+    """Prefers a user photo, then a local OFF copy, then its remote URL."""
     if db.valid_barcode(barcode):
-        path = db.product_photo_path(barcode)
-        if path.exists():
-            return f"api/barcodes/{barcode}/photo?v={int(path.stat().st_mtime)}"
+        user_photo = db.product_photo_path(barcode)
+        if user_photo.exists():
+            return f"api/barcodes/{barcode}/photo?v={int(user_photo.stat().st_mtime)}"
+        local_image = db.product_image_path(barcode)
+        if local_image.exists():
+            return f"api/barcodes/{barcode}/photo?v={int(local_image.stat().st_mtime)}"
     return image_url or ""
 
 
-def _item_view(item: dict) -> dict:
-    notify_days_before = settings.get_int("notify_days_before")
+def _item_view(item: dict, notify_days_before: int | None = None,
+               barcode_cache: dict | None = None) -> dict:
+    if notify_days_before is None:
+        notify_days_before = settings.get_int("notify_days_before")
     bucket = db.bucket_for(item, notify_days_before)
-    cached = db.get_cached_barcode(item.get("barcode")) if item.get("barcode") else None
+    cached = None
+    if item.get("barcode"):
+        cached = (barcode_cache or {}).get(item.get("barcode"))
+        if cached is None and barcode_cache is None:
+            cached = db.get_cached_barcode(item.get("barcode"))
     return {
         **item,
         "bucket": bucket,
@@ -333,9 +388,10 @@ async def scan(photo: UploadFile = File(...)):
 
 
 @app.get("/api/lookup/{code}")
-async def lookup_product(code: str):
+async def lookup_product(code: str, background_tasks: BackgroundTasks):
     cached = db.get_cached_barcode(code)
     if cached:
+        background_tasks.add_task(photos.download_product_image, cached.get("image_url", ""), code)
         return {
             "found": True,
             "cached": True,
@@ -349,12 +405,16 @@ async def lookup_product(code: str):
             **({"opened_days": cached.get("opened_days")} if cached.get("opened_days") else {}),
         }
 
-    product = await run_in_threadpool(lookup.lookup_barcode, code)
+    try:
+        product = await run_in_threadpool(lookup.lookup_barcode, code)
+    except lookup.LookupUnavailable:
+        return {"found": False, "unavailable": True, "display_image_url": _display_image_url(code, "")}
     if not product:
         return {"found": False, "display_image_url": _display_image_url(code, "")}
     product["name"] = tidy.tidy_name(product.get("name", ""))
     product["brand"] = tidy.tidy_name(product.get("brand", ""))
     db.cache_barcode(code, product)
+    background_tasks.add_task(photos.download_product_image, product["image_url"], code)
     return {
         "found": True,
         "cached": False,
@@ -376,20 +436,23 @@ async def upload_product_photo(code: str, photo: UploadFile = File(...)):
 
 @app.get("/api/barcodes/{code}/photo")
 async def get_product_photo(code: str):
-    if not db.valid_barcode(code) or not db.product_photo_path(code).exists():
+    if not db.valid_barcode(code):
         return JSONResponse({"error": "No photo stored for this barcode."}, status_code=404)
-    return FileResponse(db.product_photo_path(code), media_type="image/jpeg")
-
-
-@app.get("/api/vision-configured")
-async def vision_configured():
-    return {"configured": vision.configured()}
+    path = db.product_photo_path(code)
+    if not path.exists():
+        path = db.product_image_path(code)
+    if not path.exists():
+        return JSONResponse({"error": "No photo stored for this barcode."}, status_code=404)
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/items")
 async def list_items():
     items = db.list_items([db.STATUS_ACTIVE])
-    return {"items": [_item_view(i) for i in items]}
+    notify_days_before = settings.get_int("notify_days_before")
+    barcodes = {item.get("barcode") for item in items if item.get("barcode")}
+    cache = db.get_cached_barcodes(list(barcodes))
+    return {"items": [_item_view(i, notify_days_before, cache) for i in items]}
 
 
 @app.get("/api/barcodes/{code}/active")
@@ -534,7 +597,7 @@ async def add_item(
         db.save_date_photo(item_id, image_bytes)
         db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None, _valid_ocr_candidates(ocr_candidates))
         background_tasks.add_task(_extract_and_update, item_id, only_if_blank=True)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return _item_view(db.get_item(item_id))
 
 
@@ -648,7 +711,7 @@ async def edit_item(
             db.update_cached_barcode(existing["barcode"], location=location)
         if days is not None:
             db.update_cached_barcode(existing["barcode"], opened_days=days)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return _item_view(db.get_item(item_id))
 
 
@@ -659,7 +722,7 @@ async def finish_item(item_id: int, outcome: str = Form(...)):
     event_id = db.finish_item(item_id, outcome)
     if event_id is None:
         return JSONResponse({"error": "Item not found or no longer active."}, status_code=404)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return {"ok": True, "event_id": event_id}
 
 
@@ -672,19 +735,7 @@ async def set_opened(item_id: int, days: int | None = Form(None), opened: bool =
         return JSONResponse({"error": "Item not found."}, status_code=404)
     if opened:
         _cache_item_preference(item, opened_days=days)
-    await run_in_threadpool(_sync_now)
-    return _item_view(item)
-
-
-@app.post("/api/items/{item_id}/location")
-async def set_location(item_id: int, location: str = Form(...)):
-    if location not in {"", "fridge", "cupboard", "freezer"}:
-        return JSONResponse({"error": "Invalid location."}, status_code=400)
-    item = db.transition_item(item_id, location=location)
-    if not item:
-        return JSONResponse({"error": "Item not found."}, status_code=404)
-    _cache_item_preference(item, location=location or None)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return _item_view(item)
 
 
@@ -696,7 +747,7 @@ async def add_one(item_id: int):
     updated = db.add_one(item_id)
     if not updated:
         return JSONResponse({"error": "Item count cannot exceed 99."}, status_code=400)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return _item_view(updated)
 
 
@@ -704,14 +755,14 @@ async def add_one(item_id: int):
 async def undo_event(event_id: int):
     if not db.undo_event(event_id):
         return JSONResponse({"error": "Event not found."}, status_code=404)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return {"ok": True}
 
 
 @app.post("/api/items/{item_id}/delete")
 async def delete_item(item_id: int):
     db.delete_item(item_id)
-    await run_in_threadpool(_sync_now)
+    ha_sync.request_sync()
     return {"ok": True}
 
 
@@ -734,7 +785,6 @@ async def get_stats():
 async def save_settings(
     notify_days_before: int = Form(...),
     notify_repeat_hours: int = Form(...),
-    check_interval_hours: int = Form(...),
     notify_hour: int | None = Form(None),
 ):
     # notify_service isn't settable here - see settings.py's module
@@ -742,12 +792,10 @@ async def save_settings(
     setting_values = {
         "notify_days_before": notify_days_before,
         "notify_repeat_hours": notify_repeat_hours,
-        "check_interval_hours": check_interval_hours,
     }
     if notify_hour is not None:
         setting_values["notify_hour"] = notify_hour
     settings.set_many(setting_values)
-    _reschedule_check_job()
     if notify_hour is not None:
         _reschedule_notify_job()
     return await get_settings()
@@ -755,13 +803,17 @@ async def save_settings(
 
 @app.post("/api/check-now")
 async def check_now():
-    await run_in_threadpool(run_check_cycle)
-    return {"ok": True, "summary": db.get_state("last_check_summary")}
+    result = await run_in_threadpool(run_check_cycle)
+    return {"result": result}
 
 
 @app.get("/export")
 async def export_data():
-    items = [_item_view(i) for i in db.list_items()]
+    all_items = db.list_items()
+    notify_days_before = settings.get_int("notify_days_before")
+    barcodes = {item.get("barcode") for item in all_items if item.get("barcode")}
+    cache = db.get_cached_barcodes(list(barcodes))
+    items = [_item_view(i, notify_days_before, cache) for i in all_items]
     with db._connect() as conn:
         events = [dict(row) for row in conn.execute("SELECT * FROM item_events ORDER BY id").fetchall()]
     payload = json.dumps({"items": items, "item_events": events}, indent=2)

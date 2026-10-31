@@ -50,9 +50,11 @@ from a phone-first ingress panel.
    was opened, adjust its count, or delete it.
 5. A daily check sends one **Home Assistant summary notification** through
    your chosen `notify.*` service for due items, with a repeat reminder
-   until you deal with them. Tapping it opens the **Pantry** tab. The
-   configurable `check_interval_hours` setting only refreshes Home
-   Assistant sensors; **Check now** sends the summary immediately.
+   until you deal with them. Tapping it opens the **Pantry** tab. Home Assistant
+   sensors sync in the background at 00:05 local time, with a five-minute
+   check after startup to restore missing entities. Dashboard changes queue a
+   background refresh. **Check now** reports whether a summary was sent, nothing
+   was due, sending failed, or notifications are not configured.
 6. Every active item is also exposed as a Home Assistant sensor entity (no
    extra setup), so you can build your own automations or dashboards
    around your pantry too - see [Home Assistant entities](#home-assistant-entities).
@@ -61,10 +63,12 @@ from a phone-first ingress panel.
 
 ### 1. Configure the app
 
+Open Pantry Tracker from its Home Assistant ingress panel; the app is ingress-only.
+
 Set the options below (**Settings → Add-ons → Pantry Tracker →
 Configuration**), then start the app. `notify_days_before`,
-`notify_repeat_hours`, `notify_hour` and `check_interval_hours` can be left at their
-defaults here and changed later from the app's own **Settings** tab
+`notify_repeat_hours` and `notify_hour` can be left at their defaults here and
+changed later from the app's own **Settings** tab
 without a restart - `notify_service` and the vision model connection
 live in this Configuration tab only (restart the add-on after changing
 either), so a value saved once can never end up silently overriding a
@@ -76,7 +80,6 @@ later change made here, across an app update or otherwise.
 | `notify_days_before` | `3` | How many days before the use-by date counts as "expiring soon". |
 | `notify_repeat_hours` | `24` | How often to resend a reminder for an item still due. |
 | `notify_hour` | `8` | Hour of the day to send the daily summary notification, using the add-on's time zone. |
-| `check_interval_hours` | `12` | How often to refresh Home Assistant sensors. It does not send notifications. |
 | `vision_api_base` | _(blank)_ | Base URL of an OpenAI-compatible `/chat/completions` endpoint hosting a vision model (Open WebUI, Ollama, etc.), e.g. `http://192.168.1.50:8080/api`. Blank disables photo date extraction. |
 | `vision_api_key` | _(blank)_ | Optional bearer token for the endpoint above. |
 | `vision_model` | `glm-ocr:latest` | The vision model name to request. |
@@ -108,8 +111,9 @@ Open the panel directly at `/<slug>/add` to start scanning.
 ## Using the app
 
 - **Scan** - tap "Scan Barcode" to open your camera, snap the barcode, and
-  the product details are looked up automatically. If a barcode can't be
-  read or isn't found, you can still fill the form in by hand, or tap
+  the product details are looked up automatically. If Open Food Facts can't
+  be reached, the app says so and you can fill the details in by hand. If a
+  barcode can't be read or isn't found, you can still fill the form in by hand, or tap
   "Enter manually instead" to skip scanning entirely. Tap "Photo of use-by
   date" to capture the expiry date from a photo of the packaging, then tap
   "Add to pantry" right away - the date is read in the background and
@@ -190,8 +194,10 @@ All pantry data is stored locally in `/data/pantry.db` (SQLite), and each
 item's use-by date photo (if any) in `/data/photos/` - kept so you can
 re-open it later to compare against the date that was read from it, and
 removed automatically if the item itself is deleted. Product photos you
-take are stored per barcode in `/data/product_photos/` and kept even after
-an item is deleted, so the next scan of that product still has one.
+take are stored per barcode in `/data/product_photos/`, and Open Food Facts
+thumbnails in `/data/product_images/`. Both are kept after an item is deleted,
+so the next scan of that product still has an image. Use-by photos for consumed
+items are removed after 30 days; active items and their photos are retained.
 The on-device OCR runs in the phone browser. Its recognized text is sent to this app for date interpretation. A barcode digit string goes to Open Food Facts, and the use-by-date photo goes to the vision model endpoint you configure yourself.
 
 ## Installation

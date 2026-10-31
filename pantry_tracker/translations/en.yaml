@@ -13,9 +13,6 @@ configuration:
     description: >-
       How often to resend a reminder for an item that's still expiring soon
       or expired and hasn't been dealt with yet.
-  check_interval_hours:
-    name: Check interval (hours)
-    description: How often to re-check every item's urgency and send any due notifications.
   vision_api_base:
     name: Vision model API base URL
     description: >-
