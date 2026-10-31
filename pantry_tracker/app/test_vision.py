@@ -148,6 +148,7 @@ def test_network_error_degrades_to_no_date(monkeypatch):
     result = vision.extract_use_by_date(_jpeg_bytes())
     assert result["date"] is None
     assert "failed" in result["raw"]
+    assert result["retryable"] is True
 
 
 @pytest.mark.parametrize(

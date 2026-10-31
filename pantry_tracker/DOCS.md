@@ -123,7 +123,8 @@ limitation.
   over 180 days in the past is treated as a misread year. A
   date typed into the field by hand always wins over a background read
   that disagrees with it.
-- **Pantry** - everything you're tracking, grouped by urgency, dates shown
+- **Pantry** - everything you're tracking, grouped by urgency, with a
+  **Needs a date** banner that jumps to active items without a date. Dates shown
   as e.g. "1 July 2027", with a **Reading use-by date…** spinner shown
   while a background read is still in progress for that item. Each item
   with a stored photo has a **View use-by photo** link, opening it in
@@ -150,7 +151,8 @@ Supervisor-granted access to the Home Assistant API - no MQTT setup or
 extra credentials needed.
 
 - `sensor.pantry_tracker_summary` - state is the number of actively
-  tracked items. Attributes include `expiring_soon` and `expired` counts,
+  tracked items. Attributes include `expiring_soon`, `expired`, and
+  `needs_date` counts,
   plus an `items` list with every active item's id, name, expiry date,
   days left, and status.
 - `sensor.pantry_tracker_<id>_<name>` - one entity per active item, state

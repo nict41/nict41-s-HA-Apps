@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.0
+
+- Date camera capture now waits for focus to settle, preserves the sharpest
+  framed image, and can read dates while the camera is aimed.
+- Added month-and-year date reading, capture timing diagnostics, and recovery
+  of queued photo reads after a restart.
+- Added a Pantry banner for items that still need a date.
+
 ## 0.11.0
 
 - Date readers now return ranked candidates, account for date labels and packaging context, and compare shared candidates across OCR and vision.

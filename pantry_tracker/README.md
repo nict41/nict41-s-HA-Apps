@@ -28,7 +28,7 @@ from a phone-first ingress panel.
    the add-on instead.
 2. Optionally open the same live camera view to **photograph the use-by/
    best-before date** - line the date up in the on-screen frame and it
-   captures automatically once held steady for a moment (a shutter button
+   captures automatically once held steady and in focus (a shutter button
    is also there as a manual override). The photo is cropped to just the
    framed area and sent to a vision-capable model you run yourself (e.g.
    [Open WebUI](https://openwebui.com)/Ollama hosting `glm-ocr`), which
@@ -45,7 +45,8 @@ from a phone-first ingress panel.
    saving, and a barcode that isn't found (or isn't scannable) just falls
    back to manual entry - nothing blocks you from tracking an item.
 4. The **Pantry** tab lists everything you're tracking, grouped into
-   Expired / Expiring soon / OK / No date set, with quick actions to edit,
+   Expired / Expiring soon / OK / Needs a date, with a banner linking to
+   items that still need a date and quick actions to edit,
    mark consumed, or delete.
 5. A background check (configurable interval) re-evaluates every item and
    sends a **Home Assistant notification** through a `notify.*` service of

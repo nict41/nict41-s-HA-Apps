@@ -98,3 +98,71 @@ def test_a_batch_code_shared_by_nothing_loses_to_the_shared_date():
     bb = {"date": "2027-09-30", "repaired": False}
     batch = {"date": "2027-03-19", "repaired": False}
     assert db.reconcile_readings([batch, bb], [bb]) == ("2027-09-30", "confirmed", [])
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("Best Before APR 2027", "2027-04-30"),
+    ("Best Before April 2027", "2027-04-30"),
+    ("Best Before 04/2027", "2027-04-30"),
+    ("Best Before 04.2027", "2027-04-30"),
+    ("Best Before 04 2027", "2027-04-30"),
+    ("BBE APR 27", "2027-04-30"),
+    ("Best Before End: 04/27", "2027-04-30"),
+    ("BestBefore End:\nFILM\nAPR 2027", "2027-04-30"),
+])
+def test_labelled_month_year_dates(text, expected):
+    assert vision.parse_transcript(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "28 JAN 27", "03/11", "APR 27", "6239 11:04 BLA", "FILM", "RECYCLE AT",
+])
+def test_month_year_additions_do_not_reinterpret_non_month_year_text(text):
+    if text == "28 JAN 27":
+        assert vision.parse_transcript(text) == "2027-01-28"
+    elif text == "03/11":
+        assert vision.parse_transcript(text) == "2026-11-03"
+    else:
+        assert vision.parse_transcript(text) is None
+
+
+def test_full_date_outranks_month_year_on_same_transcript():
+    assert vision.date_candidates("BEST BEFORE\nAPR 2027\n30/04/2027")[0]["date"] == "2027-04-30"
+
+
+def test_case_18_month_year_is_read_by_paddle():
+    case = CASES["18"]
+    assert vision.date_candidates(case["paddle"])[0]["date"] == case["truth"]
+
+
+def test_month_name_must_not_match_inside_a_word():
+    assert vision.parse_transcript("Best Before APRE 2027") is None
+
+
+@pytest.mark.parametrize("text", ["Best Before APR 2026", "Best Before APR 2037"])
+def test_month_year_uses_the_normal_past_and_future_windows(text):
+    assert vision.parse_transcript(text) is None
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("APR 2027", "2027-04-30"),
+    ("04/2027", "2027-04-30"),
+    ("BestBefore End:\nAPR 2027\nL8 190327", "2027-04-30"),
+    ("Dobbs APR 27", None),
+    ("F5T6 BBXY 04/27", None),
+    ("BB 04/27", "2027-04-30"),
+])
+def test_month_year_needs_a_full_year_or_a_real_label(text, expected):
+    ranked = vision.date_candidates(text)
+    assert (ranked[0]["date"] if ranked else None) == expected
+
+
+@pytest.mark.parametrize("text,confident", [
+    ("BB 28/09/2027", True),
+    ("28/09/2027", True),
+    ("190327", False),
+    ("APR 2027", False),
+    ("03 10V", False),
+])
+def test_live_capture_needs_a_confident_read(text, confident):
+    assert vision.is_confident(vision.date_candidates(text)[0]) is confident

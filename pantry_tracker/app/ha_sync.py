@@ -103,6 +103,7 @@ def _summary_state(items_with_buckets: list[tuple[dict, str]]) -> dict:
             "icon": "mdi:fridge-outline",
             "expiring_soon": sum(1 for _, b in items_with_buckets if b == db.BUCKET_EXPIRING_SOON),
             "expired": sum(1 for _, b in items_with_buckets if b == db.BUCKET_EXPIRED),
+            "needs_date": sum(1 for _, b in items_with_buckets if b == db.BUCKET_UNKNOWN),
             "items": [
                 {
                     "entity_id": entity_id_for(item),
