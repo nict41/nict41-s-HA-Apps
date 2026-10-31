@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.0
+
+- Date readers now return ranked candidates, account for date labels and packaging context, and compare shared candidates across OCR and vision.
+- Repaired common OCR confusions conservatively and added tappable OCR lines for uncertain readings.
+- Added a saved reader-output regression set.
+
+
 ## 0.10.1
 
 - When on-device reading finds no date, it now retries once on a softened copy

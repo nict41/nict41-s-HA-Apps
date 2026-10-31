@@ -46,7 +46,7 @@ def _freeze_today(monkeypatch, year: int, month: int, day: int):
 def test_not_configured_skips_network_entirely(monkeypatch):
     monkeypatch.setenv("VISION_API_BASE", "")
     result = vision.extract_use_by_date(_jpeg_bytes())
-    assert result == {"date": None, "raw": "Vision model is not configured"}
+    assert result == {"date": None, "candidates": [], "raw": "Vision model is not configured"}
 
 
 def test_extracts_iso_date(monkeypatch):
@@ -54,7 +54,7 @@ def test_extracts_iso_date(monkeypatch):
     _freeze_today(monkeypatch, 2026, 10, 30)
     _mock_reply(monkeypatch, "2026-12-01")
     result = vision.extract_use_by_date(_jpeg_bytes())
-    assert result == {"date": "2026-12-01", "raw": "2026-12-01"}
+    assert result["date"] == "2026-12-01"
 
 
 def test_extracts_day_month_year_slash_format(monkeypatch):
@@ -114,14 +114,20 @@ def test_printed_year_a_few_weeks_past_is_left_alone(monkeypatch):
 
 
 def test_garbled_date_gives_no_date_rather_than_a_guess(monkeypatch):
-    assert _date_read_from(monkeypatch, "03110V") is None
+    assert _date_read_from(monkeypatch, "03110X") is None
+
+
+def test_a_recognised_month_misread_is_repaired_and_flagged(monkeypatch):
+    _freeze_today(monkeypatch, 2026, 10, 30)
+    candidate = vision.date_candidates("03110V")[0]
+    assert (candidate["date"], candidate["repaired"]) == ("2026-11-03", True)
 
 
 def test_unknown_reply_returns_no_date(monkeypatch):
     monkeypatch.setenv("VISION_API_BASE", "http://model.local/api")
     _mock_reply(monkeypatch, "UNKNOWN")
     result = vision.extract_use_by_date(_jpeg_bytes())
-    assert result == {"date": None, "raw": "UNKNOWN"}
+    assert result == {"date": None, "candidates": [], "raw": "UNKNOWN"}
 
 
 def test_unparseable_reply_returns_no_date_but_keeps_raw_text(monkeypatch):
@@ -161,10 +167,10 @@ def test_network_error_degrades_to_no_date(monkeypatch):
         ("04:40 6941", None),
         ("GBC 211 204D", None),
         ("L8 20317\nKeep refrigerated", None),
-        ("Use By:\n03 10V\nL8 20317", None),
+        ("Use By:\n03 10V\nL8 20317", "2026-11-03"),
         ("BEST BEFORE", None),
         ("08.03.2026\n30.03.2025:12", None),
-        ("BB 28/09/2027\n30/09/2027", "2027-09-30"),
+        ("BB 28/09/2027\n30/09/2027", "2027-09-28"),
         ("DATE: UNKNOWN", None),
         ("6 MARSHMALLOWS", None),
         ("10 mayonnaise", None),

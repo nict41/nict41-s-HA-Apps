@@ -87,6 +87,7 @@ def init_db() -> None:
                 date_extraction_raw TEXT,
                 date_ocr_date TEXT,
                 date_ocr_raw TEXT,
+                date_ocr_candidates TEXT,
                 date_confidence TEXT,
                 date_candidates TEXT
             )
@@ -97,6 +98,7 @@ def init_db() -> None:
         _ensure_column(conn, "items", "date_extraction_raw", "date_extraction_raw TEXT")
         _ensure_column(conn, "items", "date_ocr_date", "date_ocr_date TEXT")
         _ensure_column(conn, "items", "date_ocr_raw", "date_ocr_raw TEXT")
+        _ensure_column(conn, "items", "date_ocr_candidates", "date_ocr_candidates TEXT")
         _ensure_column(conn, "items", "date_confidence", "date_confidence TEXT")
         _ensure_column(conn, "items", "date_candidates", "date_candidates TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
@@ -283,7 +285,7 @@ def apply_barcode_image(barcode: str, image_url: str) -> None:
         )
 
 
-def start_date_extraction(item_id: int, ocr_date: str | None = None, ocr_raw: str | None = None) -> None:
+def start_date_extraction(item_id: int, ocr_date: str | None = None, ocr_raw: str | None = None, ocr_candidates: list | None = None) -> None:
     """Marks an item as having a use-by date photo queued for background
     extraction. Called the moment the photo is saved, before the vision
     model has even been asked - see main.py's _extract_and_update.
@@ -295,26 +297,39 @@ def start_date_extraction(item_id: int, ocr_date: str | None = None, ocr_raw: st
         date_extraction_pending=1,
         date_ocr_date=ocr_date,
         date_ocr_raw=ocr_raw,
+        date_ocr_candidates=json.dumps(ocr_candidates or ([{"date": ocr_date, "repaired": False}] if ocr_date else [])),
         date_confidence=None,
         date_candidates=None,
     )
 
 
-def reconcile_readings(ocr_date: str | None, vision_date: str | None) -> tuple[str | None, str, list[str]]:
+def reconcile_readings(ocr_candidates, vision_candidates) -> tuple[str | None, str, list[str]]:
     """Combines the two independent date readings into (date, confidence,
     candidates). A disagreement gives no date at all: one of the two is
     wrong and a person can settle it from the photo, whereas a wrong date
     that's merely flagged would still drive the expiry notifications."""
-    if ocr_date and vision_date:
-        if ocr_date == vision_date:
-            return ocr_date, CONFIDENCE_CONFIRMED, []
-        return None, CONFIDENCE_CONFLICT, [ocr_date, vision_date]
-    if ocr_date or vision_date:
-        return ocr_date or vision_date, CONFIDENCE_CHECK, []
+    def normalized(values):
+        if values is None: return []
+        if isinstance(values, str): values = [{"date": values, "repaired": False}]
+        elif values and isinstance(values[0], str): values = [{"date": value, "repaired": False} for value in values]
+        return values
+    ocr, vision = normalized(ocr_candidates), normalized(vision_candidates)
+    if ocr and vision:
+        if ocr[0]["date"] == vision[0]["date"]:
+            repaired = ocr[0].get("repaired") or vision[0].get("repaired")
+            return ocr[0]["date"], CONFIDENCE_CHECK if repaired else CONFIDENCE_CONFIRMED, []
+        shared = set(c["date"] for c in ocr) & set(c["date"] for c in vision)
+        if shared:
+            chosen = min(shared, key=lambda d: (next(i for i,c in enumerate(ocr) if c["date"] == d) + next(i for i,c in enumerate(vision) if c["date"] == d), d))
+            repaired = any(c["date"] == chosen and c.get("repaired") for c in ocr + vision)
+            return chosen, CONFIDENCE_CHECK if repaired else CONFIDENCE_CONFIRMED, []
+        return None, CONFIDENCE_CONFLICT, [ocr[0]["date"], vision[0]["date"]]
+    if ocr or vision:
+        return (ocr or vision)[0]["date"], CONFIDENCE_CHECK, []
     return None, CONFIDENCE_UNREAD, []
 
 
-def finish_date_extraction(item_id: int, vision_date: str | None, raw: str, *, only_if_blank: bool = False) -> None:
+def finish_date_extraction(item_id: int, vision_candidates, raw: str, *, only_if_blank: bool = False) -> None:
     """Called once background extraction completes, to settle the date from
     the on-device reading (if any) and the vision model's. A read that found
     nothing at all leaves whatever date the item already had alone.
@@ -333,7 +348,9 @@ def finish_date_extraction(item_id: int, vision_date: str | None, raw: str, *, o
     ocr_date = current.get("date_ocr_date")
     typed_date = only_if_blank and current.get("expiry_date") and current.get("expiry_date") != ocr_date
     if not typed_date:
-        expiry_date, confidence, candidates = reconcile_readings(ocr_date, vision_date)
+        ocr_candidates = json.loads(current.get("date_ocr_candidates") or "[]")
+        if not ocr_candidates and ocr_date: ocr_candidates = [{"date": ocr_date, "repaired": False}]
+        expiry_date, confidence, candidates = reconcile_readings(ocr_candidates, vision_candidates)
         fields["date_confidence"] = confidence
         fields["date_candidates"] = json.dumps(candidates) if candidates else None
         if expiry_date or confidence == CONFIDENCE_CONFLICT:
