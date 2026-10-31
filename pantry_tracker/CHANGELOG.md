@@ -1,3 +1,7 @@
+## 0.16.1
+
+- New app icon and logo.
+
 ## 0.16.0
 
 - Suggest fridge or cupboard storage from product categories, and freezer only for frozen products.
