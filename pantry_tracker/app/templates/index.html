@@ -10,7 +10,7 @@
     --surface: #ffffff;
     --surface-2: #edf1eb;
     --ink: #1c2420;
-    --muted: #677069;
+    --muted: #5a635d;
     --border: #dde3dc;
     --accent: #2e7d63;
     --accent-ink: #ffffff;
@@ -96,7 +96,7 @@
     align-items: center;
     gap: 8px;
   }
-  main { padding: 0 var(--space-4) var(--space-5); max-width: 640px; margin: 0 auto; }
+  main { padding: var(--space-3) var(--space-4) var(--space-5); max-width: 640px; margin: 0 auto; }
   .view { display: none; }
   .view.active { display: block; }
 
@@ -171,6 +171,7 @@
   .badge.unknown { background: color-mix(in srgb, var(--unknown) 20%, transparent); color: var(--unknown); }
   .badge.frozen { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
+  .card > .section-title:first-child { margin-top: 0; }
   .section-title {
     font-size: var(--type-2);
     letter-spacing: 0.04em;
@@ -190,7 +191,7 @@
   }
   .pantry-entry:last-child .item-summary { border-bottom: none; }
   .item-summary { border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent;
-    color: inherit; padding: 0; min-height: 60px; text-align: left; }
+    color: inherit; padding: 0 16px; min-height: 60px; width: calc(100% + 32px); margin: 0 -16px; text-align: left; }
   .item-main { min-width: 0; display: flex; flex-direction: column; justify-content: center; }
   .item-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-meta { color: var(--muted); font-size: var(--type-2); margin-top: 2px; overflow: hidden;
@@ -199,6 +200,8 @@
     border-radius: var(--radius-2); background: var(--surface-2); color: var(--muted); }
   .item-thumb img { width: 100%; height: 100%; object-fit: cover; }
   .item-thumb img.product-thumb { width: 100%; height: 100%; border: 0; border-radius: inherit; }
+  .broken-image-placeholder { display: grid; place-items: center; }
+  .broken-image-placeholder .icon-svg { width: 22px; height: 22px; }
   .item-thumb .icon-svg { width: 22px; height: 22px; }
   .item-time { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--type-2);
     font-weight: 600; white-space: nowrap; }
@@ -207,7 +210,7 @@
   .item-time.unknown { color: var(--unknown); }
   .item-time.frozen { color: var(--accent); }
   .urgency-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
-  .item-expanded { padding: 4px 0 14px; }
+  .item-expanded { padding: 12px 16px; background: var(--surface-2); border-radius: var(--radius-2); margin: 0 -16px 8px; }
   .item-expanded .item-meta { white-space: normal; overflow-wrap: anywhere; }
   .item-details { color: var(--muted); font-size: var(--type-2); margin: 4px 0; }
   .item-attention { color: var(--soon); font-weight: 600; }
@@ -225,9 +228,9 @@
   .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .chip-row button { width: auto; min-height: 44px; padding: 7px 12px; font-size: var(--type-2); }
   .chip-row button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .pantry-controls { padding: 8px; margin: 0 -16px 12px; border-radius: 0; border-width: 0 0 1px; }
-  .pantry-sticky-search { position: sticky; top: 57px; z-index: 6; background: var(--bg); padding: 8px 0; margin: 0 -16px; }
-  .pantry-sticky-search .search-wrap { margin: 0 16px; }
+  .pantry-controls { padding: 0 0 8px; margin: 0; border: 0; background: transparent; }
+  .pantry-sticky-search { position: sticky; top: 57px; z-index: 6; background: var(--bg); padding: 0 0 8px; }
+  .pantry-sticky-search .search-wrap { margin: 0; }
   .filter-scroll { overflow-x: auto; scrollbar-width: none; margin: 0 -8px; padding: 0 8px 4px; }
   .filter-scroll::-webkit-scrollbar { display: none; }
   .search-wrap { position: relative; }
@@ -250,7 +253,7 @@
   .eat-first-row .eat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .show-all { width: auto; min-height: 44px; padding: 4px 8px; border: 0; color: var(--accent); }
   .item-row.highlight { background: color-mix(in srgb, var(--accent) 12%, transparent); }
-  .item-summary:active, .eat-first-row:active { background: var(--surface-2); transition: background 120ms ease; }
+  .item-summary:active, .eat-first-row:active, .scan-item:active { background: var(--surface-2); transition: background 120ms ease; }
 
   .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
   .date-confidence { color: var(--soon); font-size: var(--type-2); margin-top: 4px; }
@@ -259,6 +262,17 @@
   .date-candidates button { width: auto; min-height: 44px; padding: 5px 9px; font-size: var(--type-2); }
   .date-confidence.unread { color: var(--expired); }
   .edit-form { width: 100%; }
+  .opened-fields-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: var(--type-2);
+  }
+  .danger-text { color: var(--expired); }
+  .item-expanded:not(.hidden) { display: block; animation: expand-in 150ms ease; }
+  .item-summary[aria-expanded="false"] + .item-expanded { display: none; }
   .opened-picker { padding-top: 6px; }
   @media (max-width: 380px) {
     .item-actions { gap: 3px; }
@@ -274,7 +288,8 @@
     border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 6px 2px; text-align: left; }
   .scan-item:last-child { border-bottom: 0; }
   .scan-item-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .add-product-line { display: flex; align-items: center; gap: 12px; min-height: 48px; }
+  .add-product-line { display: flex; align-items: center; gap: 12px; min-height: 0; }
+  .add-product-line:has(> .hidden):not(:has(> :not(.hidden))) { display: none; }
   .add-product-line #review-barcode-line { min-width: 0; overflow-wrap: anywhere; }
   .date-entry-row { display: flex; align-items: center; gap: 8px; }
   .date-entry-row button { width: auto; flex: 1; min-width: 44px; font-size: var(--type-2); padding: 8px; }
@@ -285,13 +300,13 @@
   .already-in-pantry { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); border-radius: var(--radius-1);
     padding: 8px 10px; margin-top: 8px; }
   .already-in-pantry button { width: auto; min-height: 44px; padding: 6px 8px; }
-  #review-form { padding-bottom: 92px; }
   .add-form-actions { position: fixed; z-index: 9; bottom: 0; left: 0; right: 0; display: flex; gap: 8px;
     padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--border); }
   .add-form-actions button { min-height: 48px; }
   body.add-form-open nav.tabs { display: none; }
   body.add-form-open { padding-bottom: 100px; }
   .settings-card label { margin-top: 10px; }
+  .settings-card > .section-title:first-child { margin-top: 0; }
   .settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
   .settings-actions button { min-height: 48px; padding: 8px; }
   .settings-last-check { margin-bottom: 0; }
@@ -328,7 +343,7 @@
     border-radius: 999px;
     font-size: var(--type-3);
     opacity: 0;
-    transition: opacity 0.2s ease;
+    transition: opacity 150ms ease;
     pointer-events: none;
     z-index: 70;
     max-width: 90vw;
@@ -389,7 +404,7 @@
   details.raw-reply summary { color: var(--muted); font-size: var(--type-1); cursor: pointer; }
   details.raw-reply p { font-size: var(--type-2); color: var(--muted); }
 
-  .empty-state { text-align: center; color: var(--muted); padding: 40px 10px; }
+  .empty-state { text-align: center; color: var(--muted); padding: 24px 10px; }
 
   .scanner-overlay {
     position: fixed;
@@ -398,6 +413,18 @@
     z-index: 50;
     display: flex;
     flex-direction: column;
+  }
+  .scanner-overlay { outline: none; }
+  .torch-button {
+    position: absolute;
+    top: calc(12px + env(safe-area-inset-top));
+    right: 12px;
+    z-index: 2;
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 10px;
+    border-radius: 50%;
   }
   .scanner-video {
     flex: 1;
@@ -462,6 +489,33 @@
   .photo-modal img { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: var(--radius-1); }
   .photo-modal p { margin: 0; text-align: center; }
   .photo-modal button { width: auto; min-width: 120px; color: #fff; border-color: rgba(255,255,255,0.3); }
+  :focus { outline: none; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  button:active, .scan-item:active { background-color: var(--surface-2); transition: background-color 120ms ease; }
+  .item-expanded, .toast { transition: opacity 150ms ease, background-color 150ms ease; }
+  .skeleton-row {
+    height: 60px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer { to { background-position: -200% 0; } }
+  @keyframes expand-in {
+    from { opacity: 0.2; transform: translateY(-2px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      scroll-behavior: auto !important;
+      animation: none !important;
+      transition: none !important;
+    }
+    .spinner {
+      animation: spin 2s linear infinite !important;
+    }
+    html { scroll-behavior: auto !important; }
+  }
   .scanner-frame.steady {
     border-color: #4ade80;
     box-shadow: 0 0 0 2000px rgba(0,0,0,0.35), 0 0 18px 3px rgba(74,222,128,0.65);
@@ -538,8 +592,8 @@
       <img id="date-photo-thumb" class="photo-thumb hidden" alt="Use-by date photo">
       <div id="date-extract-status" class="muted hidden"></div>
 
-      <div class="section-title">Location</div>
-      <div id="f-location-chips" class="chip-row" role="group" aria-label="Choose location"></div>
+      <span class="section-title" id="f-location-label">Location</span>
+      <div id="f-location-chips" class="chip-row" role="group" aria-labelledby="f-location-label"></div>
       <input type="hidden" id="f-location" name="location" value="">
 
       <label for="f-count">How many</label>
@@ -601,7 +655,7 @@
         </button>
       </div>
     </div>
-    <div class="pantry-controls card">
+    <div class="pantry-controls">
       <div class="filter-scroll">
         <div class="filter-scroll-inner">
           <div id="pantry-location-filters" class="chip-row" role="group" aria-label="Filter by location"></div>
@@ -630,10 +684,10 @@
 
       <label for="s-repeat-hours">If an item isn't dealt with, remind me</label>
       <select id="s-repeat-hours" name="notify_repeat_hours">
-        <option value="24">Every day (24 hours)</option>
-        <option value="48">Every 2 days (48 hours)</option>
-        <option value="72">Every 3 days (72 hours)</option>
-        <option value="168">Every week (168 hours)</option>
+        <option value="24">Every day</option>
+        <option value="48">Every 2 days</option>
+        <option value="72">Every 3 days</option>
+        <option value="168">Every week</option>
       </select>
       <div class="settings-actions">
         <button type="submit" class="primary">Save settings</button>
@@ -669,11 +723,14 @@
 <input type="file" id="input-date-photo" accept="image/*" capture="environment">
 <input type="file" id="input-product-photo" accept="image/*" capture="environment">
 
-<div id="camera-overlay" class="scanner-overlay hidden">
+<div id="camera-overlay" class="scanner-overlay hidden" role="dialog" aria-modal="true" aria-label="Camera">
   <video id="camera-video" class="scanner-video" playsinline autoplay muted></video>
   <div id="camera-frame" class="scanner-frame"></div>
   <p id="camera-hint" class="scanner-hint"></p>
   <div class="scanner-controls">
+    <button type="button" id="btn-camera-torch" class="torch-button ghost hidden" aria-label="Turn torch on" aria-pressed="false">
+      <svg class="icon-svg" aria-hidden="true"><use href="#icon-flash"></use></svg>
+    </button>
     <button type="button" id="btn-camera-shutter" class="primary hidden">
       <svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg>
       Capture
@@ -683,21 +740,21 @@
   </div>
 </div>
 
-<div id="photo-modal" class="photo-modal hidden">
+<div id="photo-modal" class="photo-modal hidden" role="dialog" aria-modal="true" aria-label="Photo viewer">
   <img id="photo-modal-img" alt="">
   <p id="photo-modal-caption"></p>
   <button type="button" class="ghost" id="btn-photo-modal-close">Close</button>
 </div>
 
-<div class="toast" id="toast">
+<div class="toast" id="toast" role="status" aria-live="polite">
   <span class="toast-content">
     <span id="toast-message"></span>
     <button type="button" id="toast-action" class="toast-action hidden"></button>
   </span>
 </div>
 
-<nav class="tabs">
-  <button data-view="scan" class="active">
+<nav class="tabs" aria-label="Main navigation">
+  <button data-view="scan" class="active" aria-current="page">
     <span class="icon"><svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg></span>
     Scan
   </button>
@@ -718,6 +775,10 @@ const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 function icon(name) {
   return `<svg class="icon-svg" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+}
+
+function scrollBehavior() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
 }
 
 // -- Toast ----------------------------------------------------------------
@@ -745,9 +806,16 @@ $("#toast-action").addEventListener("click", async () => {
 // Photos open here, in the page, because a link to one would leave Home
 // Assistant: the ingress session is only valid inside the app, so a new
 // browser tab gets a 401.
+let photoModalReturnFocus = null;
+let cameraReturnFocus = null;
+let torchEnabled = false;
+
 function setViewablePhoto(imgEl, url) {
   imgEl.src = url;
   imgEl.dataset.photoUrl = url;
+  imgEl.tabIndex = 0;
+  imgEl.setAttribute("role", "button");
+  imgEl.setAttribute("aria-label", imgEl.alt || "View photo");
 }
 
 document.addEventListener("click", (e) => {
@@ -755,15 +823,40 @@ document.addEventListener("click", (e) => {
   if (!el) return;
   $("#photo-modal-img").src = el.dataset.photoUrl;
   $("#photo-modal-caption").textContent = el.dataset.photoCaption || "";
+  photoModalReturnFocus = el.closest("button") || el;
+  $("#photo-modal-img").alt = el.alt || el.dataset.photoCaption || "Pantry item photo";
   $("#photo-modal").classList.remove("hidden");
+  $("#btn-photo-modal-close").focus();
 });
-$("#photo-modal").addEventListener("click", () => $("#photo-modal").classList.add("hidden"));
+function closePhotoModal() {
+  $("#photo-modal").classList.add("hidden");
+  photoModalReturnFocus?.focus();
+}
+$("#photo-modal").addEventListener("click", (event) => {
+  if (event.target === $("#photo-modal") || event.target.closest("#btn-photo-modal-close")) closePhotoModal();
+});
+$("#btn-photo-modal-close").addEventListener("click", closePhotoModal);
+document.addEventListener("keydown", (event) => {
+  if ((event.key === "Enter" || event.key === " ") && event.target.matches("[data-photo-url]")) {
+    event.preventDefault();
+    event.target.click();
+    return;
+  }
+  if (event.key !== "Escape") return;
+  if (!$("#photo-modal").classList.contains("hidden")) closePhotoModal();
+  else if (cameraMode) closeCamera();
+});
 
 // -- Tabs -----------------------------------------------------------------
 function showView(name) {
   if (name !== "scan") closeCamera();
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
-  $$("nav.tabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  $$("nav.tabs button").forEach((b) => {
+    const active = b.dataset.view === name;
+    b.classList.toggle("active", active);
+    if (active) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   if (name === "pantry") loadPantry();
   if (name === "settings") loadSettings();
 }
@@ -1274,6 +1367,7 @@ async function openCamera(mode, options = {}) {
   const fallbackBtn = $("#btn-camera-fallback");
   $("#btn-camera-cancel").textContent = options.doneLabel ? "Done" : "Cancel";
 
+  cameraReturnFocus = document.activeElement;
   cameraMode = mode;
   dateCameraSession++;
   if (mode === "date") dateCameraTiming = { openRequested: performance.now(), sent: false };
@@ -1315,12 +1409,20 @@ async function openCamera(mode, options = {}) {
   }
 
   const [track] = cameraStream.getVideoTracks();
+  const torchButton = $("#btn-camera-torch");
+  const capabilities = track.getCapabilities?.() || {};
+  torchEnabled = false;
+  torchButton.classList.toggle("hidden", !capabilities.torch);
+  torchButton.setAttribute("aria-pressed", "false");
+  torchButton.setAttribute("aria-label", "Turn torch on");
+  torchButton.querySelector("use").setAttribute("href", "#icon-flash");
   if (track.getCapabilities?.().focusMode?.includes("continuous")) {
     track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
   }
 
   video.srcObject = cameraStream;
   await video.play();
+  $("#btn-camera-cancel").focus();
   if (mode === "date" && dateCameraTiming) dateCameraTiming.streamReady = performance.now();
 
   if (mode === "barcode") {
@@ -1430,6 +1532,23 @@ async function openCamera(mode, options = {}) {
   }
 }
 
+async function toggleCameraTorch() {
+  const track = cameraStream?.getVideoTracks()[0];
+  if (!track) return;
+  const next = !torchEnabled;
+  try {
+    await track.applyConstraints({ advanced: [{ torch: next }] });
+    torchEnabled = next;
+    const button = $("#btn-camera-torch");
+    button.setAttribute("aria-pressed", String(next));
+    button.setAttribute("aria-label", next ? "Turn torch off" : "Turn torch on");
+    button.querySelector("use").setAttribute("href", next ? "#icon-flash-off" : "#icon-flash");
+  } catch (err) {
+    // Torch support can disappear after capabilities are reported.
+  }
+}
+$("#btn-camera-torch").addEventListener("click", toggleCameraTorch);
+
 function closeCamera() {
   if (barcodeScanTimer) {
     clearInterval(barcodeScanTimer);
@@ -1450,7 +1569,12 @@ function closeCamera() {
     cameraStream = null;
   }
   $("#camera-overlay").classList.add("hidden");
+  $("#btn-camera-torch").classList.add("hidden");
+  $("#btn-camera-torch").setAttribute("aria-pressed", "false");
+  torchEnabled = false;
   cameraMode = null;
+  cameraReturnFocus?.focus();
+  cameraReturnFocus = null;
 }
 
 $("#btn-scan-start").addEventListener("click", () => {
@@ -1698,9 +1822,34 @@ $("#input-product-photo").addEventListener("change", (e) => {
 
 // Release the camera the moment the tab/app isn't visible, rather than
 // leaving it running (and the recording indicator lit) in the background.
+let returnReloadTimer = null;
+function scheduleReturnReload() {
+  if (document.hidden || cameraMode) return;
+  clearTimeout(returnReloadTimer);
+  returnReloadTimer = setTimeout(() => {
+    if (!cameraMode && !document.hidden) pollPantryIfIdle();
+  }, 180);
+}
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) closeCamera();
+  else scheduleReturnReload();
 });
+window.addEventListener("focus", scheduleReturnReload);
+
+document.addEventListener("error", (event) => {
+  const image = event.target;
+  if (!(image instanceof HTMLImageElement) || !image.classList.contains("product-thumb")) return;
+  // Only list thumbnails are swapped. The add and edit forms keep their
+  // <img>, which later photos are drawn into, and just hide it.
+  if (!image.closest(".item-thumb")) {
+    image.classList.add("hidden");
+    return;
+  }
+  const placeholder = document.createElement("span");
+  placeholder.className = "item-thumb broken-image-placeholder";
+  placeholder.innerHTML = icon("package");
+  image.replaceWith(placeholder);
+}, true);
 
 // Called once a use-by date photo has been captured (auto-capture, the
 // manual shutter, or the fallback file picker). Never blocks on the
@@ -1891,7 +2040,7 @@ function itemRowHtml(item) {
     : "";
   const thumb = item.display_image_url
     ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" ` +
-      `data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
+      `data-photo-url="${escapeAttr(item.display_image_url)}" alt="Product photo" tabindex="0" role="button" loading="lazy">`
     : '<svg class="icon-svg" aria-hidden="true"><use href="#icon-package"></use></svg>';
   const useByLine = item.effective_date
     ? `Use by ${formatDisplayDate(item.effective_date)}`
@@ -1974,17 +2123,28 @@ function editFormHtml(item) {
     ? `Last read from photo: "${item.date_extraction_raw}"`
     : "";
   const confidence = item.date_extraction_pending ? "" : confidenceHtml(item, item.id);
+  const id = Number(item.id);
   return `
-    <label>Product name</label>
-    <input type="text" class="e-name" value="${escapeAttr(item.name)}">
+    <div class="section-title">Details</div>
+    <label for="e-name-${id}">Product name</label>
+    <input type="text" id="e-name-${id}" class="e-name" value="${escapeAttr(item.name)}" autocapitalize="sentences">
     <div class="row">
-      <div><label>Brand</label><input type="text" class="e-brand" value="${escapeAttr(item.brand || "")}"></div>
-      <div><label>Quantity</label><input type="text" class="e-quantity" value="${escapeAttr(item.quantity || "")}"></div>
+      <div>
+        <label for="e-brand-${id}">Brand</label>
+        <input type="text" id="e-brand-${id}" class="e-brand" value="${escapeAttr(item.brand || "")}">
+      </div>
+      <div>
+        <label for="e-quantity-${id}">Quantity</label>
+        <input type="text" id="e-quantity-${id}" class="e-quantity" value="${escapeAttr(item.quantity || "")}">
+      </div>
     </div>
-    <label>Category</label>
-    <input type="text" class="e-category" list="category-suggestions" value="${escapeAttr(item.category || "")}">
-    <label>How many</label><input type="number" class="e-count" min="1" max="99" value="${item.count || 1}">
-    <label>Location</label><div class="chip-row e-location-chips"></div>
+    <label for="e-category-${id}">Category</label>
+    <input type="text" id="e-category-${id}" class="e-category" list="category-suggestions" value="${escapeAttr(item.category || "")}">
+    <label for="e-count-${id}">How many</label>
+    <input type="number" id="e-count-${id}" class="e-count" min="1" max="99"
+      value="${item.count || 1}" inputmode="numeric">
+    <span class="section-title" id="e-location-label-${id}">Location</span>
+    <div class="chip-row e-location-chips" role="group" aria-labelledby="e-location-label-${id}"></div>
     <input type="hidden" class="e-location" value="${escapeAttr(item.location || "")}">
 
     ${
@@ -1992,7 +2152,8 @@ function editFormHtml(item) {
         ? `<div class="photo-step">
              <img class="product-thumb e-product-thumb ${item.display_image_url ? "" : "hidden"}" alt=""${
                item.display_image_url
-                 ? ` src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}"`
+                 ? ` src="${escapeAttr(item.display_image_url)}" ` +
+                 `data-photo-url="${escapeAttr(item.display_image_url)}" tabindex="0" role="button"`
                  : ""
              }>
              <button type="button" class="ghost e-product-photo flex-fill">
@@ -2006,10 +2167,11 @@ function editFormHtml(item) {
     <div class="photo-step">
       ${
         item.has_date_photo
-          ? `<img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}" data-photo-url="${photoUrl}">`
+          ? `<img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}" ` +
+            `data-photo-url="${photoUrl}" tabindex="0" role="button">`
           : `<img class="photo-thumb e-date-thumb hidden" alt="">`
       }
-      <button type="button" class="ghost e-rescan-date flex-fill">
+      <button type="button" class="link-btn e-rescan-date flex-fill">
         <svg class="icon-svg" aria-hidden="true"><use href="#icon-calendar"></use></svg>
         Rescan use-by date
       </button>
@@ -2017,20 +2179,32 @@ function editFormHtml(item) {
     <div class="muted e-date-status ${statusText ? "" : "hidden"}">${escapeHtml(statusText)}</div>
     <div class="e-date-confidence">${confidence}</div>
 
-    <label>Use-by date</label>
-    <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
-    <label>Opened date and use within days</label>
-    <div class="row"><input type="date" class="e-opened-at" value="${escapeAttr(item.opened_at || "")}">
-      <input type="number" class="e-opened-days" min="1" max="365" value="${escapeAttr(item.use_within_days || "")}"></div>
-    <button type="button" class="ghost e-not-opened">Not opened</button>
-    <label>Notes</label>
-    <textarea class="e-notes">${escapeHtml(item.notes || "")}</textarea>
+    <div class="section-title">Dates</div>
+    <label for="e-expiry-${id}">Use-by date</label>
+    <input type="date" id="e-expiry-${id}" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
+    <div class="opened-fields-heading">
+      <span>Opened details</span>
+      <button type="button" class="link-btn e-not-opened">Not opened</button>
+    </div>
+    <div class="row">
+      <div>
+        <label for="e-opened-at-${id}">Opened on</label>
+        <input type="date" id="e-opened-at-${id}" class="e-opened-at" value="${escapeAttr(item.opened_at || "")}">
+      </div>
+      <div>
+        <label for="e-opened-days-${id}">Use within (days)</label>
+        <input type="number" id="e-opened-days-${id}" class="e-opened-days" min="1" max="365"
+          value="${escapeAttr(item.use_within_days || "")}" inputmode="numeric">
+      </div>
+    </div>
+    <label for="e-notes-${id}">Notes</label>
+    <textarea id="e-notes-${id}" class="e-notes">${escapeHtml(item.notes || "")}</textarea>
     <div class="row mt-10">
       <button type="button" class="ghost e-cancel">Cancel</button>
       <button type="button" class="primary e-save">Save</button>
     </div>
     <div class="mt-10">
-      <button type="button" class="danger btn-delete">Delete</button>
+      <button type="button" class="link-btn danger-text btn-delete">Delete</button>
     </div>`;
 }
 
@@ -2195,7 +2369,11 @@ function watchEditFormExtraction(id, editEl) {
 
 async function loadPantry() {
   const list = $("#pantry-list");
-  if (pantryCache.length === 0) list.innerHTML = '<p class="muted">Loading…</p>';
+  if (pantryCache.length === 0) {
+    list.innerHTML = '<div class="card loading-state" aria-label="Loading pantry">' +
+      '<div class="skeleton-row"></div><div class="skeleton-row"></div>' +
+      '<div class="skeleton-row"></div></div>';
+  }
   try {
     const res = await fetch("api/items");
     if (!res.ok) throw new Error("Could not load pantry");
@@ -2204,7 +2382,8 @@ async function loadPantry() {
     pantryLoadErrorShown = false;
     renderScanSections();
   } catch (err) {
-    list.innerHTML = '<p class="muted">Could not load your pantry.</p>';
+    list.innerHTML = '<div class="card empty-state">Could not load your pantry. Check your connection and try again.</div>';
+    $("#scan-pantry-sections").innerHTML = '<div class="card empty-state">Could not load your pantry.</div>';
     if (!pantryLoadErrorShown) toast("Could not load your pantry");
     pantryLoadErrorShown = true;
     return;
@@ -2270,6 +2449,10 @@ function renderPantry() {
     return locationMatch && groupMatch && (!search || searchable.includes(search));
   });
 
+  if (expandedPantryItemId !== null && !visible.some((item) => Number(item.id) === expandedPantryItemId)) {
+    expandedPantryItemId = null;
+  }
+
   const anyPending = pantryCache.some((item) => item.date_extraction_pending);
   if (anyPending) {
     ensurePantryPolling();
@@ -2295,12 +2478,12 @@ function renderPantry() {
   }
 
   if (pantryCache.length === 0) {
-    list.innerHTML = '<div class="empty-state">Nothing tracked yet. Scan something to get started.</div>';
+    list.innerHTML = '<div class="card empty-state">Nothing tracked yet. Scan something to get started.</div>';
     eatFirst.classList.add("hidden");
     return;
   }
   let html = "";
-  if (!visible.length) html = '<div class="empty-state">Nothing matches</div>';
+  if (!visible.length) html = '<div class="card empty-state">Nothing matches</div>';
   for (const bucket of BUCKET_ORDER) {
     const items = visible.filter((item) => item.bucket === bucket);
     if (!items.length) continue;
@@ -2352,7 +2535,7 @@ $("#scan-pantry-sections").addEventListener("click", (event) => {
   requestAnimationFrame(() => {
     const summary = Array.from(document.querySelectorAll(".item-summary"))
       .find((row) => Number(row.closest(".pantry-entry")?.dataset.id) === id);
-    summary?.scrollIntoView({ behavior: "smooth", block: "center" });
+    summary?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
   });
 });
 
@@ -2502,7 +2685,7 @@ $("#pantry-group-filter").addEventListener("change", (event) => {
 });
 $("#eat-first").addEventListener("click", (event) => {
   if (event.target.closest(".show-all")) {
-    $("#pantry-list").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("#pantry-list").scrollIntoView({ behavior: scrollBehavior(), block: "start" });
     return;
   }
   const button = event.target.closest(".eat-first-row");
@@ -2510,7 +2693,7 @@ $("#eat-first").addEventListener("click", (event) => {
   expandedPantryItemId = Number(button.dataset.targetId);
   renderPantry();
   const target = document.querySelector(`.pantry-entry[data-id="${button.dataset.targetId}"] .item-summary`);
-  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  target?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
   target?.classList.add("highlight");
   setTimeout(() => target?.classList.remove("highlight"), 1800);
 });
