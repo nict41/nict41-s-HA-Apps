@@ -366,3 +366,71 @@ def test_export_returns_json_attachment():
     assert res.status_code == 200
     assert "attachment" in res.headers["content-disposition"]
     assert any(i["name"] == "Export Me" for i in res.json()["items"])
+
+
+def test_parse_date_endpoint(monkeypatch):
+    monkeypatch.setattr(main.vision, "parse_transcript", lambda text: "2027-03-01" if text == "01 03 27" else None)
+    assert client.post("/api/parse-date", data={"text": "01 03 27"}).json() == {"date": "2027-03-01"}
+    assert client.post("/api/parse-date", data={"text": "nothing"}).json() == {"date": None}
+
+
+def test_ocr_fields_are_stored_with_date_photo(monkeypatch):
+    monkeypatch.setattr(main.vision, "extract_use_by_date", lambda image_bytes: {"date": "2027-01-02", "raw": "02 Jan 27"})
+    item = client.post(
+        "/api/items",
+        data={"name": "Soup", "ocr_date": "2027-01-01", "ocr_raw": "01 Jan 27"},
+        files={"date_photo": ("use-by.jpg", b"photo", "image/jpeg")},
+    ).json()
+    stored = db.get_item(item["id"])
+    assert stored["date_ocr_date"] == "2027-01-01"
+    assert stored["date_ocr_raw"] == "01 Jan 27"
+    assert stored["date_confidence"] == "conflict"
+    assert client.get(f"/api/items/{item['id']}").json()["date_candidates"] == ["2027-01-01", "2027-01-02"]
+    assert stored["expiry_date"] is None
+
+
+def test_invalid_ocr_date_is_ignored():
+    item = client.post(
+        "/api/items",
+        data={"name": "Soup", "ocr_date": "not-a-date", "ocr_raw": "untrusted"},
+        files={"date_photo": ("use-by.jpg", b"photo", "image/jpeg")},
+    ).json()
+    assert db.get_item(item["id"])["date_ocr_date"] is None
+    assert db.get_item(item["id"])["date_ocr_raw"] == "untrusted"
+
+
+def test_non_calendar_iso_date_form_is_ignored():
+    item = client.post(
+        "/api/items",
+        data={"name": "Soup", "ocr_date": "2027-W01-1"},
+        files={"date_photo": ("use-by.jpg", b"photo", "image/jpeg")},
+    ).json()
+    assert db.get_item(item["id"])["date_ocr_date"] is None
+
+
+def test_edit_changed_date_clears_confidence_but_unchanged_date_keeps_it():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2027-01-01")
+    db.update_item(item_id, date_confidence="confirmed", date_candidates='["2027-01-01"]')
+    client.post(f"/api/items/{item_id}", data={"name": "Soup", "expiry_date": "2027-01-01"})
+    assert db.get_item(item_id)["date_confidence"] == "confirmed"
+    client.post(f"/api/items/{item_id}", data={"name": "Soup", "expiry_date": "2027-01-02"})
+    assert db.get_item(item_id)["date_confidence"] is None
+    assert db.get_item(item_id)["date_candidates"] is None
+
+
+def test_item_candidates_are_exposed_as_a_list():
+    item_id = db.add_item(barcode=None, name="Soup")
+    db.update_item(item_id, date_confidence="conflict", date_candidates='["2027-01-01", "2027-01-02"]')
+    assert client.get(f"/api/items/{item_id}").json()["date_candidates"] == ["2027-01-01", "2027-01-02"]
+
+
+def test_static_mount_tolerates_missing_ocr_directory_and_sets_immutable_header(tmp_path, monkeypatch):
+    static_mount = next(route for route in main.app.routes if getattr(route, "name", None) == "static")
+    monkeypatch.setattr(static_mount.app, "all_directories", [str(tmp_path)])
+    assert client.get("/static/ocr/absent.wasm").status_code == 404
+    ocr_dir = tmp_path / "ocr"
+    ocr_dir.mkdir()
+    (ocr_dir / "sample.wasm").write_bytes(b"wasm")
+    response = client.get("/static/ocr/sample.wasm")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"

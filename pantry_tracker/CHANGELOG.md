@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0
+
+- Added on-device OCR for use-by photos. The recognized text stays in the
+  phone browser and is checked against the configured vision model's reading
+  of the photo. Disagreements are shown for a person to resolve instead of
+  silently choosing one date.
+- Added support for spaced and compact numeric dates, while rejecting common
+  batch codes and unrelated numeric text.
+- The recommended vision model is now `glm-ocr:latest`; OCR assets are bundled
+  and cached by the browser after their first download (about 30 MB).
+
 ## 0.9.0
 
 - Use-by photos and product photos now open in a viewer inside the app.

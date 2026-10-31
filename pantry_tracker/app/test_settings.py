@@ -60,4 +60,4 @@ def test_vision_helpers_read_environment(monkeypatch):
     monkeypatch.setenv("VISION_MODEL", "")
     assert settings.vision_api_base() == "http://model.local/api"
     assert settings.vision_api_key() == "secret"
-    assert settings.vision_model() == "qwen2.5vl:3b"  # falls back when blank
+    assert settings.vision_model() == "glm-ocr:latest"  # falls back when blank
