@@ -99,6 +99,108 @@ _MAX_PAST_DAYS = 180
 # somewhere a use-by date plausibly would.
 _MAX_FUTURE_YEARS = 10
 
+SCORE_LABELLED = 8
+SCORE_PREVIOUS_LABEL = 2
+SCORE_SEPARATORS = 3
+SCORE_PRINTED_YEAR = 2
+PENALTY_COMPACT = 4
+PENALTY_TIME = 3
+PENALTY_BATCH = 6
+PENALTY_REPAIRED = 5
+# A production date is always behind us, and packs print it near the use-by.
+PENALTY_PAST = 6
+
+_MONTH_REPAIRS = {
+    "jn": "jan", "jpn": "jan", "ja n": "jan",
+    "10v": "nov", "14ov": "nov", "110v": "nov", "1ov": "nov", "hov": "nov", "nqv": "nov", "n0v": "nov",
+    "fe b": "feb", "f eb": "feb", "ap r": "apr", "ju n": "jun", "ju l": "jul",
+    "au g": "aug", "se p": "sep", "oc t": "oct", "de c": "dec",
+}
+_DATE_SHAPE_RE = re.compile(r"(?<![A-Za-z0-9])(?:\d[0-9OIl]{0,7}[./-][0-9OIl]{1,8}|[0-9OIl]{1,8}[./-][0-9OIl]{1,8})(?![A-Za-z0-9])")
+
+
+def _repaired_line(line: str) -> str:
+    repaired = line
+    # Longest first, or "110V" would be eaten as a "1" and a "10V".
+    for wrong, right in sorted(_MONTH_REPAIRS.items(), key=lambda item: -len(item[0])):
+        repaired = re.sub(rf"(?<=\d)\s*{re.escape(wrong)}(?=\s*(?:\d|$|:))", right, repaired, flags=re.IGNORECASE)
+    repaired = re.sub(r"(\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+\d{2})(\d{2}:\d{2})\b", r"\1 \2", repaired, flags=re.I)
+    return _DATE_SHAPE_RE.sub(lambda m: m.group().translate(str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1"})), repaired)
+
+
+def _line_dates(line: str, *, lenient: bool = False) -> list[tuple[date, bool]]:
+    found = []
+    variants = [(line, False)]
+    repaired = _repaired_line(line)
+    if repaired != line:
+        variants.append((repaired, True))
+    for value, was_repaired in variants:
+        parsed = _read_date(value)
+        if parsed and _is_recent_or_future(parsed):
+            found.append((parsed, was_repaired))
+        patterns = [_ISO_RE, _TEXT_DATE_RE, _DMY_RE, _SPACED_DATE_RE, _COMPACT_DATE_RE]
+        # "28 SEP 26" must not also count as a yearless "28 SEP", which would
+        # roll an expired date forward a year.
+        if not _TEXT_DATE_RE.search(value):
+            patterns.append(_TEXT_DATE_NO_YEAR_RE)
+        for pattern in patterns:
+            for match in pattern.finditer(value):
+                parsed = _read_date(match.group())
+                if parsed and _is_recent_or_future(parsed):
+                    found.append((parsed, was_repaired))
+        # Split a line around obvious separators to discover multiple dates.
+        for part in re.split(r"\s{2,}|\s+(?=(?:USE\s*BY|BEST\s*BEFORE|BB|EXP)\b)", value, flags=re.I):
+            parsed = _read_date(part)
+            if parsed and _is_recent_or_future(parsed):
+                found.append((parsed, was_repaired))
+    unique = {}
+    for parsed, repaired_flag in found:
+        if parsed not in unique or unique[parsed] and not repaired_flag:
+            unique[parsed] = repaired_flag
+    return [(parsed, flag) for parsed, flag in unique.items()]
+
+
+def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
+    """Returns ranked, deduplicated date readings with their source line."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    date_match = _DATE_LINE_RE.search(text)
+    if date_match and date_match[1].strip().upper() == "UNKNOWN":
+        return []
+    if date_match:
+        answer = date_match[1].strip()
+        parsed = _line_dates(answer, lenient=lenient)
+        if parsed:
+            return [{"date": d.isoformat(), "score": 100, "repaired": r, "line": answer} for d, r in parsed]
+        lines = [line for line in lines if not _DATE_LINE_RE.match(line)]
+    candidates = []
+    for index, line in enumerate(lines):
+        reads = _line_dates(line, lenient=lenient)
+        if not reads and lenient:
+            # Human-assisted mode accepts day/month only and repaired forms.
+            reads = _line_dates(_repaired_line(line), lenient=True)
+        labelled_here = bool(re.search(_LABEL_PATTERN, line, re.I))
+        label_previous = bool(index and re.search(_LABEL_PATTERN, lines[index - 1], re.I))
+        for parsed, repaired in reads:
+            score = SCORE_LABELLED if labelled_here else (SCORE_PREVIOUS_LABEL if label_previous else 0)
+            if re.search(r"[./-]|\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b", line, re.I): score += SCORE_SEPARATORS
+            if re.search(rf"(?<![:\d])(?:{parsed.year}|{parsed.year % 100:02d})(?![:\d])", line): score += SCORE_PRINTED_YEAR
+            if parsed < date.today(): score -= PENALTY_PAST
+            if re.search(r"(?<!\d)\d{6}(?!\d)", line) and not (labelled_here or label_previous): score -= PENALTY_COMPACT
+            if re.search(r"\b\d{1,2}:\d{2}\b", line) and not re.search(r"\b\d{1,2}\s+[A-Z]{3}\s+\d{1,2}:\d{2}\b", line, re.I): score -= PENALTY_TIME
+            if re.search(r"\b(?:L|LOT)\s*\w*\d", line, re.I): score -= PENALTY_BATCH
+            if repaired: score -= PENALTY_REPAIRED
+            candidates.append({"date": parsed.isoformat(), "score": score, "repaired": repaired, "line": line})
+    best = {}
+    for candidate in candidates:
+        old = best.get(candidate["date"])
+        if old is None or (candidate["score"], candidate["repaired"]) > (old["score"], old["repaired"]):
+            best[candidate["date"]] = candidate
+    if not best and len(lines) == 1 and not _DATE_LINE_RE.match(lines[0]):
+        parsed = _parse_date_text(lines[0])
+        if parsed:
+            best[parsed] = {"date": parsed, "score": 0, "repaired": False, "line": lines[0]}
+    return sorted(best.values(), key=lambda c: (c["score"], c["date"]), reverse=True)
+
 
 def _normalise_year(year: int) -> int:
     # Two-digit years on packaging are always near-future, never 1900s.
@@ -219,8 +321,11 @@ def parse_transcript(text: str) -> str | None:
 
     # Unlike a single line, a transcript's old dates are usually real print
     # rather than a misread year, so they're dropped and not moved forward.
-    candidates = [parsed for parsed in map(_read_date, lines) if parsed and _is_recent_or_future(parsed)]
-    return max(candidates).isoformat() if candidates else None
+    ranked = date_candidates("\n".join(lines))
+    if ranked:
+        return ranked[0]["date"]
+    old_dates = [parsed for parsed in map(_read_date, lines) if parsed and _is_recent_or_future(parsed)]
+    return max(old_dates).isoformat() if old_dates else None
 
 
 def _prompt_for(model: str) -> str:
@@ -232,9 +337,9 @@ def configured() -> bool:
 
 
 def extract_use_by_date(image_bytes: bytes) -> dict:
-    """Returns {"date": "YYYY-MM-DD" | None, "raw": "<model reply or error>"}."""
+    """Returns the top date, ranked candidates, and the model reply."""
     if not configured():
-        return {"date": None, "raw": "Vision model is not configured"}
+        return {"date": None, "candidates": [], "raw": "Vision model is not configured"}
 
     try:
         image = Image.open(BytesIO(image_bytes))
@@ -244,7 +349,7 @@ def extract_use_by_date(image_bytes: bytes) -> dict:
         image.convert("RGB").save(buffer, format="JPEG", quality=85)
         b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
     except Exception as exc:
-        return {"date": None, "raw": f"Could not read photo: {exc}"}
+        return {"date": None, "candidates": [], "raw": f"Could not read photo: {exc}"}
 
     body = {
         "model": settings.vision_model(),
@@ -271,9 +376,10 @@ def extract_use_by_date(image_bytes: bytes) -> dict:
             payload = json.loads(resp.read())
         reply = payload["choices"][0]["message"]["content"]
     except (urllib.error.URLError, TimeoutError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
-        return {"date": None, "raw": f"Vision request failed: {exc}"}
+        return {"date": None, "candidates": [], "raw": f"Vision request failed: {exc}"}
 
     reply = reply.strip()
     if reply.upper() == "UNKNOWN":
-        return {"date": None, "raw": reply}
-    return {"date": parse_transcript(reply), "raw": reply}
+        return {"date": None, "candidates": [], "raw": reply}
+    candidates = date_candidates(reply)
+    return {"date": candidates[0]["date"] if candidates else None, "candidates": candidates, "raw": reply}

@@ -140,7 +140,7 @@ limitation.
 
 ### Date reading confidence
 
-Each photo read is checked by on-device OCR and the configured vision model. **✓ Both readers agree** means both produced the same date. **Check this date against the photo** means only one reader found a date. **Readings differ** shows both candidate dates; choose the one printed on the package. **Couldn't read the date** means neither reader found a date; use Edit to rescan or enter it by hand. The parser accepts dates such as `01/03/2027`, `01 03 27`, `010327`, and `28 JAN 27`; it also handles times and surrounding packaging text while ignoring unrelated batch codes.
+Each photo read is checked by on-device OCR and the configured vision model. **✓ Both readers agree** means both produced the same date. **Check this date against the photo** means only one reader found a date. **Readings differ** shows both candidate dates; choose the one printed on the package. **Couldn't read the date** means neither reader found a date; use Edit to rescan or enter it by hand. The parser ranks multiple date candidates using labels and packaging context, and compares both readers’ candidate lists. Common OCR character confusions are repaired conservatively. For uncertain or unread readings, tap a digit-bearing OCR line to try it again in lenient mode; confirm the formatted date before it is saved. The parser accepts dates such as `01/03/2027`, `01 03 27`, `010327`, and `28 JAN 27`, while rejecting unrelated batch codes.
 
 ## Home Assistant entities
 

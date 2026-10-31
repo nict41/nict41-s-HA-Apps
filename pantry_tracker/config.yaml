@@ -1,5 +1,5 @@
 name: "Pantry Tracker"
-version: "0.10.1"
+version: "0.11.0"
 slug: "pantry_tracker"
 description: "Scan grocery barcodes to track your pantry, read use-by dates from a photo, and get notified before food expires"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pantry_tracker"

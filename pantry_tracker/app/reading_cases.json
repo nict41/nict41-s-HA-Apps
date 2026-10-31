@@ -1,0 +1,50 @@
+{
+ "6": {
+  "truth": "2026-11-02",
+  "paddle": "Use By:\n02 Nov 11:26F5T6 BBXY",
+  "qwen_copy_lines": "Use By:\n02 Nov 11:26 F5 T6 BBX Y\nDATE: 02 Nov 11:26",
+  "glm": "Use By:\n02 Nov 14:26 F5 T6 BBX Y"
+ },
+ "7": {
+  "truth": "2027-01-28",
+  "paddle": "L0B28JN2702:48",
+  "qwen_copy_lines": "L 08 28 JAN 27 02:48\nDATE: 27",
+  "glm": "L 08 28 JAN 27 02:48"
+ },
+ "8": {
+  "truth": "2026-11-03",
+  "paddle": "ralenergyvaluesper1oog:1ze6\nUse By:\n031V\nL20317\nK\nKeeprefrigerated",
+  "qwen_copy_lines": "Use By:\n03 140V\nL8 320317\nKeep refrigerated\nDATE: 03 140V",
+  "glm": "Use By:\n03 10V\nL8 20317\nKeep refrigerated"
+ },
+ "9": {
+  "truth": "2027-09-28",
+  "paddle": "BB:28/09/2027\n6271 EV 05:09",
+  "qwen_copy_lines": "BB:28/09/2027\n6271 EV 05:09\nDATE: 28/09/2027",
+  "glm": "28/09/2027\n6271 EV 05:09"
+ },
+ "10": {
+  "truth": "2027-03-01",
+  "paddle": "BEST BEFORE\n0103 27",
+  "qwen_copy_lines": "BEST BEFORE\n01 03 27\nDATE: 01 03 27",
+  "glm": "BEST BEFORE\n01 03 27"
+ },
+ "11": {
+  "truth": null,
+  "paddle": "e70g-2.50z（6x11,7g)",
+  "qwen_copy_lines": "08.03.2026\n30.03.2025:12\nDATE: 30.03.2025:12",
+  "glm": "09:03:2026\n50.09.2027:12\ne 70g-2.5 OZ (6x11,7g)"
+ },
+ "12": {
+  "truth": "2026-12-26",
+  "paddle": "BEST BEFORE\n261226\nGBC211204D\n04:40 6941",
+  "qwen_copy_lines": "BEST BEFORE\n26 12 26\nGBC 211 204D\n04:40 6941\nDATE: 26 12 26",
+  "glm": "BEST BEFORE\n26 12 26\nGBC 211 204D\n04:40 6941"
+ },
+ "13": {
+  "truth": "2027-05-01",
+  "paddle": "Best Before:\n01.05.2027\n184813:59",
+  "paddle_unsoftened": "Best Before:\n18405 13037",
+  "glm": "Best Before:\n01.05.2027\n184 A 13:59"
+ }
+}

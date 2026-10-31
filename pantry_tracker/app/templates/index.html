@@ -984,7 +984,7 @@ function readDateOnDevice(file) {
         const body = new FormData(); body.append("text", raw);
         const response = await fetch("api/parse-date", { method: "POST", body });
         const result = response.ok ? await response.json() : {};
-        if (result.date || firstRead) { settle({ date: result.date || null, raw: firstRead && !result.date ? firstRead.raw : raw }); return; }
+        if (result.date || firstRead) { settle({ date: result.date || null, candidates: result.candidates || [], raw: firstRead && !result.date ? firstRead.raw : raw }); return; }
         // No date in the text: retry softened, which helps tightly spaced
         // dot print (see soften in ocr-worker.js).
         firstRead = { date: null, raw };
@@ -1161,6 +1161,7 @@ async function uploadDatePhoto(itemId, file, statusEl, ocrPromise = Promise.reso
   body.append("photo", file, "use-by.jpg");
   if (ocrResult?.raw) body.append("ocr_raw", ocrResult.raw);
   if (ocrResult?.date) body.append("ocr_date", ocrResult.date);
+  if (ocrResult?.candidates) body.append("ocr_candidates", JSON.stringify(ocrResult.candidates));
   try {
     const response = await fetch(`api/items/${itemId}/date-photo`, { method: "POST", body });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -1199,6 +1200,7 @@ reviewForm.addEventListener("submit", async (e) => {
   }
   if (ocrResult?.raw) body.append("ocr_raw", ocrResult.raw);
   if (ocrResult?.date && $("#f-expiry").value === ocrResult.date) body.append("ocr_date", ocrResult.date);
+  if (ocrResult?.candidates) body.append("ocr_candidates", JSON.stringify(ocrResult.candidates));
   try {
     const res = await fetch("api/items", { method: "POST", body });
     if (!res.ok) {
@@ -1331,12 +1333,16 @@ function confidenceHtml(item, id = item.id) {
   const confidence = item.date_confidence;
   if (!confidence) return "";
   if (confidence === "confirmed") return '<div class="date-confidence confirmed">✓ Both readers agree</div>';
-  if (confidence === "check") return '<div class="date-confidence check">Check this date against the photo</div>';
-  if (confidence === "unread") return '<div class="date-confidence unread">Couldn\'t read the date. Use Edit to rescan.</div>';
+  if (confidence === "unread") return `<div class="date-confidence unread">Couldn\'t read the date. Tap a line to try it, or use Edit.<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
+  if (confidence === "check") return `<div class="date-confidence check">Check this date against the photo<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
   if (confidence === "conflict") return `<div class="date-confidence conflict">Readings differ:<div class="date-candidates">${(item.date_candidates || []).map((candidate) =>
     `<button type="button" class="link-btn date-candidate" data-item-id="${id}" data-date="${escapeAttr(candidate)}">${escapeHtml(formatDisplayDate(candidate))}</button>`
   ).join("")}</div></div>`;
   return "";
+}
+
+function dateTextLines(item) {
+  return [...new Set([item.date_ocr_raw || "", item.date_extraction_raw || ""].flatMap(text => text.split(/\r?\n/)).filter(line => /\d/.test(line)))].slice(0, 6);
 }
 
 async function chooseDateCandidate(itemId, selectedDate) {
@@ -1345,6 +1351,7 @@ async function chooseDateCandidate(itemId, selectedDate) {
   const body = new FormData();
   for (const field of ["name", "brand", "quantity", "category", "notes"]) body.append(field, item[field] || "");
   body.append("expiry_date", selectedDate);
+  body.append("date_chosen", "1");
   const response = await fetch(`api/items/${itemId}`, { method: "POST", body });
   if (response.ok) { await loadPantry(); }
 }
@@ -1352,7 +1359,20 @@ async function chooseDateCandidate(itemId, selectedDate) {
 document.addEventListener("click", (event) => {
   const button = event.target.closest(".date-candidate");
   if (button) chooseDateCandidate(Number(button.dataset.itemId), button.dataset.date);
+  const textButton = event.target.closest(".date-text-line");
+  if (textButton) tryDateText(textButton);
 });
+
+async function tryDateText(button) {
+  const body = new FormData(); body.append("text", button.dataset.line); body.append("lenient", "1");
+  const response = await fetch("api/parse-date", { method: "POST", body });
+  const result = response.ok ? await response.json() : {};
+  if (!result.date) { toast("No date in that text. Enter it with Edit."); return; }
+  // A second tap confirms, on a normal candidate button.
+  button.className = "link-btn date-candidate";
+  button.dataset.date = result.date;
+  button.textContent = `Use ${formatDisplayDate(result.date)}?`;
+}
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));

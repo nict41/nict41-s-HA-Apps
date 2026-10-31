@@ -94,7 +94,8 @@ def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
     result = vision.extract_use_by_date(path.read_bytes())
     if not db.get_item(item_id):
         return  # deleted while extraction was running
-    db.finish_date_extraction(item_id, result.get("date"), result.get("raw") or "", only_if_blank=only_if_blank)
+    candidates = result.get("candidates") or ([{"date": result["date"], "repaired": False}] if result.get("date") else [])
+    db.finish_date_extraction(item_id, candidates, result.get("raw") or "", only_if_blank=only_if_blank)
     _sync_now()
 
 
@@ -206,6 +207,24 @@ def _valid_ocr_date(value: str) -> str | None:
         return None
 
 
+def _valid_ocr_candidates(value: str) -> list[dict]:
+    try:
+        candidates = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(candidates, list) or len(candidates) > 10:
+        return []
+    valid = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or set(candidate) - {"date", "repaired"}:
+            return []
+        parsed = _valid_ocr_date(candidate.get("date", ""))
+        if not parsed or not isinstance(candidate.get("repaired", False), bool):
+            return []
+        valid.append({"date": parsed, "repaired": candidate.get("repaired", False)})
+    return valid
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     # Without this, a phone browser tab left open across an add-on rebuild
@@ -290,10 +309,11 @@ async def get_single_item(item_id: int):
 
 
 @app.post("/api/parse-date")
-async def parse_date(text: str = Form("")):
+async def parse_date(text: str = Form(""), lenient: str = Form("0")):
     """Turns what the browser's on-device OCR read into a date, so there's
     only one date parser to keep right."""
-    return {"date": vision.parse_transcript(text)}
+    candidates = vision.date_candidates(text, lenient=lenient == "1")
+    return {"date": candidates[0]["date"] if candidates else None, "candidates": [{"date": c["date"], "repaired": c["repaired"]} for c in candidates]}
 
 
 @app.post("/api/items")
@@ -311,6 +331,7 @@ async def add_item(
     date_photo: UploadFile | None = File(None),
     ocr_date: str = Form(""),
     ocr_raw: str = Form(""),
+    ocr_candidates: str = Form("[]"),
 ):
     name = name.strip()
     if not name:
@@ -347,7 +368,7 @@ async def add_item(
     if date_photo is not None:
         image_bytes = await date_photo.read()
         db.save_date_photo(item_id, image_bytes)
-        db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None)
+        db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None, _valid_ocr_candidates(ocr_candidates))
         background_tasks.add_task(_extract_and_update, item_id, only_if_blank=True)
     await run_in_threadpool(_sync_now)
     return _item_view(db.get_item(item_id))
@@ -360,6 +381,7 @@ async def upload_date_photo(
     photo: UploadFile = File(...),
     ocr_date: str = Form(""),
     ocr_raw: str = Form(""),
+    ocr_candidates: str = Form("[]"),
 ):
     """Attaches (or replaces) a use-by date photo on an existing item - used
     by the Pantry tab's "Rescan use-by date". Saves the photo and returns
@@ -370,7 +392,7 @@ async def upload_date_photo(
         return JSONResponse({"error": "Item not found."}, status_code=404)
     image_bytes = await photo.read()
     db.save_date_photo(item_id, image_bytes)
-    db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None)
+    db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None, _valid_ocr_candidates(ocr_candidates))
     background_tasks.add_task(_extract_and_update, item_id)
     return _item_view(db.get_item(item_id))
 
@@ -395,6 +417,7 @@ async def edit_item(
     category: str = Form(""),
     expiry_date: str = Form(""),
     notes: str = Form(""),
+    date_chosen: str = Form(""),
 ):
     name = name.strip()
     if not name:
@@ -406,9 +429,10 @@ async def edit_item(
     quantity = quantity.strip()
     category = category.strip()
     expiry_date = expiry_date.strip() or None
-    # Saving a different date is the person settling any doubt about it.
+    # Saving a different date, or tapping one, is the person settling any
+    # doubt about it.
     confidence = {}
-    if expiry_date != existing["expiry_date"]:
+    if expiry_date != existing["expiry_date"] or date_chosen == "1":
         confidence = {"date_confidence": None, "date_candidates": None}
     db.update_item(
         item_id,

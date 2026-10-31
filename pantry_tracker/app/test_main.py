@@ -369,9 +369,9 @@ def test_export_returns_json_attachment():
 
 
 def test_parse_date_endpoint(monkeypatch):
-    monkeypatch.setattr(main.vision, "parse_transcript", lambda text: "2027-03-01" if text == "01 03 27" else None)
-    assert client.post("/api/parse-date", data={"text": "01 03 27"}).json() == {"date": "2027-03-01"}
-    assert client.post("/api/parse-date", data={"text": "nothing"}).json() == {"date": None}
+    monkeypatch.setattr(main.vision, "date_candidates", lambda text, lenient=False: [{"date": "2027-03-01", "repaired": False}] if text == "01 03 27" else [])
+    assert client.post("/api/parse-date", data={"text": "01 03 27"}).json()["date"] == "2027-03-01"
+    assert client.post("/api/parse-date", data={"text": "nothing"}).json()["date"] is None
 
 
 def test_ocr_fields_are_stored_with_date_photo(monkeypatch):
@@ -436,3 +436,12 @@ def test_static_mount_tolerates_missing_ocr_directory_and_sets_immutable_header(
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
     (tmp_path / "worker.js").write_text("// worker")
     assert client.get("/static/worker.js").headers["cache-control"] == "no-cache"
+
+
+def test_tapping_the_current_date_settles_its_confidence():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2027-01-01")
+    db.update_item(item_id, date_confidence="check")
+    client.post(f"/api/items/{item_id}", data={"name": "Soup", "expiry_date": "2027-01-01"})
+    assert db.get_item(item_id)["date_confidence"] == "check"
+    client.post(f"/api/items/{item_id}", data={"name": "Soup", "expiry_date": "2027-01-01", "date_chosen": "1"})
+    assert db.get_item(item_id)["date_confidence"] is None
