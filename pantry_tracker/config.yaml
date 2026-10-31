@@ -1,5 +1,5 @@
 name: "Pantry Tracker"
-version: "0.13.0"
+version: "0.14.0"
 slug: "pantry_tracker"
 description: "Scan grocery barcodes to track your pantry, read use-by dates from a photo, and get notified before food expires"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/pantry_tracker"
@@ -14,15 +14,10 @@ ingress: true
 ingress_port: 8000
 panel_icon: mdi:barcode-scan
 panel_title: "Pantry Tracker"
-ports:
-  8000/tcp: null
-ports_description:
-  8000/tcp: "No login is required; leave this port off."
 options:
   notify_service: ""
   notify_days_before: 3
   notify_repeat_hours: 24
-  check_interval_hours: 12
   notify_hour: 8
   vision_api_base: ""
   vision_api_key: ""
@@ -31,7 +26,6 @@ schema:
   notify_service: str
   notify_days_before: int(0,30)
   notify_repeat_hours: int(1,168)
-  check_interval_hours: int(1,24)
   notify_hour: int(0,23)
   vision_api_base: str
   vision_api_key: password?

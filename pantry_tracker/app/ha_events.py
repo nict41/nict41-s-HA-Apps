@@ -29,7 +29,7 @@ def handle_action(action: str) -> None:
         if not item or item["status"] != db.STATUS_ACTIVE:
             return
         db.finish_item(item_id, match.group(1).lower())
-    ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
+    ha_sync.request_sync()
 
 
 def run(stop: threading.Event) -> None:

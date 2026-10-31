@@ -5,7 +5,7 @@ import json
 
 def test_handle_action_accepts_full_actions_and_ignores_invalid_or_inactive(monkeypatch):
     synced = []
-    monkeypatch.setattr(ha_events.ha_sync, "sync", lambda items: synced.append(items))
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: synced.append(True))
     item_id = db.add_item(barcode=None, name="Milk", count=2)
     ha_events.handle_action(f"PANTRY_EATEN_{item_id}")
     assert db.get_item(item_id)["count"] == 1
@@ -18,7 +18,7 @@ def test_handle_action_accepts_full_actions_and_ignores_invalid_or_inactive(monk
 
 
 def test_handle_action_snoozes_active_items(monkeypatch):
-    monkeypatch.setattr(ha_events.ha_sync, "sync", lambda items: None)
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: None)
     first = db.add_item(barcode=None, name="Milk")
     second = db.add_item(barcode=None, name="Soup")
     ha_events.handle_action(f"PANTRY_SNOOZE_{first},{second}")
@@ -27,7 +27,7 @@ def test_handle_action_snoozes_active_items(monkeypatch):
 
 def test_handle_action_rejects_long_ids_and_non_string_actions(monkeypatch):
     calls = []
-    monkeypatch.setattr(ha_events.ha_sync, "sync", lambda items: calls.append(items))
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: calls.append(True))
     item_id = db.add_item(barcode=None, name="Milk")
     ha_events.handle_action(f"PANTRY_EATEN_{item_id:010d}")
     ha_events.handle_action(None)
@@ -37,7 +37,7 @@ def test_handle_action_rejects_long_ids_and_non_string_actions(monkeypatch):
 
 def test_repeated_finish_action_does_not_finish_inactive_item_twice(monkeypatch):
     synced = []
-    monkeypatch.setattr(ha_events.ha_sync, "sync", lambda items: synced.append(items))
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: synced.append(True))
     item_id = db.add_item(barcode=None, name="Milk", count=1)
     action = f"PANTRY_EATEN_{item_id}"
     ha_events.handle_action(action)

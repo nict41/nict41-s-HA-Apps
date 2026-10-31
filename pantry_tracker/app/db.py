@@ -432,7 +432,21 @@ def valid_barcode(barcode: str | None) -> bool:
 
 
 def product_photo_path(barcode: str) -> Path:
+    if not valid_barcode(barcode):
+        raise ValueError("Invalid barcode")
     return DATA_DIR / "product_photos" / f"{barcode}.jpg"
+
+
+def product_image_path(barcode: str) -> Path:
+    if not valid_barcode(barcode):
+        raise ValueError("Invalid barcode")
+    return DATA_DIR / "product_images" / f"{barcode}.jpg"
+
+
+def save_product_image(barcode: str, image_bytes: bytes) -> None:
+    path = product_image_path(barcode)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(image_bytes)
 
 
 def save_product_photo(barcode: str, image_bytes: bytes) -> None:
@@ -544,6 +558,19 @@ def mark_notified(item_id: int, bucket: str) -> None:
     update_item(item_id, last_notified_at=now_iso(), last_notified_bucket=bucket)
 
 
+def get_cached_barcodes(barcodes: list[str]) -> dict[str, dict]:
+    codes = sorted(set(code for code in barcodes if code))
+    if not codes:
+        return {}
+    placeholders = ",".join("?" for _ in codes)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM barcode_cache WHERE barcode IN ({placeholders})",
+            codes,
+        ).fetchall()
+    return {row["barcode"]: dict(row) for row in rows}
+
+
 def get_cached_barcode(barcode: str) -> dict | None:
     """A previously looked-up product, by barcode. Product identity
     (name/brand/quantity/category) is effectively static once published, so
@@ -596,3 +623,26 @@ def set_state(key: str, value: str) -> None:
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (key, value),
         )
+
+
+def expire_old_date_photos() -> int:
+    """Removes use-by photos for items consumed more than 30 days ago."""
+    cutoff = today() - timedelta(days=30)
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id,consumed_at FROM items WHERE status=? AND consumed_at IS NOT NULL",
+            (STATUS_CONSUMED,),
+        ).fetchall()
+        expired_ids = []
+        for row in rows:
+            try:
+                consumed = datetime.fromisoformat(row["consumed_at"]).date()
+            except (TypeError, ValueError):
+                continue
+            if consumed < cutoff:
+                expired_ids.append(row["id"])
+        for item_id in expired_ids:
+            conn.execute("UPDATE items SET has_date_photo=0 WHERE id=?", (item_id,))
+    for item_id in expired_ids:
+        delete_date_photo(item_id)
+    return len(expired_ids)

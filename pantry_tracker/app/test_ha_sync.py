@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import time
 
 import db
 import ha_sync
@@ -62,19 +63,21 @@ def test_summary_contains_effective_and_printed_dates_and_frozen_count():
 
 
 def test_summary_notification_marks_only_after_success(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
     monkeypatch.setattr(ha_sync, "_request", lambda *args, **kwargs: False)
     item_id = db.add_item(barcode=None, name="Milk", expiry_date="2020-01-01")
-    assert ha_sync.notify_summary([db.get_item(item_id)]) == 0
+    assert ha_sync.notify_summary([db.get_item(item_id)]) == "failed"
     assert db.get_item(item_id)["last_notified_at"] is None
 
 
 def test_summary_notification_text_and_actions(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(body) or True)
     item_id = db.add_item(barcode=None, name="Milk", count=3, expiry_date="2020-01-01")
-    assert ha_sync.notify_summary([db.get_item(item_id)]) == 1
+    assert ha_sync.notify_summary([db.get_item(item_id)]) == "sent"
     payload = calls[0]
     assert payload["title"] == "1 item to use"
     assert payload["message"] == "Expired: Milk ×3."
@@ -86,12 +89,13 @@ def test_summary_notification_text_and_actions(monkeypatch):
 
 
 def test_multiple_items_make_one_summary_with_snooze_only(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(body) or True)
     first = db.add_item(barcode=None, name="Milk", expiry_date=(db.today() + timedelta(days=1)).isoformat())
     second = db.add_item(barcode=None, name="Soup", expiry_date=(db.today() + timedelta(days=2)).isoformat())
-    assert ha_sync.notify_summary([db.get_item(first), db.get_item(second)]) == 1
+    assert ha_sync.notify_summary([db.get_item(first), db.get_item(second)]) == "sent"
     payload = calls[0]
     assert "Tomorrow: Milk." in payload["message"]
     assert "In 2 days: Soup." in payload["message"]
@@ -134,16 +138,18 @@ def test_sync_deletes_stale_entities(monkeypatch):
 
 def test_notify_summary_requires_configured_service(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "")
-    assert ha_sync.notify_summary([_make_item(expiry_date="2020-01-01")]) == 0
+    assert ha_sync.notify_summary([_make_item(expiry_date="2020-01-01")]) == "not_configured"
 
 
 def test_notify_summary_skips_non_due_item(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     monkeypatch.setattr(ha_sync, "_request", lambda *a, **k: True)
-    assert ha_sync.notify_summary([_make_item(expiry_date="2099-01-01")]) == 0
+    assert ha_sync.notify_summary([_make_item(expiry_date="2099-01-01")]) == "nothing_due"
 
 
 def test_notify_summary_sends_and_marks_notified(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append((method, path, body)) or True)
@@ -152,7 +158,7 @@ def test_notify_summary_sends_and_marks_notified(monkeypatch):
     item = db.get_item(item_id)
 
     sent = ha_sync.notify_summary([item])
-    assert sent == 1
+    assert sent == "sent"
     assert calls[0] == ("POST", "/services/notify/mobile_app_phone", calls[0][2])
     assert "Yoghurt" in calls[0][2]["message"]
 
@@ -162,6 +168,7 @@ def test_notify_summary_sends_and_marks_notified(monkeypatch):
 
 
 def test_notify_summary_sets_click_action_to_own_ingress_panel(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     # The real hostname format, from `ha apps info` - hyphens, not the slug.
     monkeypatch.setattr(ha_sync.socket, "gethostname", lambda: "beb500c8-pantry-tracker")
@@ -176,6 +183,7 @@ def test_notify_summary_sets_click_action_to_own_ingress_panel(monkeypatch):
 
 
 def test_notify_summary_respects_repeat_window(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -186,11 +194,12 @@ def test_notify_summary_respects_repeat_window(monkeypatch):
     item = db.get_item(item_id)
 
     # Just notified moments ago, in the same bucket - no repeat yet.
-    assert ha_sync.notify_summary([item]) == 0
+    assert ha_sync.notify_summary([item]) == "nothing_due"
     assert calls == []
 
 
 def test_notify_summary_sends_again_after_repeat_window(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -201,11 +210,12 @@ def test_notify_summary_sends_again_after_repeat_window(monkeypatch):
     db.update_item(item_id, last_notified_at=stale, last_notified_bucket=db.BUCKET_EXPIRED)
     item = db.get_item(item_id)
 
-    assert ha_sync.notify_summary([item]) == 1
+    assert ha_sync.notify_summary([item]) == "sent"
     assert calls == [1]
 
 
 def test_notify_summary_bucket_change_bypasses_repeat_window(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -216,5 +226,37 @@ def test_notify_summary_bucket_change_bypasses_repeat_window(monkeypatch):
     item = db.get_item(item_id)
 
     # Degraded from expiring_soon to expired just now - should alert immediately.
-    assert ha_sync.notify_summary([item]) == 1
+    assert ha_sync.notify_summary([item]) == "sent"
     assert calls == [1]
+
+
+
+def test_sync_stops_when_summary_post_fails_and_preserves_synced_ids(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
+    db.set_state(ha_sync._SYNCED_IDS_STATE_KEY, '["sensor.old"]')
+    calls = []
+    monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(path) or False)
+    ha_sync.sync([_make_item(id=55)])
+    assert calls == ["/states/sensor.pantry_tracker_summary"]
+    assert db.get_state(ha_sync._SYNCED_IDS_STATE_KEY) == '["sensor.old"]'
+
+
+def test_request_sync_coalesces_and_reads_latest_items(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
+    calls = []
+    monkeypatch.setattr(ha_sync, "sync", lambda items: calls.append([item["id"] for item in items]))
+    original_list = db.list_items
+    monkeypatch.setattr(db, "list_items", lambda statuses: [{"id": 99}])
+    ha_sync.start_sync_worker()
+    try:
+        for _ in range(10):
+            ha_sync.request_sync()
+        deadline = time.monotonic() + 2
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert calls
+        assert calls[0] == [99]
+        assert len(calls) <= 2
+    finally:
+        ha_sync.stop_sync_worker()
+        monkeypatch.setattr(db, "list_items", original_list)

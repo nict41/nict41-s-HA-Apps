@@ -17,24 +17,37 @@ _USER_AGENT = "PantryTracker-HomeAssistantApp/1.0 (+https://github.com/nict41/ni
 _TIMEOUT_SECONDS = 10
 
 
+class LookupUnavailable(Exception):
+    """Open Food Facts could not be reached or returned an invalid response."""
+
+
 def lookup_barcode(barcode: str) -> dict | None:
-    """The product's name/brand/quantity/category/image, or None if it
-    isn't in the database or the request failed. A miss is never fatal to
-    the scan flow - the caller falls back to manual entry either way."""
+    """The product fields, or None when Open Food Facts reports no match."""
     url = f"{_BASE_URL}/{barcode}.json"
     req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
             payload = json.loads(resp.read())
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
-        return None
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        raise LookupUnavailable(f"Open Food Facts returned HTTP {exc.code}") from exc
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError, OSError) as exc:
+        raise LookupUnavailable("Open Food Facts request failed") from exc
 
-    if payload.get("status") != 1:
+    if not isinstance(payload, dict):
+        raise LookupUnavailable("Open Food Facts returned invalid JSON")
+    status = payload.get("status")
+    if type(status) is int and status == 0:
         return None
+    if type(status) is not int or status != 1:
+        raise LookupUnavailable("Open Food Facts returned an unknown status")
 
     product = payload.get("product") or {}
+    if not isinstance(product, dict):
+        raise LookupUnavailable("Open Food Facts returned invalid product data")
     return {
-        "name": product.get("product_name") or product.get("product_name_en") or "",
+        "name": product.get("product_name_en") or product.get("product_name") or "",
         "brand": (product.get("brands") or "").split(",")[0].strip(),
         "quantity": product.get("quantity") or "",
         "category": (product.get("categories") or "").split(",")[0].strip(),

@@ -25,7 +25,7 @@ from a phone-first ingress panel.
    the same barcode serves your correction next time instead of the
    original. On a browser without live camera support, it falls back to
    the phone's own photo-capture UI and decodes the barcode (via zbar) on
-   the add-on instead.
+   the app instead.
 2. Optionally open the same live camera view to **photograph the use-by/
    best-before date** - line the date up in the on-screen frame and it
    captures automatically once held steady for a moment (a shutter button
@@ -50,9 +50,11 @@ from a phone-first ingress panel.
    was opened, adjust its count, or delete it.
 5. A daily check sends one **Home Assistant summary notification** through
    your chosen `notify.*` service for due items, with a repeat reminder
-   until you deal with them. Tapping it opens the **Pantry** tab. The
-   configurable `check_interval_hours` setting only refreshes Home
-   Assistant sensors; **Check now** sends the summary immediately.
+   until you deal with them. Tapping it opens the **Pantry** tab. Home Assistant
+   sensors sync in the background at 00:05 local time, with a five-minute
+   check after startup to restore missing entities. Dashboard changes queue a
+   background refresh. **Send summary now** reports whether a summary was sent, nothing
+   was due, sending failed, or notifications are not configured.
 6. Every active item is also exposed as a Home Assistant sensor entity (no
    extra setup), so you can build your own automations or dashboards
    around your pantry too - see [Home Assistant entities](#home-assistant-entities).
@@ -61,22 +63,22 @@ from a phone-first ingress panel.
 
 ### 1. Configure the app
 
-Set the options below (**Settings → Add-ons → Pantry Tracker →
-Configuration**), then start the app. `notify_days_before`,
-`notify_repeat_hours`, `notify_hour` and `check_interval_hours` can be left at their
-defaults here and changed later from the app's own **Settings** tab
+Open Pantry Tracker from its Home Assistant ingress panel; the app is ingress-only.
+
+Open Pantry Tracker’s **Configuration** tab in Home Assistant to set the options below, then start the app. `notify_days_before`,
+`notify_repeat_hours` and `notify_hour` can be left at their defaults here and
+changed later from the app's own **Settings** tab
 without a restart - `notify_service` and the vision model connection
-live in this Configuration tab only (restart the add-on after changing
+live in this Configuration tab only (restart the app after changing
 either), so a value saved once can never end up silently overriding a
 later change made here, across an app update or otherwise.
 
 | Option | Default | Description |
 |---|---|---|
-| `notify_service` | _(blank)_ | A Home Assistant `notify.*` service, e.g. `notify.mobile_app_your_phone`. Blank disables notifications. Restart the add-on after changing it. |
+| `notify_service` | _(blank)_ | A Home Assistant `notify.*` service, e.g. `notify.mobile_app_your_phone`. Blank disables notifications. Restart the app after changing it. |
 | `notify_days_before` | `3` | How many days before the use-by date counts as "expiring soon". |
 | `notify_repeat_hours` | `24` | How often to resend a reminder for an item still due. |
-| `notify_hour` | `8` | Hour of the day to send the daily summary notification, using the add-on's time zone. |
-| `check_interval_hours` | `12` | How often to refresh Home Assistant sensors. It does not send notifications. |
+| `notify_hour` | `8` | Hour of the day to send the daily summary notification, using the app's time zone. |
 | `vision_api_base` | _(blank)_ | Base URL of an OpenAI-compatible `/chat/completions` endpoint hosting a vision model (Open WebUI, Ollama, etc.), e.g. `http://192.168.1.50:8080/api`. Blank disables photo date extraction. |
 | `vision_api_key` | _(blank)_ | Optional bearer token for the endpoint above. |
 | `vision_model` | `glm-ocr:latest` | The vision model name to request. |
@@ -90,7 +92,7 @@ search for "notify", and use the dotted id shown there (e.g.
 Open the app from the Home Assistant sidebar and use the **Scan** tab - it's
 built mobile-first, with big touch targets and native camera capture.
 
-Use `/<slug>/add` to open the app directly on its scanning flow.
+Open `/<slug>/add` to start scanning.
 
 ### A note on live camera access
 
@@ -107,10 +109,14 @@ HTTPS.
 
 ## Using the app
 
-- **Scan** - tap "Scan Barcode" to open your camera, snap the barcode, and
-  the product details are looked up automatically. If a barcode can't be
-  read or isn't found, you can still fill the form in by hand, or tap
-  "Enter manually instead" to skip scanning entirely. Tap "Photo of use-by
+Pantry groups items under **Expired**, **Use soon**, **Later**, **Needs a date**, and **Freezer**. The Add form keeps optional fields under **More details**. Settings includes **Send summary now**.
+
+- **Scan** - tap "Scan barcode" to open your camera, snap the barcode, and
+  the product details are looked up automatically. The camera shows a torch button
+  when the device supports it. If Open Food Facts can't
+  be reached, the app says so and you can fill the details in by hand. If a
+  barcode can't be read or isn't found, you can still fill the form in by hand, or tap
+  "Enter manually" to skip scanning entirely. Tap "Photo of use-by
   date" to capture the expiry date from a photo of the packaging, then tap
   "Add to pantry" right away - the date is read in the background and
   fills in on its own once it's done (check the Pantry tab), since OCR on
@@ -120,8 +126,9 @@ HTTPS.
   over 180 days in the past is treated as a misread year. A
   date typed into the field by hand always wins over a background read
   that disagrees with it.
-- **Pantry** - everything you're tracking, grouped by urgency, with a
-  **Needs a date** banner that jumps to active items without a date. Dates shown
+- **Pantry** - everything you're tracking, grouped under **Expired**, **Use soon**,
+  **Later**, **Needs a date**, and **Freezer**, with search and All, Fridge,
+  Cupboard, Freezer, Needs a date, and food-group filters. Dates shown
   as e.g. "1 July 2027", with a **Reading use-by date…** spinner shown
   while a background read is still in progress for that item. Each item
   with a stored photo has a **View use-by photo** link, opening it in
@@ -129,16 +136,16 @@ HTTPS.
   (correct the name, quantity, category, or notes; pick a new date by
   hand, or tap **Rescan use-by date** to read it from a fresh photo the
   same way as when first adding the item - this also runs in the
-  background), **Eaten** and **Binned** (one unit at a time, with a short
+  background), **Eaten**, **Binned**, and **Opened** (one unit at a time, with a short
   Undo action), opened-date and storage-location controls, quantity, and
-  **Delete**. The Eat first list shows up to five items due within a week.
+  **Delete**. Eat first shows up to three items due within a week, with Show all when more qualify.
   Search and location or food-group filters stay in place while the list
   refreshes. Settings includes this and last month's eaten and binned
   totals, plus the most-binned items this month.
-- **Settings** - the notification knobs above, a **Check now** button to
+- **Settings** - the notification knobs above, a **Send summary now** button to
   run a check immediately instead of waiting for the next scheduled one,
   status lines showing whether the vision model and Home Assistant sync
-  are configured, and a data **Export** as JSON.
+  are configured, and an **Export pantry data** button for JSON.
 
 ### Date reading confidence
 
@@ -146,8 +153,8 @@ Each photo read is checked by on-device OCR and the configured vision model. **�
 
 ## Home Assistant entities
 
-With no extra setup beyond installing the add-on, your pantry is also
-exposed as Home Assistant sensor entities, using the add-on's own
+With no extra setup beyond installing the app, your pantry is also
+exposed as Home Assistant sensor entities, using the app's own
 Supervisor-granted access to the Home Assistant API - no MQTT setup or
 extra credentials needed.
 
@@ -192,9 +199,11 @@ All pantry data is stored locally in `/data/pantry.db` (SQLite), and each
 item's use-by date photo (if any) in `/data/photos/` - kept so you can
 re-open it later to compare against the date that was read from it, and
 removed automatically if the item itself is deleted. Product photos you
-take are stored per barcode in `/data/product_photos/` and kept even after
-an item is deleted, so the next scan of that product still has one.
-The on-device OCR runs in the phone browser. Its recognized text is sent to this app for date interpretation. A barcode digit string goes to Open Food Facts, and the use-by-date photo goes to the vision model endpoint you configure yourself.
+take are stored per barcode in `/data/product_photos/`, and Open Food Facts
+thumbnails in `/data/product_images/`. Both are kept after an item is deleted,
+so the next scan of that product still has an image. Use-by photos for consumed
+items are removed after 30 days; active items and their photos are retained.
+The on-device OCR runs in your phone browser. Its recognized text is sent to this app for date interpretation. A barcode digit string goes to Open Food Facts, and the use-by-date photo goes to the vision model endpoint you configure yourself.
 
 ## Installation
 

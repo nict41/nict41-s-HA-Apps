@@ -2,6 +2,7 @@ from io import BytesIO
 import asyncio
 import threading
 import time
+import pytest
 
 import db
 import main
@@ -201,8 +202,10 @@ def test_location_opened_and_add_one_routes(monkeypatch):
     item_id = db.add_item(barcode="1234567", name="Soup", count=1)
     assert client.post(f"/api/items/{item_id}/opened", data={"days": 3}).status_code == 200
     assert db.get_item(item_id)["use_within_days"] == 3
-    assert client.post(f"/api/items/{item_id}/location", data={"location": "freezer"}).json()["bucket"] == db.BUCKET_FROZEN
-    assert client.post(f"/api/items/{item_id}/location", data={"location": "fridge"}).json()["defrosted_at"] == db.today().isoformat()
+    frozen = client.post(f"/api/items/{item_id}", data={"name": "Soup", "location": "freezer"})
+    assert frozen.json()["bucket"] == db.BUCKET_FROZEN
+    thawed = client.post(f"/api/items/{item_id}", data={"name": "Soup", "location": "fridge"})
+    assert thawed.json()["defrosted_at"] == db.today().isoformat()
     newest_id = db.add_item(barcode="1234567", name="Different date", count=4)
     result = client.post(f"/api/items/{item_id}/add-one")
     assert result.json()["count"] == 2
@@ -244,7 +247,7 @@ def test_tidy_migration_preserves_null_brand():
     assert db.get_cached_barcode("123456789")["brand"] is None
 
 
-def test_daily_summary_job_uses_local_time_grace_and_logs_reschedule(monkeypatch, capsys):
+def test_daily_summary_job_and_midnight_jobs_use_local_time_grace(monkeypatch, capsys):
     class FakeScheduler:
         running = False
 
@@ -277,11 +280,18 @@ def test_daily_summary_job_uses_local_time_grace_and_logs_reschedule(monkeypatch
 
     asyncio.run(run_lifespan())
     daily = next(job for job in scheduler.jobs if job[1].get("id") == main._NOTIFY_JOB_ID)
+    midnight = next(job for job in scheduler.jobs if job[1].get("id") == main._SYNC_JOB_ID)
+    assert midnight[1]["hour"] == 0
+    assert midnight[1]["minute"] == 5
+    assert midnight[1]["misfire_grace_time"] == 3600
+    assert midnight[1]["coalesce"] is True
+    republish = next(job for job in scheduler.jobs if job[1].get("id") == main._REPUBLISH_JOB_ID)
+    assert republish[1]["minutes"] == 5
+    assert any(job[1].get("id") == main._RETENTION_JOB_ID for job in scheduler.jobs)
     assert daily[1]["hour"] == 6
     assert daily[1]["misfire_grace_time"] == 3600
     assert daily[1]["coalesce"] is True
     assert "Daily summary at 06:00 Europe/London" in capsys.readouterr().out
-
     scheduler.running = True
     settings.set_many({"notify_hour": 9})
     main._reschedule_notify_job()
@@ -422,14 +432,12 @@ def test_settings_roundtrip():
         data={
             "notify_days_before": 5,
             "notify_repeat_hours": 48,
-            "check_interval_hours": 8,
         },
     )
     assert res.status_code == 200
     body = res.json()
     assert body["notify_days_before"] == 5
     assert body["notify_repeat_hours"] == 48
-    assert body["check_interval_hours"] == 8
 
     res = client.get("/api/settings")
     assert res.json()["notify_days_before"] == 5
@@ -445,7 +453,6 @@ def test_settings_reflects_notify_service_from_environment_not_the_database(monk
         data={
             "notify_days_before": 5,
             "notify_repeat_hours": 48,
-            "check_interval_hours": 8,
             "notify_service": "notify.mobile_app_a_completely_different_one",
         },
     )
@@ -459,7 +466,7 @@ def test_settings_reflects_notify_service_from_environment_not_the_database(monk
 def test_check_now_runs_without_ha_configured():
     res = client.post("/api/check-now")
     assert res.status_code == 200
-    assert res.json()["ok"] is True
+    assert res.json() == {"result": "not_configured"}
 
 
 def test_export_returns_json_attachment():
@@ -639,3 +646,144 @@ def test_restart_requeue_keeps_a_typed_date(monkeypatch):
     item = db.get_item(item_id)
     assert item["expiry_date"] == "2099-01-01"
     assert not item["date_extraction_pending"]
+
+
+@pytest.mark.parametrize("peer,expected", [
+    ("172.30.32.2", 200), ("127.0.0.1", 200), ("::1", 200), ("testclient", 200),
+    ("192.0.2.4", 403),
+])
+def test_ingress_peer_allowlist_uses_socket_peer(peer, expected):
+    class FakePeer:
+        async def __call__(self, scope, receive, send):
+            scope["client"] = (peer, 12345)
+            await main.app(scope, receive, send)
+    peer_client = TestClient(FakePeer())
+    response = peer_client.get("/api/settings", headers={"X-Forwarded-For": "172.30.32.2"})
+    assert response.status_code == expected
+
+
+def test_check_now_returns_each_result_and_stores_summary(monkeypatch):
+    results = {
+        "sent": "Summary sent",
+        "nothing_due": "Nothing is due right now",
+        "failed": "Couldn't send the summary",
+        "not_configured": "Notifications aren't set up",
+    }
+    for result, summary in results.items():
+        monkeypatch.setattr(main.ha_sync, "notify_summary", lambda items, value=result: value)
+        monkeypatch.setattr(main.ha_sync, "request_sync", lambda: None)
+        response = client.post("/api/check-now")
+        assert response.status_code == 200
+        assert response.json() == {"result": result}
+        assert db.get_state("last_check_summary") == summary
+
+
+def test_product_image_display_priority():
+    code = "5000000000010"
+    db.cache_barcode(code, {"name": "Tin", "brand": "", "quantity": "", "category": "", "image_url": "https://off.example/image.jpg"})
+    db.save_product_image(code, main.photos.normalise_product_photo(_jpeg_bytes(), max_dimension=400))
+    local_url = main._display_image_url(code, "https://off.example/image.jpg")
+    assert "/photo?v=" in local_url
+    assert client.get(f"/api/barcodes/{code}/photo").status_code == 200
+    db.save_product_photo(code, main.photos.normalise_product_photo(_jpeg_bytes()))
+    import os
+    os.utime(db.product_image_path(code), (100, 100))
+    os.utime(db.product_photo_path(code), (200, 200))
+    assert main._display_image_url(code, "https://off.example/image.jpg").endswith("v=200")
+
+
+def test_list_reads_settings_and_barcode_cache_once(monkeypatch):
+    db.cache_barcode("5000000000011", {"name": "Tin", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    db.add_item(barcode="5000000000011", name="First")
+    db.add_item(barcode="5000000000011", name="Second")
+    reads = {"settings": 0, "cache": 0, "single_cache": 0}
+    original_get_int = main.settings.get_int
+    original_get_many = db.get_cached_barcodes
+    def counted_get_int(key):
+        reads["settings"] += 1
+        return original_get_int(key)
+    def counted_get_many(codes):
+        reads["cache"] += 1
+        return original_get_many(codes)
+    def forbidden_single(code):
+        reads["single_cache"] += 1
+        raise AssertionError("list opened a per-item cache connection")
+    monkeypatch.setattr(main.settings, "get_int", counted_get_int)
+    monkeypatch.setattr(db, "get_cached_barcodes", counted_get_many)
+    monkeypatch.setattr(db, "get_cached_barcode", forbidden_single)
+    response = client.get("/api/items")
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 2
+    assert reads == {"settings": 1, "cache": 1, "single_cache": 0}
+
+
+
+def test_lookup_unavailable_is_reported_separately(monkeypatch):
+    def unavailable(code):
+        raise main.lookup.LookupUnavailable("offline")
+    monkeypatch.setattr(main.lookup, "lookup_barcode", unavailable)
+    response = client.get("/api/lookup/5000000000020")
+    assert response.json() == {"found": False, "unavailable": True, "display_image_url": ""}
+
+
+def test_photo_retention_boundary_and_malformed_consumed_at(monkeypatch):
+    from datetime import timedelta
+    today = db.today()
+    monkeypatch.setattr(db, "today", lambda: today)
+    old_id = db.add_item(barcode=None, name="Old")
+    boundary_id = db.add_item(barcode=None, name="Boundary")
+    malformed_id = db.add_item(barcode=None, name="Malformed")
+    active_id = db.add_item(barcode=None, name="Active")
+    for item_id in [old_id, boundary_id, malformed_id, active_id]:
+        db.save_date_photo(item_id, b"photo")
+    with db._connect() as conn:
+        conn.execute("UPDATE items SET has_date_photo=1 WHERE id=?", (active_id,))
+        conn.execute("UPDATE items SET status=?,consumed_at=?,has_date_photo=1 WHERE id=?", (db.STATUS_CONSUMED, (today - timedelta(days=31)).isoformat(), old_id))
+        conn.execute("UPDATE items SET status=?,consumed_at=?,has_date_photo=1 WHERE id=?", (db.STATUS_CONSUMED, (today - timedelta(days=30)).isoformat(), boundary_id))
+        conn.execute("UPDATE items SET status=?,consumed_at=?,has_date_photo=1 WHERE id=?", (db.STATUS_CONSUMED, "malformed", malformed_id))
+    assert db.expire_old_date_photos() == 1
+    assert not db.date_photo_path(old_id).exists()
+    assert db.get_item(old_id)["has_date_photo"] == 0
+    for kept_id in [boundary_id, malformed_id, active_id]:
+        assert db.date_photo_path(kept_id).exists()
+        assert db.get_item(kept_id)["has_date_photo"] == 1
+    assert db.get_item(malformed_id)["status"] == db.STATUS_CONSUMED
+    assert db.get_item(active_id)["status"] == db.STATUS_ACTIVE
+
+
+def test_local_product_image_route_has_changeable_cache_header():
+    code = "5000000000021"
+    db.save_product_image(code, main.photos.normalise_product_photo(_jpeg_bytes(), max_dimension=400))
+    response = client.get(f"/api/barcodes/{code}/photo")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache"
+
+
+
+def test_product_image_download_host_allowlist_size_cap_and_no_raise(monkeypatch):
+    calls = []
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+        def read(self, limit):
+            calls.append(limit)
+            return self.payload[:limit]
+        def __enter__(self):
+            return self
+        def __exit__(self, *exc):
+            return False
+    monkeypatch.setattr(main.photos.urllib.request, "urlopen", lambda req, timeout: Response(_jpeg_bytes()))
+    code = "5000000000022"
+    assert main.photos.download_product_image(f"https://images.openfoodfacts.org/images/{code}.jpg", code)
+    assert calls == [5 * 1024 * 1024]
+    assert max(Image.open(db.product_image_path(code)).size) <= 400
+    calls.clear()
+    assert not main.photos.download_product_image(f"https://evilimages.openfoodfacts.org/{code}.jpg", code)
+    assert not main.photos.download_product_image(f"http://images.openfoodfacts.org/{code}.jpg", code)
+    assert calls == []
+
+    db.product_image_path(code).unlink()
+    monkeypatch.setattr(main.photos.urllib.request, "urlopen", lambda req, timeout: Response(b"x" * (5 * 1024 * 1024 + 1)))
+    assert not main.photos.download_product_image(f"https://images.openfoodfacts.org/{code}.jpg", code)
+    monkeypatch.setattr(main.photos.urllib.request, "urlopen", lambda req, timeout: (_ for _ in ()).throw(TimeoutError()))
+    assert main.photos.download_product_image(f"https://images.openfoodfacts.org/{code}.jpg", code) is False

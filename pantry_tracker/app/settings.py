@@ -1,8 +1,7 @@
 """App settings.
 
-Numeric operational knobs (notify_days_before, notify_repeat_hours,
-check_interval_hours) are runtime-adjustable: each one's default comes
-from the add-on options, but the in-app settings page can override any of
+Numeric operational knobs (notify_days_before and notify_repeat_hours) are
+runtime-adjustable: each one's default comes from the add-on options, but the in-app settings page can override any of
 them, persisted in the `app_state` table under a `setting:` prefix and
 read live on every check cycle - same pattern as Parcel Tracker's
 settings.py.
@@ -31,7 +30,6 @@ _PREFIX = "setting:"
 _DEFAULTS = {
     "notify_days_before": int(os.environ.get("NOTIFY_DAYS_BEFORE", "3")),
     "notify_repeat_hours": int(os.environ.get("NOTIFY_REPEAT_HOURS", "24")),
-    "check_interval_hours": int(os.environ.get("CHECK_INTERVAL_HOURS", "12")),
     "notify_hour": int(os.environ.get("NOTIFY_HOUR", "8")),
 }
 
@@ -40,7 +38,6 @@ _DEFAULTS = {
 _BOUNDS = {
     "notify_days_before": (0, 30),
     "notify_repeat_hours": (1, 168),
-    "check_interval_hours": (1, 24),
     "notify_hour": (0, 23),
 }
 
