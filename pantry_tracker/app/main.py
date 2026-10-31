@@ -159,6 +159,9 @@ class _StaticFiles(StaticFiles):
         response = super().file_response(full_path, stat_result, scope, status_code)
         if Path(full_path).parent.name == "ocr":
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            # ocr-worker.js changes with the app, unlike the pinned files.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
 
