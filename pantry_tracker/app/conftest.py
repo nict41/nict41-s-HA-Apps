@@ -19,7 +19,10 @@ sys.path.insert(0, os.path.dirname(__file__))
 # for test_main.py occurs at collection time, before any per-test fixture
 # below has had a chance to run.
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="pantry_tracker_test_"))
-os.environ.setdefault("SUPERVISOR_TOKEN", "")
+# Assigned, not defaulted: ha_sync reads this once at import, and on a machine
+# with a real token (a Home Assistant app container) the tests would otherwise
+# write their fake items into that live Home Assistant.
+os.environ["SUPERVISOR_TOKEN"] = ""
 
 
 @pytest.fixture(autouse=True)

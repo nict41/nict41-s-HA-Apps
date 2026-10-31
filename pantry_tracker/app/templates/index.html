@@ -547,6 +547,7 @@ function resetScan() {
   scanBusy.classList.add("hidden");
   scanIdle.classList.remove("hidden");
   pendingAddDatePhoto = null;
+  pendingAddDatePhotoPromise = null;
   pendingAddDateOcr = null;
   addOcrGeneration++;
   addOcrAutofill = "";
@@ -655,10 +656,22 @@ let bestDateSharpness = -Infinity;
 let dateSharpnessBestAt = null;
 let dateCameraTiming = null;
 let dateLiveReadInFlight = false;
-let dateLiveSlowReads = 0;
 let dateLiveReadingStopped = false;
 let dateCameraSession = 0;
+let dateLiveWarmupAt = 0;
+let dateLastSharpnessAt = 0;
+let dateWorstTickMs = 0;
+let dateSkipNextTick = false;
+let shutterPointerHandled = false;
+let pendingAddDatePhotoPromise = null;
 const DATE_SAMPLE_INTERVAL_MS = 100;
+const TAP_SHIELD_MS = 450;
+const DATE_TICK_OVERRUN_GUARD_MS = 90;
+const DATE_STABILITY_MAX_GAP_MS = 400;
+const DATE_SHARPNESS_INTERVAL_MS = 250;
+const DATE_LIVE_WARMUP_MS = 800;
+const DATE_LIVE_SLOW_STREAK_KEY = "pantry-date-live-slow-streak-v1";
+const DATE_LIVE_DISABLED_KEY = "pantry-date-live-disabled-v1";
 const DATE_STABLE_DURATION_MS = 400;
 const DATE_SHARPNESS_MARGIN = 0.03; // a smaller gain than this counts as no longer improving
 const DATE_SHARPNESS_HARD_CAP_MS = 1200;
@@ -670,6 +683,8 @@ const DATE_MIN_BRIGHTNESS = 25;
 const DATE_MAX_BRIGHTNESS = 235;
 const STABILITY_SAMPLE_W = 48;
 const STABILITY_SAMPLE_H = 32;
+let stabilityGrayBuffer = new Uint8ClampedArray(STABILITY_SAMPLE_W * STABILITY_SAMPLE_H);
+let stabilityPreviousBuffer = new Uint8ClampedArray(STABILITY_SAMPLE_W * STABILITY_SAMPLE_H);
 
 // A use-by date photo captured before its item exists yet (the normal
 // case when adding something new - the item is only created once "Add to
@@ -748,16 +763,16 @@ function frameCropRect(video) {
 // sent anywhere.
 function sampleStabilityFrame(video, cropRect) {
   if (!stabilityCanvas) stabilityCanvas = document.createElement("canvas");
-  stabilityCanvas.width = STABILITY_SAMPLE_W;
-  stabilityCanvas.height = STABILITY_SAMPLE_H;
-  const ctx = stabilityCanvas.getContext("2d");
+  if (stabilityCanvas.width !== STABILITY_SAMPLE_W) stabilityCanvas.width = STABILITY_SAMPLE_W;
+  if (stabilityCanvas.height !== STABILITY_SAMPLE_H) stabilityCanvas.height = STABILITY_SAMPLE_H;
+  const ctx = stabilityCanvas.getContext("2d", { willReadFrequently: true });
   if (cropRect) {
     ctx.drawImage(video, cropRect.sx, cropRect.sy, cropRect.sw, cropRect.sh, 0, 0, STABILITY_SAMPLE_W, STABILITY_SAMPLE_H);
   } else {
     ctx.drawImage(video, 0, 0, STABILITY_SAMPLE_W, STABILITY_SAMPLE_H);
   }
   const { data } = ctx.getImageData(0, 0, STABILITY_SAMPLE_W, STABILITY_SAMPLE_H);
-  const gray = new Uint8ClampedArray(STABILITY_SAMPLE_W * STABILITY_SAMPLE_H);
+  const gray = stabilityGrayBuffer;
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
     gray[p] = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
   }
@@ -822,36 +837,93 @@ function saveBestDateFrame(video, cropRect) {
   else ctx.drawImage(video, 0, 0, width, height);
 }
 
-function bestDateFrameBlob() {
-  return new Promise((resolve) => bestDateFrameCanvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95));
+function copyVideoFrame(video, cropRect) {
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(cropRect ? cropRect.sw : video.videoWidth || 1280);
+  canvas.height = Math.round(cropRect ? cropRect.sh : video.videoHeight || 720);
+  const ctx = canvas.getContext("2d");
+  if (cropRect) ctx.drawImage(video, cropRect.sx, cropRect.sy, cropRect.sw, cropRect.sh, 0, 0, canvas.width, canvas.height);
+  else ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+function encodePhotoCanvas(canvas) {
+  return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95));
+}
+
+// The camera has already closed by the time this runs, so encoding can take
+// as long as it likes. Abandoned if the form was cancelled meanwhile, or a
+// slow encode would attach this photo to the next item.
+function finishCapturedPhoto(canvas, mode, existingOcrResult = null) {
+  const generation = addOcrGeneration;
+  pendingAddDatePhotoPromise = encodePhotoCanvas(canvas).then((blob) => {
+    if (generation !== addOcrGeneration) return null;
+    if (!blob) {
+      toast("Could not capture that photo - try again.");
+      return null;
+    }
+    if (mode === "product") onProductPhotoCaptured(blob);
+    else onDatePhotoCaptured(blob, existingOcrResult);
+    return blob;
+  });
+  return pendingAddDatePhotoPromise;
+}
+
+// Closing the camera on the press means the finger is still down, and the
+// browser sends the tap to whatever is under it on release. This takes that
+// tap, so it can't land on the form or the tab bar.
+function shieldPendingTap() {
+  const shield = document.createElement("div");
+  shield.style.cssText = "position:fixed;inset:0;z-index:9999;touch-action:none";
+  document.body.appendChild(shield);
+  setTimeout(() => shield.remove(), TAP_SHIELD_MS);
+}
+
+function noteLiveReadSpeed(readMs) {
+  const slow = readMs > DATE_LIVE_READ_SLOW_MS;
+  try {
+    const streak = slow ? Number(localStorage.getItem(DATE_LIVE_SLOW_STREAK_KEY) || "0") + 1 : 0;
+    localStorage.setItem(DATE_LIVE_SLOW_STREAK_KEY, String(streak));
+    if (streak >= 2) localStorage.setItem(DATE_LIVE_DISABLED_KEY, "1");
+  } catch (err) {
+    // Private browsing or full storage: only the memory of this is lost.
+  }
+  return slow;
 }
 
 // Reads the frame while the person is still aiming, so a clear date is
 // captured without waiting for a steady hold. The session check matters: a
 // read outlasting its camera must not fire into the next item's camera.
 function startLiveDateRead(video, cropRect) {
-  if (dateLiveReadingStopped || dateLiveReadInFlight || !ocrModelsReady) return;
+  if (dateLiveReadingStopped || dateLiveReadInFlight || !ocrModelsReady || !cropRect || performance.now() < dateLiveWarmupAt) return;
   dateLiveReadInFlight = true;
   const session = dateCameraSession;
   const startedAt = performance.now();
-  captureVideoFrame(video, cropRect)
-    .then(async (frameBlob) => {
-      const result = frameBlob ? await readDateOnDevice(frameBlob, { softRetry: false }) : null;
-      if (session !== dateCameraSession || cameraMode !== "date" || dateScanBusy) return;
+  const keptFrame = copyVideoFrame(video, cropRect);
+  createImageBitmap(video, cropRect.sx, cropRect.sy, cropRect.sw, cropRect.sh)
+    .then(async (bitmap) => {
+      const result = await readDateOnDevice(bitmap, { softRetry: false, bitmap: true });
       const doneAt = performance.now();
-      dateCameraTiming.readMs = doneAt - startedAt;
-      if (dateCameraTiming.readMs > DATE_LIVE_READ_SLOW_MS) {
-        dateLiveSlowReads++;
-        if (dateLiveSlowReads >= 2) dateLiveReadingStopped = true;
-      } else {
-        dateLiveSlowReads = 0;
+      // Counted even if the camera has closed: a person tapping Capture
+      // before a slow read ends is exactly what this needs to notice.
+      const slow = noteLiveReadSpeed(doneAt - startedAt);
+      if (session !== dateCameraSession) return;
+      if (dateCameraTiming) {
+        dateCameraTiming.readMs = doneAt - startedAt;
+        if (slow) dateCameraTiming.readSlow = true;
       }
+      if (slow) dateLiveReadingStopped = true;
+      if (cameraMode !== "date" || dateScanBusy) return;
       if (!result?.confident) return;
       dateScanBusy = true;
       dateCameraTiming.capturedAt = doneAt;
       sendCaptureTiming("live", doneAt);
+      if (datePhotoTarget?.statusEl) {
+        datePhotoTarget.statusEl.textContent = "Reading the date…";
+        datePhotoTarget.statusEl.classList.remove("hidden");
+      }
       closeCamera();
-      onDatePhotoCaptured(frameBlob, result);
+      await finishCapturedPhoto(keptFrame, "date", result);
     })
     .catch(() => {})
     .finally(() => {
@@ -873,6 +945,8 @@ function sendCaptureTiming(path, ocrDoneAt = null) {
   body.append("ocr_ms", Math.round(ocrDoneAt === null ? 0 : ocrDoneAt - dateCameraTiming.capturedAt));
   body.append("read_ms", Math.round(dateCameraTiming.readMs || 0));
   body.append("soft", dateCameraTiming.soft ? "1" : "0");
+  body.append("read_slow", dateCameraTiming.readSlow ? "1" : "0");
+  body.append("tick_ms", Math.round(dateCameraTiming.worstTickMs || 0));
   fetch("api/client-timing", { method: "POST", body }).catch(() => {});
 }
 
@@ -955,50 +1029,83 @@ async function openCamera(mode) {
     dateScanBusy = false;
     bestDateSharpness = -Infinity;
     dateSharpnessBestAt = null;
-    dateLiveSlowReads = 0;
     dateLiveReadingStopped = false;
     dateLiveReadInFlight = false;
+    dateLastSharpnessAt = 0;
+    dateWorstTickMs = 0;
+    dateSkipNextTick = false;
+    dateLiveWarmupAt = performance.now() + DATE_LIVE_WARMUP_MS;
+    dateCameraTiming.worstTickMs = 0;
+    dateCameraTiming.readSlow = false;
+    try { dateLiveReadingStopped = localStorage.getItem(DATE_LIVE_DISABLED_KEY) === "1"; } catch (err) { dateLiveReadingStopped = false; }
     dateStabilityTimer = setInterval(() => {
       if (dateScanBusy || video.readyState < 2) return;
+      if (dateSkipNextTick) { dateSkipNextTick = false; return; }
+      const tickStartedAt = performance.now();
+      const finishTick = () => {
+        const tickMs = performance.now() - tickStartedAt;
+        dateWorstTickMs = Math.max(dateWorstTickMs, tickMs);
+        if (dateCameraTiming) dateCameraTiming.worstTickMs = dateWorstTickMs;
+        if (tickMs > DATE_TICK_OVERRUN_GUARD_MS) dateSkipNextTick = true;
+      };
       const now = performance.now();
       if (!dateCameraTiming.firstSample) dateCameraTiming.firstSample = now;
       const cropRect = frameCropRect(video);
       const sample = sampleStabilityFrame(video, cropRect);
       const stats = grayStats(sample);
       const framedWell = stats.mean >= DATE_MIN_BRIGHTNESS && stats.mean <= DATE_MAX_BRIGHTNESS && stats.stddev >= DATE_MIN_STDDEV;
-      const frameDiff = prevStabilitySample ? grayDiff(sample, prevStabilitySample) : Infinity;
+      const gap = prevStabilitySample ? now - prevStabilitySample.at : Infinity;
+      const frameDiff = prevStabilitySample && gap <= DATE_STABILITY_MAX_GAP_MS ? grayDiff(sample, stabilityPreviousBuffer) : Infinity;
       const steady = framedWell && frameDiff < DATE_DIFF_THRESHOLD;
-      prevStabilitySample = sample;
+      stabilityPreviousBuffer.set(sample);
+      prevStabilitySample = { at: now };
       if (framedWell && frameDiff < DATE_LIVE_DIFF_THRESHOLD) startLiveDateRead(video, cropRect);
 
       if (!steady) {
-        dateStabilitySince = null;
-        bestDateSharpness = -Infinity;
-        dateSharpnessBestAt = null;
+        if (gap <= DATE_STABILITY_MAX_GAP_MS) {
+          dateStabilitySince = null;
+          bestDateSharpness = -Infinity;
+          dateSharpnessBestAt = null;
+        } else {
+          dateStabilitySince = now;
+          bestDateSharpness = -Infinity;
+          dateSharpnessBestAt = null;
+        }
         $("#camera-frame").classList.remove("steady");
+        finishTick();
         return;
       }
       if (dateStabilitySince === null) dateStabilitySince = now;
       $("#camera-frame").classList.add("steady");
       if (!dateCameraTiming.steadyReached && now - dateStabilitySince >= DATE_STABLE_DURATION_MS) dateCameraTiming.steadyReached = now;
-      const sharpness = sampleSharpness(video, cropRect);
-      if (sharpness > bestDateSharpness * (1 + DATE_SHARPNESS_MARGIN) || dateSharpnessBestAt === null) dateSharpnessBestAt = now;
-      if (sharpness > bestDateSharpness) {
-        bestDateSharpness = sharpness;
-        saveBestDateFrame(video, cropRect);
+      if (!dateLastSharpnessAt || now - dateLastSharpnessAt >= DATE_SHARPNESS_INTERVAL_MS) {
+        dateLastSharpnessAt = now;
+        const sharpness = sampleSharpness(video, cropRect);
+        if (sharpness > bestDateSharpness * (1 + DATE_SHARPNESS_MARGIN) || dateSharpnessBestAt === null) dateSharpnessBestAt = now;
+        if (sharpness > bestDateSharpness) {
+          bestDateSharpness = sharpness;
+          saveBestDateFrame(video, cropRect);
+        }
       }
       const steadyFor = now - dateStabilitySince;
       const sharpnessStopped = now - dateSharpnessBestAt >= DATE_SAMPLE_INTERVAL_MS;
-      if (steadyFor < DATE_STABLE_DURATION_MS || (steadyFor < DATE_SHARPNESS_HARD_CAP_MS && !sharpnessStopped)) return;
+      if (steadyFor < DATE_STABLE_DURATION_MS || (steadyFor < DATE_SHARPNESS_HARD_CAP_MS && !sharpnessStopped)) {
+        finishTick();
+        return;
+      }
 
       dateScanBusy = true;
       dateCameraTiming.capturedAt = now;
       dateCameraTiming.readerPath = "steady";
-      (async () => {
-        const blob = await bestDateFrameBlob();
-        closeCamera();
-        if (blob) onDatePhotoCaptured(blob);
-      })();
+      const canvas = bestDateSharpness > -Infinity ? bestDateFrameCanvas : copyVideoFrame(video, cropRect);
+      if (datePhotoTarget?.statusEl) {
+        datePhotoTarget.statusEl.textContent = "Reading the date…";
+        datePhotoTarget.statusEl.classList.remove("hidden");
+      }
+      closeCamera();
+      finishCapturedPhoto(canvas, "date");
+      finishTick();
+      return;
     }, DATE_SAMPLE_INTERVAL_MS);
   }
 }
@@ -1024,23 +1131,6 @@ function closeCamera() {
   }
   $("#camera-overlay").classList.add("hidden");
   cameraMode = null;
-}
-
-function captureVideoFrame(video, cropRect) {
-  return new Promise((resolve) => {
-    const canvas = document.createElement("canvas");
-    const ctx2d = canvas.getContext("2d");
-    if (cropRect) {
-      canvas.width = Math.round(cropRect.sw);
-      canvas.height = Math.round(cropRect.sh);
-      ctx2d.drawImage(video, cropRect.sx, cropRect.sy, cropRect.sw, cropRect.sh, 0, 0, canvas.width, canvas.height);
-    } else {
-      canvas.width = video.videoWidth || 1280;
-      canvas.height = video.videoHeight || 720;
-      ctx2d.drawImage(video, 0, 0, canvas.width, canvas.height);
-    }
-    canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.95);
-  });
 }
 
 $("#btn-scan-start").addEventListener("click", () => {
@@ -1099,7 +1189,7 @@ function preloadDateOcr() {
   if (worker) { try { worker.postMessage({ type: "init" }); } catch (err) { terminateOcrWorker(); } }
 }
 
-function readDateOnDevice(file, { softRetry = true } = {}) {
+function readDateOnDevice(file, { softRetry = true, bitmap = false } = {}) {
   return new Promise((resolve) => {
     const worker = ensureOcrWorker();
     if (!worker) { resolve(null); return; }
@@ -1135,7 +1225,13 @@ function readDateOnDevice(file, { softRetry = true } = {}) {
       } catch (err) { settle(firstRead); }
     };
     ocrPending.set(id, { finish, fail: () => settle(null) });
-    try { worker.postMessage({ id, file }); } catch (err) { settle(null); }
+    try {
+      if (bitmap) worker.postMessage({ id, bitmap: file }, [file]);
+      else worker.postMessage({ id, file });
+    } catch (err) {
+      if (bitmap) file.close();
+      settle(null);
+    }
   });
 }
 
@@ -1166,20 +1262,42 @@ $("#btn-camera-fallback").addEventListener("click", () => {
   closeCamera();
   openFallbackPicker(mode);
 });
-$("#btn-camera-shutter").addEventListener("click", async () => {
+function handleCameraShutter() {
   const mode = cameraMode;
+  if (!mode) return;
   const video = $("#camera-video");
-  const blob = mode === "date" && bestDateSharpness > -Infinity
-    ? await bestDateFrameBlob()
-    : await captureVideoFrame(video, mode === "date" ? frameCropRect(video) : null);
+  const canvas = mode === "date" && bestDateSharpness > -Infinity
+    ? bestDateFrameCanvas
+    : copyVideoFrame(video, mode === "date" ? frameCropRect(video) : null);
   if (mode === "date" && dateCameraTiming) {
     dateCameraTiming.capturedAt = performance.now();
     dateCameraTiming.readerPath = "shutter";
+    const target = datePhotoTarget;
+    if (target?.statusEl) {
+      target.statusEl.textContent = "Reading the date…";
+      target.statusEl.classList.remove("hidden");
+    }
   }
   closeCamera();
-  if (!blob) return;
-  if (mode === "product") onProductPhotoCaptured(blob);
-  else onDatePhotoCaptured(blob);
+  finishCapturedPhoto(canvas, mode);
+}
+
+const cameraShutter = $("#btn-camera-shutter");
+cameraShutter.addEventListener("pointerdown", (event) => {
+  if (event.button !== undefined && event.button !== 0) return;
+  event.preventDefault();
+  if (shutterPointerHandled) return;
+  shutterPointerHandled = true;
+  setTimeout(() => { shutterPointerHandled = false; }, 1000);
+  shieldPendingTap();
+  handleCameraShutter();
+});
+cameraShutter.addEventListener("click", () => {
+  if (shutterPointerHandled) {
+    shutterPointerHandled = false;
+    return;
+  }
+  handleCameraShutter();
 });
 
 // The product a photo belongs to, set just before the camera/file-picker
@@ -1352,6 +1470,7 @@ reviewForm.addEventListener("submit", async (e) => {
   const saveBtn = $("#btn-review-save");
   saveBtn.disabled = true;
 
+  if (pendingAddDatePhotoPromise) await pendingAddDatePhotoPromise;
   const ocrResult = pendingAddDateOcr ? await withOcrCap(pendingAddDateOcr) : null;
   const body = new FormData(reviewForm);
   body.append("barcode", reviewForm.dataset.barcode || "");

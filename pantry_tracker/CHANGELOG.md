@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.1
+
+- Camera capture now closes immediately on press, with photo encoding moved
+  off the interaction path and live date OCR moved to bitmap worker input.
+- Stability sampling skips slow ticks, and slow live reads can be disabled
+  automatically on devices that repeatedly struggle with them.
+
 ## 0.12.0
 
 - Date camera capture now waits for focus to settle, preserves the sharpest
