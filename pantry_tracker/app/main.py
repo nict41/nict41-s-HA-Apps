@@ -327,7 +327,7 @@ def _item_view(item: dict, notify_days_before: int | None = None,
 
 
 def _cache_item_preference(item: dict, **fields) -> None:
-    """Stores a location or opened-days choice even when no lookup cache exists yet."""
+    """Stores an opened-days choice even when no lookup cache exists yet."""
     barcode = item.get("barcode")
     if not barcode:
         return
@@ -391,6 +391,7 @@ async def scan(photo: UploadFile = File(...)):
 async def lookup_product(code: str, background_tasks: BackgroundTasks):
     cached = db.get_cached_barcode(code)
     if cached:
+        suggested_location = cached.get("suggested_location") or tidy.storage_suggestion([], cached.get("category", ""), cached.get("name", ""))
         background_tasks.add_task(photos.download_product_image, cached.get("image_url", ""), code)
         return {
             "found": True,
@@ -402,6 +403,7 @@ async def lookup_product(code: str, background_tasks: BackgroundTasks):
             "image_url": cached["image_url"],
             "display_image_url": _display_image_url(code, cached["image_url"]),
             **({"location": cached.get("location")} if cached.get("location") else {}),
+            **({"suggested_location": suggested_location} if suggested_location else {}),
             **({"opened_days": cached.get("opened_days")} if cached.get("opened_days") else {}),
         }
 
@@ -413,6 +415,9 @@ async def lookup_product(code: str, background_tasks: BackgroundTasks):
         return {"found": False, "display_image_url": _display_image_url(code, "")}
     product["name"] = tidy.tidy_name(product.get("name", ""))
     product["brand"] = tidy.tidy_name(product.get("brand", ""))
+    product["suggested_location"] = tidy.storage_suggestion(
+        product.get("categories_tags", []), product.get("category", ""), product.get("name", "")
+    )
     db.cache_barcode(code, product)
     background_tasks.add_task(photos.download_product_image, product["image_url"], code)
     return {
@@ -707,8 +712,6 @@ async def edit_item(
             existing["barcode"],
             {"name": name, "brand": brand, "quantity": quantity, "category": category, "image_url": existing["image_url"] or ""},
         )
-        if location:
-            db.update_cached_barcode(existing["barcode"], location=location)
         if days is not None:
             db.update_cached_barcode(existing["barcode"], opened_days=days)
     ha_sync.request_sync()

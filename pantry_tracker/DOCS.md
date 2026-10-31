@@ -44,6 +44,12 @@ from a phone-first ingress panel.
 3. Review and **add it to your pantry**. Everything is editable before
    saving, and a barcode that isn't found (or isn't scannable) just falls
    back to manual entry - nothing blocks you from tracking an item.
+   For a recognized product, the Add form prefers the last nonblank location chosen
+   when adding that barcode, then a category-based suggestion. Suggestions
+   use fridge or cupboard for clear product groups; freezer is suggested only
+   for products tagged or named as frozen. Only a nonblank location chosen
+   when adding an item is remembered; edits and Freeze or Defrost actions do
+   not change that remembered choice.
 4. The **Pantry** tab groups items by effective use-by date and storage
    location, with an Eat first list, search and filters. Rows let you edit,
    mark one unit **Eaten** or **Binned**, Freeze or Defrost an item, undo a

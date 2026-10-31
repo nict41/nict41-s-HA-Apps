@@ -1,0 +1,191 @@
+[
+ {
+  "name": "Mash",
+  "category": "",
+  "categories_tags": [],
+  "expected": ""
+ },
+ {
+  "name": "Fresh double cream",
+  "category": "Creams",
+  "categories_tags": [
+   "en:dairies",
+   "en:creams"
+  ],
+  "expected": "fridge"
+ },
+ {
+  "name": "10 Pork Sausages",
+  "category": "Sausages",
+  "categories_tags": [
+   "en:meats-and-their-products",
+   "en:prepared-meats",
+   "en:sausages"
+  ],
+  "expected": "fridge"
+ },
+ {
+  "name": "Chicken & Vegetable Soup",
+  "category": "Chicken and vegetables soup",
+  "categories_tags": [
+   "en:meals",
+   "en:soups",
+   "en:reheatable-soups",
+   "en:chicken-and-vegetables-soup"
+  ],
+  "expected": ""
+ },
+ {
+  "name": "Dinner rolls",
+  "category": "Pre-baked breads",
+  "categories_tags": [
+   "en:plant-based-foods-and-beverages",
+   "en:plant-based-foods",
+   "en:cereals-and-potatoes",
+   "en:cereals-and-their-products",
+   "en:breads",
+   "en:pre-baked-breads",
+   "en:bread-rolls"
+  ],
+  "expected": ""
+ },
+ {
+  "name": "Soft Cheese Original",
+  "category": "Cream cheeses",
+  "categories_tags": [
+   "en:dairies",
+   "en:fermented-foods",
+   "en:fermented-milk-products",
+   "en:cheeses",
+   "en:cream-cheeses",
+   "es:Ultraprocesado"
+  ],
+  "expected": "fridge"
+ },
+ {
+  "name": "Beautifully Buttery Light",
+  "category": "Plant-based spreads",
+  "categories_tags": [
+   "en:plant-based-foods-and-beverages",
+   "en:plant-based-foods",
+   "en:dairies",
+   "en:spreads",
+   "en:fats",
+   "en:plant-based-spreads",
+   "en:vegetable-fats",
+   "en:spreadable-fats",
+   "en:animal-fats",
+   "en:dairy-spreads",
+   "en:margarines",
+   "en:milkfat",
+   "en:butters"
+  ],
+  "expected": "fridge"
+ },
+ {
+  "name": "Jammy Wheels",
+  "category": "Biscuits",
+  "categories_tags": [
+   "en:snacks",
+   "en:sweet-snacks",
+   "en:biscuits-and-cakes",
+   "en:biscuits-and-crackers",
+   "en:biscuits"
+  ],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Biscuits covered with milk chocolate",
+  "category": "Chocolate-covered biscuits",
+  "categories_tags": [
+   "en:snacks",
+   "en:sweet-snacks",
+   "en:biscuits-and-cakes",
+   "en:biscuits-and-crackers",
+   "en:biscuits",
+   "en:chocolate-biscuits",
+   "en:chocolate-covered-biscuits",
+   "en:Chocolate-finger"
+  ],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Belmont Biscuits Groovy Biscuits x 6",
+  "category": "Biscuits",
+  "categories_tags": [
+   "en:snacks",
+   "en:sweet-snacks",
+   "en:biscuits-and-cakes",
+   "en:biscuits-and-crackers",
+   "en:biscuits",
+   "en:Biscuit with smarties"
+  ],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Ko-lee Go Noodles Roast Chicken 65g",
+  "category": "Instant noodles",
+  "categories_tags": [
+   "en:plant-based-foods-and-beverages",
+   "en:plant-based-foods",
+   "en:dried-products",
+   "en:dried-products-to-be-rehydrated",
+   "en:pastas",
+   "en:noodles",
+   "en:instant-noodles"
+  ],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Total 5% Fat Greek Yogurt",
+  "category": "Cow milk yogurts",
+  "categories_tags": [
+   "en:dairies",
+   "en:fermented-foods",
+   "en:fermented-milk-products",
+   "en:desserts",
+   "en:dairy-desserts",
+   "en:fermented-dairy-desserts",
+   "en:yogurts",
+   "en:cow-milk-yogurts",
+   "en:greek-style-yogurts"
+  ],
+  "expected": "fridge"
+ },
+ {
+  "name": "Doritos",
+  "category": "",
+  "categories_tags": [],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Chewy Candy Raspberry",
+  "category": "Candies",
+  "categories_tags": [
+   "en:snacks",
+   "en:sweet-snacks",
+   "en:confectioneries",
+   "en:candies"
+  ],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Natural Sea Salt",
+  "category": "",
+  "categories_tags": [],
+  "expected": "cupboard"
+ },
+ {
+  "name": "Golden Syrup Porridge",
+  "category": "Breakfast cereals",
+  "categories_tags": [
+   "en:plant-based-foods-and-beverages",
+   "en:plant-based-foods",
+   "en:breakfasts",
+   "en:cereals-and-potatoes",
+   "en:cereals-and-their-products",
+   "en:breakfast-cereals"
+  ],
+  "expected": "cupboard"
+ }
+]

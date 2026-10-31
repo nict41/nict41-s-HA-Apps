@@ -28,6 +28,7 @@ def test_lookup_barcode_returns_product_fields(monkeypatch):
             "brands": "Heinz,Other",
             "quantity": "415g",
             "categories": "Tinned foods,Beans",
+            "categories_tags": ["en:canned-foods"],
             "image_front_small_url": "https://example.com/img.jpg",
         },
     }
@@ -39,6 +40,7 @@ def test_lookup_barcode_returns_product_fields(monkeypatch):
         "brand": "Heinz",
         "quantity": "415g",
         "category": "Tinned foods",
+        "categories_tags": ["en:canned-foods"],
         "image_url": "https://example.com/img.jpg",
     }
 

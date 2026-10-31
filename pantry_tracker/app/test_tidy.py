@@ -1,4 +1,8 @@
 import tidy
+import json
+from pathlib import Path
+
+import pytest
 
 
 def test_tidy_name_capitalisation_and_units():
@@ -32,3 +36,41 @@ def test_food_group_real_examples():
     assert tidy.food_group("", "ice cream") == "Snacks & sweets"
     assert tidy.food_group("Snack", "") == "Snacks & sweets"
     assert tidy.food_group("Peanut butter", "Cream") == "Cooking & condiments"
+
+
+@pytest.mark.parametrize("case", json.loads((Path(__file__).parent / "storage_cases.json").read_text()))
+def test_storage_suggestion_cases(case):
+    assert tidy.storage_suggestion(case["categories_tags"], case["category"], case["name"]) == case["expected"]
+
+
+@pytest.mark.parametrize(("tags", "category", "name", "expected"), [
+    (["en:canned-foods", "en:meats"], "Canned meat", "Beef", "cupboard"),
+    (["en:dairies", "en:biscuits"], "Biscuits", "Milk chocolate biscuit", "cupboard"),
+    (["en:canned-foods", "en:frozen-peas"], "Peas", "Frozen peas", "freezer"),
+    (["en:dairies"], "Milk", "", "fridge"),
+    (["en:chips-and-fries"], "", "", ""),
+    (["en:chips-and-fries", "en:snacks"], "", "", "cupboard"),
+    ([], "Salted snacks", "", ""),
+    ([], "Cream crackers", "", "cupboard"),
+    ([], "", "Ice cream", "freezer"),
+    ([], "", "Mash", ""),
+])
+def test_storage_suggestion_order_and_word_boundaries(tags, category, name, expected):
+    assert tidy.storage_suggestion(tags, category, name) == expected
+
+
+@pytest.mark.parametrize(
+    ("category", "name", "expected"),
+    [
+        ("Cow milk yogurts", "Greek yogurt", "fridge"),
+        ("Creams", "", "fridge"),
+        ("Sausages", "", "fridge"),
+        ("Cream cheeses", "", "fridge"),
+        ("", "Salted crisps", "cupboard"),
+        ("Instant noodles", "", "cupboard"),
+        ("", "Peanut butter", "cupboard"),
+        ("", "Cream crackers", "cupboard"),
+    ],
+)
+def test_storage_suggestion_word_fallback_handles_plurals(category, name, expected):
+    assert tidy.storage_suggestion([], category, name) == expected
