@@ -20,7 +20,13 @@ The app exposes port 8200 to the internal app network; it is not published to th
 
 On the phone, enable Developer options and Wireless debugging. Choose **Pair device with pairing code** and pass the displayed pairing IP and port to `adb_pair` along with its code. Pairing and connect use different ports. Then use the main Wireless debugging screen's IP address and port with `adb_connect`. Android may change these ports, so check the phone each time. If several phones are connected, supply the device id to device-specific tools.
 
+Over Tailscale, the phone must still be on Wi-Fi, because Android only offers Wireless debugging there. Use the phone's Tailscale `100.x` address in place of the IP shown on screen, and keep the port shown.
+
 This HA host has no `/dev/kvm`, so Android emulators are not supported. Use a real phone over wireless adb.
+
+## Typical workflow
+
+Write the project under `/share/android_dev/projects/<name>`, run `gradle_wrapper` once, then start a build with `gradle_run`. It returns a job id straight away, so poll `job_status` and then use `list_artifacts`. Only one job runs at a time. Install with `install_apk`, then use `launch`, `logcat`, `screenshot` and `ui_dump`. `input_text` is ASCII only, and a literal `%s` types a space. AGP 9.5.0, compileSdk 36 and Gradle 9.8.2 are known to work on JDK 21.
 
 ## Projects, artifacts and signing
 
