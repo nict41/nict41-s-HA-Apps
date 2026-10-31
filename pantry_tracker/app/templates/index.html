@@ -8,77 +8,114 @@
   :root {
     --bg: #f4f6f2;
     --surface: #ffffff;
+    --surface-2: #edf1eb;
     --ink: #1c2420;
     --muted: #677069;
     --border: #dde3dc;
     --accent: #2e7d63;
     --accent-ink: #ffffff;
-    --ok: #2e7d63;
-    --soon: #b5790a;
-    --expired: #b3362c;
-    --unknown: #8a8f8b;
-    --radius: 14px;
+    --ok: #1f6b52;
+    --soon: #795000;
+    --expired: #a12b22;
+    --unknown: #505954;
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --radius-1: 8px;
+    --radius-2: 12px;
+    --radius-3: 16px;
+    --type-1: 12px;
+    --type-2: 13px;
+    --type-3: 15px;
+    --type-4: 17px;
+    --type-5: 22px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #10140f;
       --surface: #1a2018;
+      --surface-2: #242c23;
       --ink: #eef3ea;
       --muted: #9aa69c;
       --border: #2a332a;
       --accent: #57c498;
       --accent-ink: #0b1210;
-      --ok: #57c498;
-      --soon: #e0ac3e;
-      --expired: #ec6a5e;
-      --unknown: #7c8680;
+      --ok: #a0ddc0;
+      --soon: #f3cb78;
+      --expired: #ff9b91;
+      --unknown: #aeb8b1;
     }
   }
+
+  .icon-sprite { display: none; }
+  .icon-svg {
+    width: 24px;
+    height: 24px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    flex: 0 0 auto;
+  }
+  nav.tabs button .icon-svg { width: 22px; height: 22px; }
+  .mt-0 { margin-top: 0; }
+  .mt-10 { margin-top: var(--space-3); }
+  .mt-16 { margin-top: var(--space-4); }
+  .flex-fill { width: auto; flex: 1; }
+  .small-centered { font-size: var(--type-1); text-align: center; }
+  .centered { text-align: center; }
+  .no-underline { text-decoration: none; }
+  .spinner-small { width: 12px; height: 12px; vertical-align: middle; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
     color: var(--ink);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 16px;
+    font-size: var(--type-3);
     line-height: 1.4;
     padding-bottom: 76px;
     min-height: 100vh;
   }
   header.top {
-    padding: 16px 16px 8px;
+    padding: var(--space-4) var(--space-4) var(--space-2);
     position: sticky;
     top: 0;
     background: var(--bg);
     z-index: 5;
+    border-bottom: 1px solid var(--border);
   }
   header.top h1 {
-    font-size: 20px;
+    font-size: var(--type-4);
+    font-weight: 600;
     margin: 0;
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  main { padding: 0 16px 24px; max-width: 640px; margin: 0 auto; }
+  main { padding: 0 var(--space-4) var(--space-5); max-width: 640px; margin: 0 auto; }
   .view { display: none; }
   .view.active { display: block; }
 
   .card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    margin-bottom: 14px;
+    border-radius: var(--radius-3);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
   }
 
   button, .btn {
-    font-size: 16px;
+    font-size: var(--type-3);
     font-family: inherit;
-    border-radius: 12px;
+    border-radius: var(--radius-2);
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--ink);
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
     min-height: 48px;
     cursor: pointer;
     display: inline-flex;
@@ -95,31 +132,34 @@
   }
   button.danger { color: var(--expired); border-color: var(--expired); }
   button.ghost { background: transparent; }
-  .needs-date-banner { width: auto; min-height: 44px; padding: 6px 10px; margin-bottom: 10px; font-size: 13px; }
+  .needs-date-banner { width: auto; min-height: 44px; padding: 6px 10px; margin-bottom: 10px; font-size: var(--type-2); }
   button:disabled { opacity: 0.5; cursor: default; }
   .row { display: flex; gap: 10px; }
   .row > * { flex: 1; }
 
-  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
-  input[type=text], input[type=date], input[type=number], textarea, select {
+  label { display: block; font-size: var(--type-2); color: var(--muted); margin: 12px 0 4px; }
+  input[type=text], input[type=date], input[type=number], input[type=search], textarea, select {
     width: 100%;
-    font-size: 16px;
+    font-size: var(--type-3);
     font-family: inherit;
     padding: 11px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-1);
     border: 1px solid var(--border);
     background: var(--bg);
     color: var(--ink);
   }
+  input[type=search] { appearance: none; -webkit-appearance: none; }
+  input[type=search]::-webkit-search-cancel-button,
+  input[type=search]::-webkit-search-decoration { appearance: none; -webkit-appearance: none; }
   textarea { resize: vertical; min-height: 60px; }
 
-  .muted { color: var(--muted); font-size: 14px; }
+  .muted { color: var(--muted); font-size: var(--type-3); }
   .hidden { display: none !important; }
 
   .badge {
     display: inline-flex;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--type-1);
     font-weight: 600;
     padding: 3px 9px;
     border-radius: 999px;
@@ -133,8 +173,7 @@
   .badge.frozen { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
   .section-title {
-    font-size: 13px;
-    text-transform: uppercase;
+    font-size: var(--type-2);
     letter-spacing: 0.04em;
     color: var(--muted);
     margin: 20px 0 8px;
@@ -150,26 +189,26 @@
   .item-row:last-child { border-bottom: none; }
   .item-main { flex: 1; min-width: 0; }
   .item-name { font-weight: 600; overflow-wrap: anywhere; }
-  .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
+  .item-meta { color: var(--muted); font-size: var(--type-2); margin-top: 2px; overflow-wrap: anywhere; }
   .link-btn {
     width: auto; min-height: 44px; padding: 0; border: none; border-radius: 0;
     background: none; color: var(--accent); font-size: inherit; text-decoration: underline;
   }
   [data-photo-url] { cursor: zoom-in; }
   .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .item-actions button { width: auto; min-height: 44px; padding: 7px 10px; font-size: 13px; }
+  .item-actions button { width: auto; min-height: 44px; padding: 7px 10px; font-size: var(--type-2); }
   .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
-  .chip-row button { width: auto; min-height: 44px; padding: 7px 12px; font-size: 13px; }
-  .chip-row button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip-row button { width: auto; min-height: 44px; padding: 7px 12px; font-size: var(--type-2); }
+  .chip-row button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .pantry-controls { margin-bottom: 12px; }
   .eat-first-row { display: flex; width: 100%; justify-content: space-between; min-height: 44px; margin: 3px 0; }
   .item-row.highlight { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
   .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
-  .date-confidence { color: var(--soon); font-size: 13px; margin-top: 4px; }
+  .date-confidence { color: var(--soon); font-size: var(--type-2); margin-top: 4px; }
   .date-confidence.confirmed { color: var(--ok); }
   .date-candidates { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-  .date-candidates button { width: auto; min-height: 44px; padding: 5px 9px; font-size: 13px; }
+  .date-candidates button { width: auto; min-height: 44px; padding: 5px 9px; font-size: var(--type-2); }
   .date-confidence.unread { color: var(--expired); }
 
   .photo-step {
@@ -179,11 +218,11 @@
     padding: 10px 0;
   }
   .photo-thumb {
-    width: 44px; height: 44px; border-radius: 10px; object-fit: cover;
+    width: 44px; height: 44px; border-radius: var(--radius-1); object-fit: cover;
     border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
   }
   .product-thumb {
-    width: 64px; height: 64px; border-radius: 10px; object-fit: contain;
+    width: 64px; height: 64px; border-radius: var(--radius-1); object-fit: contain;
     border: 1px solid var(--border); flex-shrink: 0; background: var(--bg);
   }
 
@@ -196,7 +235,7 @@
     color: var(--bg);
     padding: 10px 18px;
     border-radius: 999px;
-    font-size: 14px;
+    font-size: var(--type-3);
     opacity: 0;
     transition: opacity 0.2s ease;
     pointer-events: none;
@@ -207,7 +246,15 @@
   }
   .toast.show { opacity: 1; }
   .toast-content { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
-  .toast-action { pointer-events: auto; width: auto; min-height: 44px; padding: 6px 12px; background: transparent; border-color: currentColor; color: inherit; }
+  .toast-action {
+    pointer-events: auto;
+    width: auto;
+    min-height: 44px;
+    padding: 6px 12px;
+    background: transparent;
+    border-color: currentColor;
+    color: inherit;
+  }
 
   nav.tabs {
     position: fixed;
@@ -229,7 +276,7 @@
     flex-direction: column;
     gap: 2px;
     padding: 10px 4px;
-    font-size: 12px;
+    font-size: var(--type-1);
     color: var(--muted);
   }
   nav.tabs button.active { color: var(--accent); font-weight: 600; }
@@ -248,8 +295,8 @@
   input[type=file] { display: none; }
 
   details.raw-reply { margin-top: 6px; }
-  details.raw-reply summary { color: var(--muted); font-size: 12px; cursor: pointer; }
-  details.raw-reply p { font-size: 13px; color: var(--muted); }
+  details.raw-reply summary { color: var(--muted); font-size: var(--type-1); cursor: pointer; }
+  details.raw-reply p { font-size: var(--type-2); color: var(--muted); }
 
   .empty-state { text-align: center; color: var(--muted); padding: 40px 10px; }
 
@@ -287,7 +334,7 @@
     left: 50%;
     transform: translateX(-50%);
     color: #fff;
-    font-size: 14px;
+    font-size: var(--type-3);
     text-align: center;
     width: 100%;
     text-shadow: 0 1px 3px rgba(0,0,0,0.6);
@@ -321,7 +368,7 @@
     padding: 16px;
     color: #fff;
   }
-  .photo-modal img { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 10px; }
+  .photo-modal img { max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: var(--radius-1); }
   .photo-modal p { margin: 0; text-align: center; }
   .photo-modal button { width: auto; min-width: 120px; color: #fff; border-color: rgba(255,255,255,0.3); }
   .scanner-frame.steady {
@@ -331,18 +378,42 @@
 </style>
 </head>
 <body>
-
-<header class="top"><h1>🥫 Pantry Tracker</h1></header>
+<svg class="icon-sprite" aria-hidden="true" focusable="false">
+  <symbol id="icon-scan" viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M8 12h8"/></symbol>
+  <symbol id="icon-pantry" viewBox="0 0 24 24"><path d="M4 7h16v13H4zM3 4h18v3H3zM9 11h6v5H9z"/></symbol>
+  <symbol id="icon-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1 1.4 1.1-1.4 2.4-1.7-.7a8 8 0 0 1-1.7 1l-.3 1.8h-2.8l-.3-1.8a8 8 0 0 1-1.7-1l-1.7.7-1.4-2.4 1.4-1.1a7 7 0 0 1 0-2L5.9 12l1.4-2.4 1.7.7a8 8 0 0 1 1.7-1l.3-1.8h2.8l.3 1.8a8 8 0 0 1 1.7 1l1.7-.7 1.4 2.4-1.4 1.1a7 7 0 0 1-.1 1.9z"/></symbol>
+  <symbol id="icon-camera" viewBox="0 0 24 24"><path d="M4 7h4l2-2h4l2 2h4v13H4z"/><circle cx="12" cy="13" r="4"/></symbol>
+  <symbol id="icon-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
+  <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></symbol>
+  <symbol id="icon-pencil" viewBox="0 0 24 24"><path d="m4 16-.8 4.8L8 20l11-11-4-4zM13.5 6.5l4 4"/></symbol>
+  <symbol id="icon-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="icon-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 14h10l1-14M9 7V4h6v3"/></symbol>
+  <symbol id="icon-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="icon-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="icon-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="icon-flash" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></symbol>
+  <symbol id="icon-flash-off" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-7zM3 3l18 18"/></symbol>
+  <symbol id="icon-package" viewBox="0 0 24 24"><path d="m12 3 9 5v9l-9 5-9-5V8zM3 8l9 5 9-5M12 13v9M8 5l9 5"/></symbol>
+  <symbol id="icon-snowflake" viewBox="0 0 24 24"><path d="M12 2v20M4 7l16 10M4 17 20 7M8 4l4 3 4-3M8 20l4-3 4 3M3 10l1-3 4 1M16 16l4 1 1-3M3 14l1 3 4-1M16 8l4-1 1 3"/></symbol>
+  <symbol id="icon-alert" viewBox="0 0 24 24"><path d="M12 3 2.5 20h19zM12 9v5M12 17h.01"/></symbol>
+  <symbol id="icon-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></symbol>
+  <symbol id="icon-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="icon-download" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></symbol>
+</svg>
+<header class="top"><h1><svg class="icon-svg" aria-hidden="true"><use href="#icon-package"></use></svg>Pantry</h1></header>
 
 <main>
 
-  <!-- ───────────────────────── Scan ───────────────────────── -->
+  <!-- ------------------------- Scan ------------------------- -->
   <section id="view-scan" class="view active">
 
     <div id="scan-idle" class="card">
-      <p class="muted" style="margin-top:0">Scan a barcode to look up the product, then (optionally) snap its use-by date.</p>
-      <button class="primary" id="btn-scan-start">📷 Scan Barcode</button>
-      <div style="margin-top:10px">
+      <p class="muted mt-0">Scan a barcode to look up the product, then (optionally) snap its use-by date.</p>
+      <button class="primary" id="btn-scan-start">
+        <svg class="icon-svg" aria-hidden="true"><use href="#icon-scan"></use></svg>
+        Scan barcode
+      </button>
+      <div class="mt-10">
         <button class="ghost" id="btn-manual-start">Enter manually instead</button>
       </div>
     </div>
@@ -354,12 +425,15 @@
     <form id="review-form" class="card hidden">
       <input type="hidden" id="f-image-url" name="image_url">
       <div id="review-not-found" class="hidden">
-        <p class="muted" style="margin-top:0">No barcode recognised in that photo. You can try again, or fill the details in by hand.</p>
+        <p class="muted mt-0">No barcode recognised in that photo. You can try again, or fill the details in by hand.</p>
       </div>
-      <div id="review-barcode-line" class="muted hidden" style="margin-top:0"></div>
+      <div id="review-barcode-line" class="muted hidden mt-0"></div>
       <div id="product-photo-step" class="photo-step hidden">
         <img id="review-product-image" class="product-thumb hidden" alt="">
-        <button type="button" class="ghost" id="btn-product-photo" style="width:auto;flex:1">📷 Photo of product</button>
+        <button type="button" class="ghost flex-fill" id="btn-product-photo">
+          <svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg>
+          Photo of product
+        </button>
       </div>
 
       <label for="f-name">Product name</label>
@@ -386,16 +460,25 @@
       </datalist>
 
       <label for="f-count">How many</label>
-      <div class="row"><button type="button" class="ghost" id="f-count-minus" aria-label="Decrease count">−</button>
+      <div class="row">
+        <button type="button" class="ghost" id="f-count-minus" aria-label="Decrease count">
+          <svg class="icon-svg" aria-hidden="true"><use href="#icon-minus"></use></svg>
+        </button>
         <input type="number" id="f-count" name="count" min="1" max="99" value="1">
-        <button type="button" class="ghost" id="f-count-plus" aria-label="Increase count">+</button></div>
+        <button type="button" class="ghost" id="f-count-plus" aria-label="Increase count">
+          <svg class="icon-svg" aria-hidden="true"><use href="#icon-plus"></use></svg>
+        </button>
+      </div>
       <label>Location</label><div id="f-location-chips" class="chip-row"></div>
       <input type="hidden" id="f-location" name="location" value="">
       <div id="already-in-pantry" class="muted hidden"></div>
 
       <div class="photo-step">
         <img id="date-photo-thumb" class="photo-thumb hidden" alt="">
-        <button type="button" class="ghost" id="btn-date-photo" style="width:auto;flex:1">📅 Photo of use-by date</button>
+        <button type="button" class="ghost flex-fill" id="btn-date-photo">
+          <svg class="icon-svg" aria-hidden="true"><use href="#icon-calendar"></use></svg>
+          Photo of use-by date
+        </button>
       </div>
       <div id="date-extract-status" class="muted hidden"></div>
 
@@ -405,16 +488,16 @@
       <label for="f-notes">Notes (optional)</label>
       <textarea id="f-notes" name="notes"></textarea>
 
-      <div class="row" style="margin-top:16px">
+      <div class="row mt-16">
         <button type="button" class="ghost" id="btn-review-cancel">Cancel</button>
         <button type="submit" class="primary" id="btn-review-save">Add to pantry</button>
       </div>
     </form>
 
-    <p class="muted" id="camera-hint-note" style="font-size:12px;text-align:center"></p>
+    <p class="muted small-centered" id="camera-hint-note"></p>
   </section>
 
-  <!-- ───────────────────────── Pantry ───────────────────────── -->
+  <!-- ------------------------- Pantry ------------------------- -->
   <section id="view-pantry" class="view">
     <div class="pantry-controls card">
       <input type="search" id="pantry-search" aria-label="Search pantry" placeholder="Search pantry">
@@ -425,13 +508,16 @@
     <div id="pantry-list"></div>
   </section>
 
-  <!-- ───────────────────────── Settings ───────────────────────── -->
+  <!-- ------------------------- Settings ------------------------- -->
   <section id="view-settings" class="view">
     <form id="settings-form" class="card">
-      <div class="section-title" style="margin-top:0">Notifications</div>
+      <div class="section-title mt-0">Notifications</div>
 
-      <p class="muted" id="status-notify-service" style="margin-top:0"></p>
-      <p class="muted">Set under the add-on's own <strong>Configuration</strong> tab (option <code>notify_service</code>), not here - restart the add-on after changing it. Find the exact service name under <strong>Developer Tools → Actions</strong>. Leave it blank there to disable notifications.</p>
+      <p class="muted mt-0" id="status-notify-service"></p>
+      <p class="muted">
+        Set this under the add-on's own <strong>Configuration</strong> tab, then restart the add-on.
+        Leave the service blank there to disable notifications.
+      </p>
 
       <div class="row">
         <div>
@@ -444,19 +530,16 @@
         </div>
       </div>
 
-      <label for="s-check-interval">Refresh Home Assistant sensors every (hours)</label>
-      <input type="number" id="s-check-interval" name="check_interval_hours" min="1" max="24">
-      <p class="muted">This only refreshes Home Assistant sensors. Daily summaries are sent at the hour below.</p>
       <label for="s-notify-hour">Send daily summary at (hour, 0–23)</label>
       <input type="number" id="s-notify-hour" name="notify_hour" min="0" max="23">
 
-      <div style="margin-top:16px">
+      <div class="mt-16">
         <button type="submit" class="primary">Save settings</button>
       </div>
     </form>
 
     <div class="card">
-      <div class="section-title" style="margin-top:0">Status</div>
+      <div class="section-title mt-0">Status</div>
       <p class="muted" id="status-vision"></p>
       <p class="muted" id="status-ha"></p>
       <p class="muted" id="status-last-check"></p>
@@ -465,16 +548,19 @@
     </div>
 
     <div class="card" id="food-waste-card">
-      <div class="section-title" style="margin-top:0">Food waste</div>
+      <div class="section-title mt-0">Food waste</div>
       <div id="food-waste-summary" class="muted">Loading…</div>
     </div>
 
     <div class="card">
-      <div class="section-title" style="margin-top:0">Data</div>
-      <a class="btn" href="export" style="text-decoration:none">⬇ Export pantry as JSON</a>
+      <div class="section-title mt-0">Data</div>
+      <a class="btn no-underline" href="export">
+        <svg class="icon-svg" aria-hidden="true"><use href="#icon-download"></use></svg>
+        Export pantry as JSON
+      </a>
     </div>
 
-    <p class="muted" style="text-align:center">
+    <p class="muted centered">
       The barcode lookup (Open Food Facts) and use-by photo extraction (your own vision model) are configured
       under the add-on's own <strong>Configuration</strong> tab, not here.
     </p>
@@ -494,7 +580,10 @@
   <div id="camera-frame" class="scanner-frame"></div>
   <p id="camera-hint" class="scanner-hint"></p>
   <div class="scanner-controls">
-    <button type="button" id="btn-camera-shutter" class="primary hidden">📸 Capture</button>
+    <button type="button" id="btn-camera-shutter" class="primary hidden">
+      <svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg>
+      Capture
+    </button>
     <button type="button" id="btn-camera-fallback" class="ghost"></button>
     <button type="button" id="btn-camera-cancel" class="ghost">Cancel</button>
   </div>
@@ -506,12 +595,26 @@
   <button type="button" class="ghost" id="btn-photo-modal-close">Close</button>
 </div>
 
-<div class="toast" id="toast"><span class="toast-content"><span id="toast-message"></span><button type="button" id="toast-action" class="toast-action hidden"></button></span></div>
+<div class="toast" id="toast">
+  <span class="toast-content">
+    <span id="toast-message"></span>
+    <button type="button" id="toast-action" class="toast-action hidden"></button>
+  </span>
+</div>
 
 <nav class="tabs">
-  <button data-view="scan" class="active"><span class="icon">📷</span>Scan</button>
-  <button data-view="pantry"><span class="icon">🧺</span>Pantry</button>
-  <button data-view="settings"><span class="icon">⚙️</span>Settings</button>
+  <button data-view="scan" class="active">
+    <span class="icon"><svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg></span>
+    Scan
+  </button>
+  <button data-view="pantry">
+    <span class="icon"><svg class="icon-svg" aria-hidden="true"><use href="#icon-pantry"></use></svg></span>
+    Pantry
+  </button>
+  <button data-view="settings">
+    <span class="icon"><svg class="icon-svg" aria-hidden="true"><use href="#icon-settings"></use></svg></span>
+    Settings
+  </button>
 </nav>
 
 <script>
@@ -519,8 +622,11 @@
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+function icon(name) {
+  return `<svg class="icon-svg" aria-hidden="true"><use href="#icon-${name}"></use></svg>`;
+}
 
-// ── Toast ────────────────────────────────────────────────────────────────
+// -- Toast ----------------------------------------------------------------
 let toastTimer = null;
 let toastActionHandler = null;
 function toast(message, actionLabel = "", actionHandler = null, duration = 2200) {
@@ -541,7 +647,7 @@ $("#toast-action").addEventListener("click", async () => {
   if (action) await action();
 });
 
-// ── Photo viewer ─────────────────────────────────────────────────────────
+// -- Photo viewer ---------------------------------------------------------
 // Photos open here, in the page, because a link to one would leave Home
 // Assistant: the ingress session is only valid inside the app, so a new
 // browser tab gets a 401.
@@ -559,7 +665,7 @@ document.addEventListener("click", (e) => {
 });
 $("#photo-modal").addEventListener("click", () => $("#photo-modal").classList.add("hidden"));
 
-// ── Tabs ─────────────────────────────────────────────────────────────────
+// -- Tabs -----------------------------------------------------------------
 function showView(name) {
   if (name !== "scan") closeCamera();
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
@@ -569,7 +675,7 @@ function showView(name) {
 }
 $$("nav.tabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 
-// ── Scan flow ────────────────────────────────────────────────────────────
+// -- Scan flow ------------------------------------------------------------
 const scanIdle = $("#scan-idle");
 const scanBusy = $("#scan-busy");
 const reviewForm = $("#review-form");
@@ -604,7 +710,8 @@ const LOCATION_LABELS = { "": "No location", fridge: "Fridge", cupboard: "Cupboa
 
 function renderLocationChips(container, selected, fieldName) {
   container.innerHTML = LOCATION_CHOICES.map((location) =>
-    `<button type="button" class="ghost location-chip" data-location="${escapeAttr(location)}" data-field="${fieldName}" aria-pressed="${location === selected}">${LOCATION_LABELS[location]}</button>`
+    `<button type="button" class="ghost location-chip" data-location="${escapeAttr(location)}" ` +
+    `data-field="${fieldName}" aria-pressed="${location === selected}">${LOCATION_LABELS[location]}</button>`
   ).join("");
 }
 
@@ -649,6 +756,12 @@ async function handleScannedBarcode(code) {
     const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
     if (!res.ok) throw new Error("Lookup failed");
     const data = await res.json();
+    if (data.unavailable) {
+      openReviewForm({ barcode: code, notFound: true });
+      $("#review-not-found p").textContent = "Couldn't reach Open Food Facts - fill in the details";
+      toast("Couldn't reach Open Food Facts - fill in the details");
+      return;
+    }
     openReviewForm({ barcode: code, notFound: false });
     if (data.display_image_url) {
       setViewablePhoto($("#review-product-image"), data.display_image_url);
@@ -730,7 +843,7 @@ async function handleBarcodePhoto(file) {
   await handleScannedBarcode(code);
 }
 
-// ── Live camera (barcode scanning + use-by date photo capture) ─────────────
+// -- Live camera (barcode scanning + use-by date photo capture) -------------
 // One shared full-screen camera overlay, used two ways:
 //   - "barcode": continuously scans video frames via BarcodeDetector until
 //     one decodes, with no shutter button.
@@ -1326,7 +1439,16 @@ function readDateOnDevice(file, { softRetry = true, bitmap = false } = {}) {
         const body = new FormData(); body.append("text", raw);
         const response = await fetch("api/parse-date", { method: "POST", body });
         const result = response.ok ? await response.json() : {};
-        if (result.date || firstRead) { settle({ date: result.date || null, confident: Boolean(result.confident), candidates: result.candidates || [], raw: firstRead && !result.date ? firstRead.raw : raw, soft: Boolean(firstRead) }); return; }
+        if (result.date || firstRead) {
+          settle({
+            date: result.date || null,
+            confident: Boolean(result.confident),
+            candidates: result.candidates || [],
+            raw: firstRead && !result.date ? firstRead.raw : raw,
+            soft: Boolean(firstRead),
+          });
+          return;
+        }
         // No date in the text: retry softened, which helps tightly spaced
         // dot print (see soften in ocr-worker.js).
         firstRead = { date: null, raw };
@@ -1524,7 +1646,9 @@ function onDatePhotoCaptured(file, existingOcrResult = null) {
         const expiry = $("#f-expiry");
         if (!expiry.value || expiry.value === oldAutofill) { expiry.value = result.date; addOcrAutofill = result.date; }
         if (target.statusEl) target.statusEl.textContent = `Read as ${formatDisplayDate(result.date)}, double-checking in the background.`;
-      } else if (!result?.date && target.statusEl) target.statusEl.textContent = "Couldn't read it here. The background check will try, or retake it if it's blurry.";
+      } else if (!result?.date && target.statusEl) {
+        target.statusEl.textContent = "Couldn't read it here. The background check will try, or retake it if it's blurry.";
+      }
       return result;
     });
     pendingAddDateOcr = task;
@@ -1618,7 +1742,7 @@ reviewForm.addEventListener("submit", async (e) => {
   }
 });
 
-// ── Pantry list ──────────────────────────────────────────────────────────
+// -- Pantry list ----------------------------------------------------------
 const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Expiring soon", ok: "OK", unknown: "Needs a date", frozen: "Freezer" };
 const BUCKET_ORDER = ["expired", "expiring_soon", "ok", "unknown", "frozen"];
 const FOOD_GROUPS = ["Dairy & eggs", "Meat & fish", "Fruit & veg", "Bakery", "Snacks & sweets", "Tins & jars",
@@ -1652,20 +1776,25 @@ function itemRowHtml(item) {
   const daysText = item.days_left === null ? "" : humanDays(item.days_left);
   const effective = item.effective_date;
   const dateLine = item.date_extraction_pending
-    ? '<span class="spinner" style="width:12px;height:12px;vertical-align:middle"></span> Reading use-by date…'
+    ? '<span class="spinner spinner-small"></span> Reading use-by date…'
     : item.bucket === "frozen" ? "Frozen"
     : effective ? `${escapeHtml(daysText)} · ${escapeHtml(formatDisplayDate(effective))}`
     : "No use-by date set";
   const openedLine = item.opened_at && item.use_within_days
-    ? `<div class="item-meta">Opened ${escapeHtml(new Date(item.opened_at + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }))}, use within ${item.use_within_days} ${item.use_within_days === 1 ? "day" : "days"}</div>`
+    ? `<div class="item-meta">Opened ${escapeHtml(new Date(item.opened_at + "T00:00:00Z")
+      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }))}, use within ` +
+      `${item.use_within_days} ${item.use_within_days === 1 ? "day" : "days"}</div>`
     : "";
   const photoCaption = item.expiry_date ? `Read as ${formatDisplayDate(item.expiry_date)}` : "No date read yet";
   const photoLink = item.has_date_photo
-    ? `<div class="item-meta"><button type="button" class="link-btn" data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
+    ? `<div class="item-meta"><button type="button" class="link-btn" ` +
+      `data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" ` +
+      `data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
     : "";
   const confidence = item.date_extraction_pending ? "" : confidenceHtml(item);
   const productImg = item.display_image_url
-    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
+    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" ` +
+      `data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
     : "";
   return `
     <div class="item-row" data-id="${item.id}">
@@ -1721,7 +1850,10 @@ function editFormHtml(item) {
                  ? ` src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}"`
                  : ""
              }>
-             <button type="button" class="ghost e-product-photo" style="width:auto;flex:1">📷 Photo of product</button>
+             <button type="button" class="ghost e-product-photo flex-fill">
+               <svg class="icon-svg" aria-hidden="true"><use href="#icon-camera"></use></svg>
+               Photo of product
+             </button>
            </div>`
         : ""
     }
@@ -1732,7 +1864,10 @@ function editFormHtml(item) {
           ? `<img class="photo-thumb e-date-thumb" alt="Use-by date photo" src="${photoUrl}" data-photo-url="${photoUrl}">`
           : `<img class="photo-thumb e-date-thumb hidden" alt="">`
       }
-      <button type="button" class="ghost e-rescan-date" style="width:auto;flex:1">📅 Rescan use-by date</button>
+      <button type="button" class="ghost e-rescan-date flex-fill">
+        <svg class="icon-svg" aria-hidden="true"><use href="#icon-calendar"></use></svg>
+        Rescan use-by date
+      </button>
     </div>
     <div class="muted e-date-status ${statusText ? "" : "hidden"}">${escapeHtml(statusText)}</div>
     <div class="e-date-confidence">${confidence}</div>
@@ -1745,11 +1880,11 @@ function editFormHtml(item) {
     <button type="button" class="ghost e-not-opened">Not opened</button>
     <label>Notes</label>
     <textarea class="e-notes">${escapeHtml(item.notes || "")}</textarea>
-    <div class="row" style="margin-top:10px">
+    <div class="row mt-10">
       <button type="button" class="ghost e-cancel">Cancel</button>
       <button type="button" class="primary e-save">Save</button>
     </div>
-    <div style="margin-top:10px">
+    <div class="mt-10">
       <button type="button" class="danger btn-delete">Delete</button>
     </div>`;
 }
@@ -1757,22 +1892,41 @@ function editFormHtml(item) {
 function confidenceHtml(item, id = item.id) {
   const confidence = item.date_confidence;
   if (!confidence) return "";
-  if (confidence === "confirmed") return '<div class="date-confidence confirmed">✓ Both readers agree</div>';
+  if (confidence === "confirmed") return `<div class="date-confidence confirmed">${icon("check")}Both readers agree</div>`;
   if (confidence === "unread") {
     const message = item.expiry_date
       ? "Couldn't read the new photo, so the old date is still in use. Tap a line to try it, or use Edit."
       : "Couldn't read the date. Tap a line to try it, or use Edit.";
-    return `<div class="date-confidence unread">${escapeHtml(message)}<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
+    const candidates = dateTextLines(item).map((line) =>
+      `<button type="button" class="link-btn date-text-line" data-item-id="${id}" ` +
+      `data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`
+    ).join("");
+    return `<div class="date-confidence unread">${escapeHtml(message)}` +
+      `<div class="date-candidates">${candidates}</div></div>`;
   }
-  if (confidence === "check") return `<div class="date-confidence check">Check this date against the photo<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
-  if (confidence === "conflict") return `<div class="date-confidence conflict">Readings differ:<div class="date-candidates">${(item.date_candidates || []).map((candidate) =>
-    `<button type="button" class="link-btn date-candidate" data-item-id="${id}" data-date="${escapeAttr(candidate)}">${escapeHtml(formatDisplayDate(candidate))}</button>`
-  ).join("")}</div></div>`;
+  if (confidence === "check") {
+    const candidates = dateTextLines(item).map((line) =>
+      `<button type="button" class="link-btn date-text-line" data-item-id="${id}" ` +
+      `data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`
+    ).join("");
+    return `<div class="date-confidence check">Check this date against the photo` +
+      `<div class="date-candidates">${candidates}</div></div>`;
+  }
+  if (confidence === "conflict") {
+    const candidates = (item.date_candidates || []).map((candidate) =>
+      `<button type="button" class="link-btn date-candidate" data-item-id="${id}" ` +
+      `data-date="${escapeAttr(candidate)}">${escapeHtml(formatDisplayDate(candidate))}</button>`
+    ).join("");
+    return `<div class="date-confidence conflict">Readings differ:` +
+      `<div class="date-candidates">${candidates}</div></div>`;
+  }
   return "";
 }
 
 function dateTextLines(item) {
-  return [...new Set([item.date_ocr_raw || "", item.date_extraction_raw || ""].flatMap(text => text.split(/\r?\n/)).filter(line => /\d/.test(line)))].slice(0, 6);
+  const sourceText = [item.date_ocr_raw || "", item.date_extraction_raw || ""];
+  const lines = sourceText.flatMap((text) => text.split(/\r?\n/)).filter((line) => /\d/.test(line));
+  return [...new Set(lines)].slice(0, 6);
 }
 
 async function chooseDateCandidate(itemId, selectedDate) {
@@ -1918,7 +2072,8 @@ function renderPantry() {
   const filters = ["all", "fridge", "cupboard", "freezer", "needs_date"];
   $("#pantry-location-filters").innerHTML = filters.map((filter) => {
     const label = filter === "all" ? "All" : filter === "needs_date" ? "Needs a date" : LOCATION_LABELS[filter];
-    return `<button type="button" class="ghost pantry-filter" data-filter="${filter}" aria-pressed="${pantryLocationFilter === filter}">${label}</button>`;
+    return `<button type="button" class="ghost pantry-filter" data-filter="${filter}" ` +
+      `aria-pressed="${pantryLocationFilter === filter}">${label}</button>`;
   }).join("");
   const groupSelect = $("#pantry-group-filter");
   if (groupSelect.options.length !== FOOD_GROUPS.length + 1) {
@@ -1950,21 +2105,26 @@ function renderPantry() {
   }
   const needsDateCount = pantryCache.filter((item) => item.bucket === "unknown").length;
   let html = needsDateCount
-    ? `<button type="button" class="ghost needs-date-banner" id="needs-date-banner">${needsDateCount === 1 ? "1 item needs" : `${needsDateCount} items need`} a date</button>`
+    ? `<button type="button" class="ghost needs-date-banner" id="needs-date-banner">` +
+      `${needsDateCount === 1 ? "1 item needs" : `${needsDateCount} items need`} a date</button>`
     : "";
   const eatFirst = $("#eat-first");
   const dueSoon = pantryCache.filter((item) => item.effective_date && item.days_left <= 7).slice(0, 5);
   eatFirst.classList.toggle("hidden", searchActive || dueSoon.length === 0);
   if (!searchActive && dueSoon.length) {
-    eatFirst.innerHTML = '<div class="section-title" style="margin-top:0">Eat first</div>' +
-      dueSoon.map((item) => `<button type="button" class="ghost eat-first-row" data-target-id="${item.id}"><span>${escapeHtml(item.name)}</span><span>${escapeHtml(humanDays(item.days_left))}</span></button>`).join("");
+    eatFirst.innerHTML = '<div class="section-title mt-0">Eat first</div>' +
+      dueSoon.map((item) =>
+        `<button type="button" class="ghost eat-first-row" data-target-id="${item.id}">` +
+        `<span>${escapeHtml(item.name)}</span><span>${escapeHtml(humanDays(item.days_left))}</span></button>`
+      ).join("");
   }
   if (!visible.length) html += '<div class="empty-state">Nothing matches</div>';
   for (const bucket of BUCKET_ORDER) {
     const items = visible.filter((i) => i.bucket === bucket);
     if (items.length === 0) continue;
     const title = bucket === "frozen" ? "Freezer" : BUCKET_LABELS[bucket];
-    html += `<div class="section-title"${bucket === "unknown" ? ' id="needs-date-group"' : ""}>${title} (${items.length})</div><div class="card">`;
+    const groupId = bucket === "unknown" ? ' id="needs-date-group"' : "";
+    html += `<div class="section-title"${groupId}>${title} (${items.length})</div><div class="card">`;
     html += items.map(itemRowHtml).join("");
     html += "</div>";
   }
@@ -2105,7 +2265,8 @@ function renderPantry() {
     }));
     picker.querySelector(".btn-save-opened").addEventListener("click", async () => {
       try {
-        const res = await fetch(`api/items/${item.id}/opened`, { method: "POST", body: new URLSearchParams({ days: picker.dataset.days }) });
+        const body = new URLSearchParams({ days: picker.dataset.days });
+        const res = await fetch(`api/items/${item.id}/opened`, { method: "POST", body });
         if (!res.ok) throw new Error("Could not save opened date");
         await loadPantry();
         toast("Opened date saved");
@@ -2144,7 +2305,7 @@ $("#eat-first").addEventListener("click", (event) => {
   setTimeout(() => target?.classList.remove("highlight"), 1800);
 });
 
-// ── Settings ─────────────────────────────────────────────────────────────
+// -- Settings -------------------------------------------------------------
 async function loadSettings() {
   let data;
   try {
@@ -2155,19 +2316,18 @@ async function loadSettings() {
     toast("Could not load settings");
     return;
   }
-  $("#status-notify-service").textContent = data.notify_service
-    ? `✅ Notifying ${data.notify_service}.`
-    : "⚠️ No notify service configured - notifications are off.";
+  $("#status-notify-service").innerHTML = data.notify_service
+    ? `${icon("check")}Notifying ${escapeHtml(data.notify_service)}.`
+    : `${icon("alert")}No notify service configured - notifications are off.`;
   $("#s-days-before").value = data.notify_days_before;
   $("#s-repeat-hours").value = data.notify_repeat_hours;
-  $("#s-check-interval").value = data.check_interval_hours;
   $("#s-notify-hour").value = data.notify_hour;
-  $("#status-vision").textContent = data.vision_configured
-    ? "✅ Use-by photo extraction is configured."
-    : "⚠️ Use-by photo extraction is not configured - set vision_api_base in the add-on Configuration tab.";
-  $("#status-ha").textContent = data.ha_sync_configured
-    ? "✅ Synced to Home Assistant as sensor.pantry_tracker_*."
-    : "⚠️ Not synced to Home Assistant (homeassistant_api permission missing - restart the add-on after upgrading).";
+  $("#status-vision").innerHTML = data.vision_configured
+    ? `${icon("check")}Use-by photo extraction is configured.`
+    : `${icon("alert")}Use-by photo extraction is not configured - set vision_api_base in the add-on Configuration tab.`;
+  $("#status-ha").innerHTML = data.ha_sync_configured
+    ? icon("check") + "Synced to Home Assistant as sensor.pantry_tracker_*."
+    : icon("alert") + "Not synced to Home Assistant (homeassistant_api permission missing - restart the add-on after upgrading).";
   $("#status-last-check").textContent = data.last_check_summary
     ? `Last check: ${data.last_check_summary} (${data.last_check_at || ""})`
     : "No check has run yet.";
@@ -2176,7 +2336,8 @@ async function loadSettings() {
     if (!statsResponse.ok) throw new Error("Could not load food waste stats");
     const stats = await statsResponse.json();
     const waste = $("#food-waste-summary");
-    waste.textContent = `This month: ${stats.this_month.eaten} eaten, ${stats.this_month.binned} binned. Last month: ${stats.last_month.eaten} eaten, ${stats.last_month.binned} binned.`;
+    waste.textContent = `This month: ${stats.this_month.eaten} eaten, ${stats.this_month.binned} binned. ` +
+      `Last month: ${stats.last_month.eaten} eaten, ${stats.last_month.binned} binned.`;
     if (stats.most_binned.length) {
       const names = document.createElement("p");
       names.className = "muted";
@@ -2207,9 +2368,13 @@ $("#btn-check-now").addEventListener("click", async () => {
   try {
     const res = await fetch("api/check-now", { method: "POST" });
     if (!res.ok) throw new Error("Check failed");
-    toast("Summary sent");
+    const data = await res.json();
+    if (data.result === "sent") toast("Summary sent");
+    else if (data.result === "nothing_due") toast("Nothing is due right now");
+    else if (data.result === "not_configured") toast("Notifications aren't set up");
+    else toast("Couldn't send the summary");
   } catch (err) {
-    toast("Could not send summary");
+    toast("Couldn't send the summary");
   } finally {
     $("#btn-check-now").disabled = false;
     loadSettings();
