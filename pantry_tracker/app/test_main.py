@@ -192,6 +192,61 @@ def test_add_list_and_item_lifecycle():
     assert db.get_item(item["id"]) is None
 
 
+def test_freeze_defrost_routes_and_undo_restore_exact_storage_state(monkeypatch):
+    syncs = []
+    monkeypatch.setattr(main.ha_sync, "request_sync", lambda: syncs.append(True))
+    item_id = db.add_item(barcode="5000000000123", name="Soup", location="cupboard")
+    db.update_item(item_id, defrosted_at="2026-01-02")
+    db.cache_barcode("5000000000123", {"name": "Soup", "location": "fridge"})
+    cached = db.get_cached_barcode("5000000000123")
+
+    frozen = client.post(f"/api/items/{item_id}/storage", data={"action": "freeze"})
+    assert frozen.status_code == 200
+    assert frozen.json()["location"] == "freezer"
+    assert frozen.json()["undo"] == {"location": "cupboard", "defrosted_at": "2026-01-02"}
+    assert db.get_cached_barcode("5000000000123") == cached
+    restored_freezer = client.post(
+        f"/api/items/{item_id}/storage/undo", data=frozen.json()["undo"]
+    )
+    assert restored_freezer.status_code == 200
+    assert (restored_freezer.json()["location"], restored_freezer.json()["defrosted_at"]) == (
+        "cupboard", "2026-01-02"
+    )
+
+    client.post(f"/api/items/{item_id}/storage", data={"action": "freeze"})
+    defrosted = client.post(f"/api/items/{item_id}/storage", data={"action": "defrost"})
+    assert defrosted.status_code == 200
+    assert defrosted.json()["location"] == "fridge"
+    assert defrosted.json()["defrosted_at"] == db.today().isoformat()
+    assert defrosted.json()["undo"] == {"location": "freezer", "defrosted_at": ""}
+    undone = client.post(f"/api/items/{item_id}/storage/undo", data=defrosted.json()["undo"])
+    assert undone.status_code == 200
+    assert (undone.json()["location"], undone.json()["defrosted_at"]) == ("freezer", None)
+    restored = client.post(
+        f"/api/items/{item_id}/storage/undo",
+        data={"location": "cupboard", "defrosted_at": "2026-01-02"},
+    )
+    assert restored.status_code == 200
+    assert (restored.json()["location"], restored.json()["defrosted_at"]) == ("cupboard", "2026-01-02")
+    assert len(syncs) == 6
+
+
+def test_storage_routes_reject_bad_action_missing_and_consumed_items():
+    item_id = db.add_item(barcode=None, name="Milk")
+    assert client.post(f"/api/items/{item_id}/storage", data={"action": "open"}).status_code == 400
+    assert client.post("/api/items/99999/storage", data={"action": "freeze"}).status_code == 404
+    db.finish_item(item_id, "eaten")
+    assert client.post(f"/api/items/{item_id}/storage", data={"action": "freeze"}).status_code == 404
+    assert client.post(
+        f"/api/items/{item_id}/storage/undo", data={"location": "fridge", "defrosted_at": ""}
+    ).status_code == 404
+
+
+def test_storage_undo_validates_location_and_iso_date():
+    item_id = db.add_item(barcode=None, name="Milk")
+    assert client.post(f"/api/items/{item_id}/storage/undo", data={"location": "garage", "defrosted_at": ""}).status_code == 400
+    assert client.post(f"/api/items/{item_id}/storage/undo", data={"location": "fridge", "defrosted_at": "tomorrow"}).status_code == 400
+
 def test_add_validates_count_location_and_opened_days():
     assert client.post("/api/items", data={"name": "Soup", "count": 100}).status_code == 400
     assert client.post("/api/items", data={"name": "Soup", "location": "garage"}).status_code == 400

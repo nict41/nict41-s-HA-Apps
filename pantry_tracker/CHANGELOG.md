@@ -1,3 +1,9 @@
+## 0.15.0
+
+- Add one-tap Freeze and Defrost actions in the pantry, with six-second undo.
+- Defrosting moves an item to the fridge and sets its use-by date to tomorrow.
+- Offer Freeze instead of Binned in notifications for one item that has not expired.
+
 ## 0.14.0
 
 - Refreshed the phone-first page with compact expandable pantry rows, Eat first,
@@ -28,6 +34,12 @@
 - Tidy existing product names once, and add the `/<slug>/add` scanning route.
 
 # Changelog
+
+## 0.15.0
+
+- Add one-tap Freeze and Defrost actions in the pantry, with six-second undo.
+- Defrosting moves an item to the fridge and sets its use-by date to tomorrow.
+- Offer Freeze instead of Binned in notifications for one item that has not expired.
 
 ## 0.12.2
 

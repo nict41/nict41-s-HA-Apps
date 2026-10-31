@@ -323,6 +323,24 @@ def transition_item(item_id: int, *, opened: bool | None = None, location: str |
     return get_item(item_id)
 
 
+def freeze_item(item_id: int) -> dict | None:
+    item = get_item(item_id)
+    if not item or item["status"] != STATUS_ACTIVE:
+        return None
+    if item.get("location") == "freezer":
+        return item
+    return transition_item(item_id, location="freezer")
+
+
+def defrost_item(item_id: int) -> dict | None:
+    item = get_item(item_id)
+    if not item or item["status"] != STATUS_ACTIVE:
+        return None
+    if item.get("location") != "freezer":
+        return item
+    return transition_item(item_id, location="fridge")
+
+
 def add_one(item_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute("SELECT * FROM items WHERE id=? AND status=?", (item_id, STATUS_ACTIVE)).fetchone()

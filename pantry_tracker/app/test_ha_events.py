@@ -51,6 +51,24 @@ def test_repeated_finish_action_does_not_finish_inactive_item_twice(monkeypatch)
     assert len(synced) == 1
 
 
+def test_handle_action_freezes_valid_repeated_and_ignores_consumed_or_malformed(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: calls.append("sync"))
+    item_id = db.add_item(barcode=None, name="Milk", location="fridge")
+    ha_events.handle_action(f"PANTRY_FREEZE_{item_id}")
+    assert db.get_item(item_id)["location"] == "freezer"
+    assert len(calls) == 1
+    ha_events.handle_action(f"PANTRY_FREEZE_{item_id}")
+    assert len(calls) == 1
+    consumed = db.add_item(barcode=None, name="Soup")
+    db.finish_item(consumed, "eaten")
+    ha_events.handle_action(f"PANTRY_FREEZE_{consumed}")
+    ha_events.handle_action(f"PANTRY_FREEZE_{item_id}extra")
+    ha_events.handle_action("PANTRY_FREEZE_1234567890")
+    assert db.get_item(consumed)["location"] != "freezer"
+    assert len(calls) == 1
+
+
 def test_action_handler_exception_is_logged_without_dropping_socket(monkeypatch, capsys):
     import websockets.sync.client
 

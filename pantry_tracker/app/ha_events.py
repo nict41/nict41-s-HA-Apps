@@ -8,7 +8,7 @@ from datetime import timedelta
 import db
 import ha_sync
 
-_ACTION = re.compile(r"PANTRY_(EATEN|BINNED)_(\d{1,9})|PANTRY_SNOOZE_(\d{1,9}(?:,\d{1,9})*)")
+_ACTION = re.compile(r"PANTRY_(EATEN|BINNED|FREEZE)_(\d{1,9})|PANTRY_SNOOZE_(\d{1,9}(?:,\d{1,9})*)")
 
 
 def handle_action(action: str) -> None:
@@ -28,7 +28,12 @@ def handle_action(action: str) -> None:
         item = db.get_item(item_id)
         if not item or item["status"] != db.STATUS_ACTIVE:
             return
-        db.finish_item(item_id, match.group(1).lower())
+        if match.group(1) == "FREEZE":
+            if item.get("location") == "freezer":
+                return
+            db.freeze_item(item_id)
+        else:
+            db.finish_item(item_id, match.group(1).lower())
     ha_sync.request_sync()
 
 
