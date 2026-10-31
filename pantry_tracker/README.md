@@ -46,11 +46,14 @@ from a phone-first ingress panel.
    back to manual entry - nothing blocks you from tracking an item.
 4. The **Pantry** tab groups items by effective use-by date and storage
    location, with an Eat first list, search and filters. Rows let you edit,
-   mark one unit **Eaten** or **Binned**, undo a finish, record when an item
-   was opened, adjust its count, or delete it.
+   mark one unit **Eaten** or **Binned**, freeze or defrost items, undo a
+   finish or storage change, record when an item was opened, adjust its
+   count, or delete it. Defrost moves the item to the fridge and sets its
+   use-by date to tomorrow.
 5. A daily check sends one **Home Assistant summary notification** through
    your chosen `notify.*` service for due items, with a repeat reminder
-   until you deal with them. Tapping it opens the **Pantry** tab. Home Assistant
+   until you deal with them. For one due item that has not expired, the
+   notification offers Freeze in place of Binned. Tapping it opens the **Pantry** tab. Home Assistant
    sensors sync in the background at 00:05 local time, with a five-minute
    check after startup to restore missing entities. Dashboard changes queue a
    background refresh. **Send summary now** reports whether a summary was sent, nothing

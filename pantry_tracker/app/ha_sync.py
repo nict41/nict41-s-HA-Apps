@@ -276,10 +276,15 @@ def notify_summary(items: list[dict]) -> str:
     message = " ".join(f"{label}: {', '.join(grouped[label])}." for label in labels if grouped[label])
     path = _pantry_panel_path()
     ids = [str(item["id"]) for item, _ in due]
-    actions = ([{"action": f"PANTRY_EATEN_{ids[0]}", "title": "Eaten"},
-                {"action": f"PANTRY_BINNED_{ids[0]}", "title": "Binned"},
-                {"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"}]
-               if len(ids) == 1 else [{"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"}])
+    if len(ids) == 1:
+        actions = [{"action": f"PANTRY_EATEN_{ids[0]}", "title": "Eaten"}]
+        if due[0][1] == db.BUCKET_EXPIRING_SOON:
+            actions.append({"action": f"PANTRY_FREEZE_{ids[0]}", "title": "Freeze"})
+        else:
+            actions.append({"action": f"PANTRY_BINNED_{ids[0]}", "title": "Binned"})
+        actions.append({"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"})
+    else:
+        actions = [{"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"}]
     domain, _, name = service.partition(".")
     ok = _request("POST", f"/services/{domain}/{name}", {"title": f"{len(due)} item{'s' if len(due) != 1 else ''} to use",
         "message": message, "data": {"tag": "pantry-summary", "clickAction": path, "url": path, "actions": actions}})

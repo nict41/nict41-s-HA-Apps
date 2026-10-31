@@ -219,7 +219,7 @@
     background: none; color: var(--accent); font-size: inherit; text-decoration: underline;
   }
   [data-photo-url] { cursor: zoom-in; }
-  .item-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+  .item-actions { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); gap: 6px; margin-top: 12px; }
   .item-actions button { min-width: 0; min-height: 52px; padding: 5px 2px; font-size: var(--type-1);
     flex-direction: column; gap: 2px; }
   .item-actions .icon-svg { width: 20px; height: 20px; }
@@ -276,7 +276,7 @@
   .opened-picker { padding-top: 6px; }
   @media (max-width: 380px) {
     .item-actions { gap: 3px; }
-    .item-actions button { font-size: 10px; }
+    .item-actions button { font-size: 10px; white-space: nowrap; }
     .item-time { gap: 4px; font-size: 12px; }
   }
 
@@ -2067,6 +2067,10 @@ function itemRowHtml(item) {
     : "";
   const confidence = item.date_extraction_pending ? "" : confidenceHtml(item, id);
   const openedPickerDays = item.use_within_days || item.opened_days || 3;
+  const storageButton = item.bucket === "expired" ? "" :
+    `<button class="ghost btn-storage" type="button" data-action="${item.location === "freezer" ? "defrost" : "freeze"}">
+      <svg class="icon-svg" aria-hidden="true"><use href="#icon-snowflake"></use></svg>${item.location === "freezer" ? "Defrost" : "Freeze"}
+    </button>`;
   const openedPicker = [1, 2, 3, 5, 7, 14, 30].map((days) =>
     `<button type="button" class="ghost opened-chip" data-days="${days}" aria-pressed="${days === openedPickerDays}">${days} days</button>`
   ).join("");
@@ -2097,6 +2101,7 @@ function itemRowHtml(item) {
           <button class="ghost btn-finish" type="button" data-outcome="binned">
             <svg class="icon-svg" aria-hidden="true"><use href="#icon-trash"></use></svg>${item.count > 1 ? "Binned 1" : "Binned"}
           </button>
+          ${storageButton}
           <button class="ghost btn-opened" type="button">
             <svg class="icon-svg" aria-hidden="true"><use href="#icon-calendar"></use></svg>Opened
           </button>
@@ -2624,6 +2629,43 @@ $("#pantry-list").addEventListener("click", async (event) => {
     picker.querySelectorAll(".opened-chip").forEach((chip) => {
       chip.setAttribute("aria-pressed", String(chip === openedChip));
     });
+    return;
+  }
+  const storage = event.target.closest(".btn-storage");
+  if (storage) {
+    const action = storage.dataset.action;
+    try {
+      const response = await fetch(`api/items/${id}/storage`, {
+        method: "POST",
+        body: new URLSearchParams({ action }),
+      });
+      if (!response.ok) throw new Error("Could not change storage");
+      const result = await response.json();
+      expandedPantryItemId = id;
+      await loadPantry();
+      requestAnimationFrame(() => {
+        const row = Array.from(document.querySelectorAll(".item-summary"))
+          .find((summary) => Number(summary.closest(".pantry-entry")?.dataset.id) === id);
+        row?.scrollIntoView({ behavior: scrollBehavior(), block: "center" });
+      });
+      const message = action === "freeze" ? "Moved to freezer" : "Defrosted: use by tomorrow";
+      toast(message, "Undo", async () => {
+        try {
+          const undo = await fetch(`api/items/${id}/storage/undo`, {
+            method: "POST",
+            body: new URLSearchParams(result.undo),
+          });
+          if (!undo.ok) throw new Error("Could not undo storage change");
+          expandedPantryItemId = id;
+          await loadPantry();
+          toast("Undo complete");
+        } catch (err) {
+          toast("Could not undo");
+        }
+      }, 6000);
+    } catch (err) {
+      toast("Could not change storage");
+    }
     return;
   }
   if (event.target.closest(".btn-save-opened")) {

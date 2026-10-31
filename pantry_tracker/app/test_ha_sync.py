@@ -88,6 +88,18 @@ def test_summary_notification_text_and_actions(monkeypatch):
     ]
 
 
+def test_expiring_item_notification_offers_freeze(monkeypatch):
+    monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
+    calls = []
+    monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(body) or True)
+    item_id = db.add_item(barcode=None, name="Milk", expiry_date=(db.today() + timedelta(days=1)).isoformat())
+    assert ha_sync.notify_summary([db.get_item(item_id)]) == "sent"
+    assert [action["action"] for action in calls[0]["data"]["actions"]] == [
+        f"PANTRY_EATEN_{item_id}", f"PANTRY_FREEZE_{item_id}", f"PANTRY_SNOOZE_{item_id}"
+    ]
+
+
 def test_multiple_items_make_one_summary_with_snooze_only(monkeypatch):
     monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")

@@ -726,6 +726,38 @@ async def finish_item(item_id: int, outcome: str = Form(...)):
     return {"ok": True, "event_id": event_id}
 
 
+@app.post("/api/items/{item_id}/storage")
+async def change_storage(item_id: int, action: str = Form(...)):
+    if action not in {"freeze", "defrost"}:
+        return JSONResponse({"error": "Invalid storage action."}, status_code=400)
+    item = db.get_item(item_id)
+    if not item or item["status"] != db.STATUS_ACTIVE:
+        return JSONResponse({"error": "Item not found or no longer active."}, status_code=404)
+    undo = {"location": item.get("location") or "", "defrosted_at": item.get("defrosted_at") or ""}
+    updated = db.freeze_item(item_id) if action == "freeze" else db.defrost_item(item_id)
+    ha_sync.request_sync()
+    return {**_item_view(updated), "undo": undo}
+
+
+@app.post("/api/items/{item_id}/storage/undo")
+async def undo_storage(item_id: int, location: str = Form(""), defrosted_at: str = Form("")):
+    allowed_locations = {"", "fridge", "cupboard", "freezer"}
+    if location not in allowed_locations:
+        return JSONResponse({"error": "Invalid location."}, status_code=400)
+    if defrosted_at:
+        try:
+            if date.fromisoformat(defrosted_at).isoformat() != defrosted_at:
+                raise ValueError
+        except ValueError:
+            return JSONResponse({"error": "Invalid defrost date."}, status_code=400)
+    item = db.get_item(item_id)
+    if not item or item["status"] != db.STATUS_ACTIVE:
+        return JSONResponse({"error": "Item not found or no longer active."}, status_code=404)
+    db.update_item(item_id, location=location or None, defrosted_at=defrosted_at or None)
+    ha_sync.request_sync()
+    return _item_view(db.get_item(item_id))
+
+
 @app.post("/api/items/{item_id}/opened")
 async def set_opened(item_id: int, days: int | None = Form(None), opened: bool = Form(True)):
     if opened and (days is None or not 1 <= days <= 365):

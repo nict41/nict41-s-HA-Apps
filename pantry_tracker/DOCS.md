@@ -46,11 +46,14 @@ from a phone-first ingress panel.
    back to manual entry - nothing blocks you from tracking an item.
 4. The **Pantry** tab groups items by effective use-by date and storage
    location, with an Eat first list, search and filters. Rows let you edit,
-   mark one unit **Eaten** or **Binned**, undo a finish, record when an item
-   was opened, adjust its count, or delete it.
+   mark one unit **Eaten** or **Binned**, Freeze or Defrost an item, undo a
+   finish or storage change, record when an item was opened, adjust its
+   count, or delete it. Defrost moves an item to the fridge and sets its
+   use-by date to tomorrow.
 5. A daily check sends one **Home Assistant summary notification** through
    your chosen `notify.*` service for due items, with a repeat reminder
-   until you deal with them. Tapping it opens the **Pantry** tab. Home Assistant
+   until you deal with them. For one item that has not expired, the
+   notification offers Freeze in place of Binned. Tapping it opens the **Pantry** tab. Home Assistant
    sensors sync in the background at 00:05 local time, with a five-minute
    check after startup to restore missing entities. Dashboard changes queue a
    background refresh. **Send summary now** reports whether a summary was sent, nothing
@@ -136,7 +139,7 @@ Pantry groups items under **Expired**, **Use soon**, **Later**, **Needs a date**
   (correct the name, quantity, category, or notes; pick a new date by
   hand, or tap **Rescan use-by date** to read it from a fresh photo the
   same way as when first adding the item - this also runs in the
-  background), **Eaten**, **Binned**, and **Opened** (one unit at a time, with a short
+  background), **Eaten**, **Binned**, **Freeze**, **Defrost**, and **Opened** (one unit at a time, with a short
   Undo action), opened-date and storage-location controls, quantity, and
   **Delete**. Eat first shows up to three items due within a week, with Show all when more qualify.
   Search and location or food-group filters stay in place while the list
