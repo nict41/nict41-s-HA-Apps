@@ -967,6 +967,7 @@ function readDateOnDevice(file) {
     const timeout = ocrReads++ === 0 ? 30000 : 12000;
     let settled = false;
     let parsing = false;
+    let firstRead = null;
     const settle = (result) => {
       if (settled) return;
       settled = true; clearTimeout(timer); ocrPending.delete(id); resolve(result);
@@ -976,15 +977,20 @@ function readDateOnDevice(file) {
     }, timeout);
     const finish = async (lines) => {
       if (settled || parsing) return;
-      if (!lines) { settle(null); return; }
+      if (!lines) { settle(firstRead); return; }
       parsing = true;
       const raw = lines.join("\n");
       try {
         const body = new FormData(); body.append("text", raw);
         const response = await fetch("api/parse-date", { method: "POST", body });
         const result = response.ok ? await response.json() : {};
-        settle({ date: result.date || null, raw });
-      } catch (err) { settle(null); }
+        if (result.date || firstRead) { settle({ date: result.date || null, raw: firstRead && !result.date ? firstRead.raw : raw }); return; }
+        // No date in the text: retry softened, which helps tightly spaced
+        // dot print (see soften in ocr-worker.js).
+        firstRead = { date: null, raw };
+        parsing = false;
+        worker.postMessage({ id, file, soft: true });
+      } catch (err) { settle(firstRead); }
     };
     ocrPending.set(id, { finish, fail: () => settle(null) });
     try { worker.postMessage({ id, file }); } catch (err) { settle(null); }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.1
+
+- When on-device reading finds no date, it now retries once on a softened copy
+  of the photo. Tightly spaced dot-printed lines were being read as a single
+  garbled line, such as `01.05.2027` over `184 A 13:59`.
+
 ## 0.10.0
 
 - Added on-device OCR for use-by photos. The recognized text stays in the

@@ -3,6 +3,8 @@ const ORT_VERSION = "1.31.1";
 const DET_PATH = "./ocr/ch_PP-OCRv4_det_infer.onnx?v=" + ORT_VERSION;
 const REC_PATH = "./ocr/ch_PP-OCRv4_rec_infer.onnx?v=" + ORT_VERSION;
 const KEYS_PATH = "./ocr/ppocr_keys_v1.txt?v=" + ORT_VERSION;
+const SOFTENED_WIDTH = 740;
+const SOFTENED_BLUR_DIVISOR = 494;
 let detector, recognizer, keys, loading, bitmap;
 const mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
 
@@ -91,9 +93,30 @@ async function recognize(canvas, box) {
   return text;
 }
 
-async function read(file) {
+// Separates tightly spaced dot-printed lines, which the detector otherwise
+// boxes together and the recognizer can't read: the dots merge into strokes
+// and the gap between the lines survives.
+async function soften(source) {
+  const scale = Math.min(1, SOFTENED_WIDTH / source.width);
+  const canvas = new OffscreenCanvas(Math.round(source.width * scale), Math.round(source.height * scale));
+  const blurred = new OffscreenCanvas(source.width, source.height);
+  const blurContext = blurred.getContext("2d");
+  blurContext.filter = `blur(${source.width / SOFTENED_BLUR_DIVISOR}px)`;
+  blurContext.drawImage(source, 0, 0);
+  const context = canvas.getContext("2d");
+  context.imageSmoothingQuality = "high";
+  context.drawImage(blurred, 0, 0, canvas.width, canvas.height);
+  return createImageBitmap(canvas);
+}
+
+async function read(file, soft) {
   await loadModels();
   bitmap = await createImageBitmap(file);
+  if (soft) {
+    const original = bitmap;
+    bitmap = await soften(original);
+    original.close();
+  }
   const canvas = new OffscreenCanvas(1, 1);
   canvas.getContext("2d").imageSmoothingQuality = "high";
   try {
@@ -112,7 +135,7 @@ self.onmessage = async ({ data }) => {
   if (data?.type === "init") { try { await loadModels(); self.postMessage({ type: "ready" }); } catch (error) { self.postMessage({ type: "init-error", error: String(error) }); } return; }
   if (!data || data.id === undefined) return;
   processing = processing.then(async () => {
-    try { self.postMessage({ id: data.id, lines: await read(data.file) }); }
+    try { self.postMessage({ id: data.id, lines: await read(data.file, data.soft) }); }
     catch (error) { self.postMessage({ id: data.id, error: String(error?.message || error) }); }
   });
 };
