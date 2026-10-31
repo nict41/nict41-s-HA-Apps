@@ -51,5 +51,6 @@ def lookup_barcode(barcode: str) -> dict | None:
         "brand": (product.get("brands") or "").split(",")[0].strip(),
         "quantity": product.get("quantity") or "",
         "category": (product.get("categories") or "").split(",")[0].strip(),
+        "categories_tags": product.get("categories_tags") or [],
         "image_url": product.get("image_front_small_url") or product.get("image_front_url") or "",
     }

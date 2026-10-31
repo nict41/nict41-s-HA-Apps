@@ -22,6 +22,58 @@ _RULES = [
 ]
 
 
+def storage_suggestion(categories_tags: list[str], category: str, name: str) -> str:
+    """Suggest storage only when product tags or clear whole words support it."""
+    tags = [re.sub(r"^[a-z]{2}:", "", str(tag).casefold()) for tag in categories_tags or []]
+    tag_set = set(tags)
+    text = " ".join((category or "", name or "")).casefold()
+
+    def word_match(value: str, words: str) -> bool:
+        return re.search(rf"\b(?:{words})\b", value) is not None
+
+    if ("frozen-foods" in tag_set or any(tag.startswith("frozen-") for tag in tags)
+            or word_match(text, "frozen")):
+        return "freezer"
+
+    cupboard_prefixes = ("canned-", "dried-", "dehydrated", "uht")
+    cupboard_tags = {
+        "canned-foods", "uht-milk", "milk-powder", "jams", "honeys",
+        "nut-butters", "peanut-butters", "chocolate-spreads", "breakfast-cereals",
+        "pastas", "rices", "noodles", "flours", "sugars", "salts", "spices",
+        "vegetable-oils", "vinegars",
+    }
+    if tag_set & cupboard_tags or any(tag.startswith(cupboard_prefixes) for tag in tags):
+        return "cupboard"
+
+    fridge_prefixes = ("fresh-meats", "fresh-fish", "fresh-pasta")
+    fridge_tags = {
+        "dairy-desserts", "yogurts", "yoghurts", "cheeses", "creams", "butters",
+        "margarines", "plant-based-spreads", "sausages", "prepared-meats", "eggs", "hummus",
+    }
+    if tag_set & fridge_tags or any(tag.startswith(fridge_prefixes) for tag in tags):
+        return "fridge"
+
+    snack_tags = {"biscuits", "chocolates", "candies", "confectioneries", "crisps", "nuts"}
+    if tag_set & snack_tags or ("chips-and-fries" in tag_set and "snacks" in tag_set):
+        return "cupboard"
+
+    if "dairies" in tag_set:
+        return "fridge"
+
+    cupboard_words = "salt|doritos|crisps?|flour|sugar|rice|pasta|noodles?|biscuits?|chocolate|sweets?|peanut butter|cream crackers"
+    fridge_words = "yogurts?|yoghurts?|creams?|cheeses?|sausages?|butter"
+    # The category gets the same whole-word fallback before the product name.
+    for value in (category or "", name or ""):
+        value = value.casefold()
+        if word_match(value, "ice cream"):
+            return "freezer"
+        if word_match(value, cupboard_words):
+            return "cupboard"
+        if word_match(value, fridge_words):
+            return "fridge"
+    return ""
+
+
 def tidy_name(text: str) -> str:
     value = text or ""
     letters = [c for c in value if c.isalpha()]

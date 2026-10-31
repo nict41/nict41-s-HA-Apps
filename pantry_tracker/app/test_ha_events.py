@@ -69,6 +69,15 @@ def test_handle_action_freezes_valid_repeated_and_ignores_consumed_or_malformed(
     assert len(calls) == 1
 
 
+def test_handle_action_does_not_change_remembered_location(monkeypatch):
+    monkeypatch.setattr(ha_events.ha_sync, "request_sync", lambda: None)
+    item_id = db.add_item(barcode="ha-memory", name="Milk", location="fridge")
+    db.cache_barcode("ha-memory", {"name": "Milk", "image_url": ""})
+    db.update_cached_barcode("ha-memory", location="cupboard")
+    ha_events.handle_action(f"PANTRY_FREEZE_{item_id}")
+    assert db.get_cached_barcode("ha-memory")["location"] == "cupboard"
+
+
 def test_action_handler_exception_is_logged_without_dropping_socket(monkeypatch, capsys):
     import websockets.sync.client
 

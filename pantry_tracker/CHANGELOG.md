@@ -1,3 +1,8 @@
+## 0.16.0
+
+- Suggest fridge or cupboard storage from product categories, and freezer only for frozen products.
+- Prefer the last location chosen when adding, then the product suggestion; only add-time location choices are remembered.
+
 ## 0.15.0
 
 - Add one-tap Freeze and Defrost actions in the pantry, with six-second undo.

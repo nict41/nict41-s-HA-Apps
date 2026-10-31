@@ -42,12 +42,13 @@ def test_lookup_product_found(monkeypatch):
     monkeypatch.setattr(
         main.lookup,
         "lookup_barcode",
-        lambda code: {"name": "Milk", "brand": "Tesco", "quantity": "1L", "category": "Dairy", "image_url": ""},
+        lambda code: {"name": "Milk", "brand": "Tesco", "quantity": "1L", "category": "Dairy", "categories_tags": ["en:dairies"], "image_url": ""},
     )
     res = client.get("/api/lookup/123")
     assert res.json()["found"] is True
     assert res.json()["name"] == "Milk"
     assert res.json()["cached"] is False
+    assert res.json()["suggested_location"] == "fridge"
 
 
 def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
@@ -55,7 +56,10 @@ def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
     monkeypatch.setattr(
         main.lookup,
         "lookup_barcode",
-        lambda code: calls.append(code) or {"name": "Beans", "brand": "Heinz", "quantity": "415g", "category": "Tinned", "image_url": ""},
+        lambda code: calls.append(code) or {
+            "name": "Beans", "brand": "Heinz", "quantity": "415g", "category": "Tinned",
+            "categories_tags": ["en:canned-foods"], "image_url": "",
+        },
     )
 
     first = client.get("/api/lookup/9999")
@@ -80,6 +84,7 @@ def test_lookup_product_caches_and_skips_network_on_repeat_scan(monkeypatch):
         "category": "Tinned",
         "image_url": "",
         "display_image_url": "",
+        "suggested_location": "cupboard",
     }
     assert calls == ["9999"]
 
@@ -88,6 +93,15 @@ def test_lookup_product_not_found(monkeypatch):
     monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: None)
     res = client.get("/api/lookup/123")
     assert res.json() == {"found": False, "display_image_url": ""}
+
+
+def test_cached_legacy_lookup_computes_suggestion_without_network(monkeypatch):
+    db.cache_barcode("legacy", {"name": "Plain flour", "category": "", "image_url": ""})
+    db.update_cached_barcode("legacy", suggested_location=None)
+    monkeypatch.setattr(main.lookup, "lookup_barcode", lambda code: pytest.fail("network called"))
+    result = client.get("/api/lookup/legacy").json()
+    assert result["cached"] is True
+    assert result["suggested_location"] == "cupboard"
 
 
 def test_product_photo_roundtrip_is_shrunk_and_wins_over_open_food_facts():
@@ -190,6 +204,26 @@ def test_add_list_and_item_lifecycle():
     res = client.post(f"/api/items/{item['id']}/delete")
     assert res.status_code == 200
     assert db.get_item(item["id"]) is None
+
+
+def test_only_nonblank_add_remembers_location(monkeypatch):
+    code = "memory-test"
+    db.cache_barcode(code, {"name": "Soup", "category": "", "image_url": ""})
+    added = client.post("/api/items", data={"barcode": code, "name": "Soup", "location": "cupboard"}).json()
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
+    blank = client.post("/api/items", data={"barcode": code, "name": "Soup"}).json()
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
+    for data in ({"name": "Soup", "location": "fridge"}, {"name": "Soup", "location": "freezer"}):
+        client.post(f"/api/items/{added['id']}", data=data)
+        assert db.get_cached_barcode(code)["location"] == "cupboard"
+    client.post(f"/api/items/{added['id']}/storage", data={"action": "freeze"})
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
+    client.post(f"/api/items/{added['id']}/storage", data={"action": "defrost"})
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
+    client.post(f"/api/items/{added['id']}/storage/undo", data={"location": "fridge", "defrosted_at": ""})
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
+    client.post(f"/api/items/{blank['id']}/opened", data={"days": 4})
+    assert db.get_cached_barcode(code)["location"] == "cupboard"
 
 
 def test_freeze_defrost_routes_and_undo_restore_exact_storage_state(monkeypatch):

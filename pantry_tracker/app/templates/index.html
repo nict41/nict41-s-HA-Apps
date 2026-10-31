@@ -594,6 +594,7 @@
 
       <span class="section-title" id="f-location-label">Location</span>
       <div id="f-location-chips" class="chip-row" role="group" aria-labelledby="f-location-label"></div>
+      <div id="f-location-source" class="muted hidden"></div>
       <input type="hidden" id="f-location" name="location" value="">
 
       <label for="f-count">How many</label>
@@ -894,7 +895,6 @@ function resetScan() {
   addOcrAutofill = "";
 }
 
-let sessionLocation = "";
 const LOCATION_CHOICES = ["", "fridge", "cupboard", "freezer"];
 const LOCATION_LABELS = { "": "No location", fridge: "Fridge", cupboard: "Cupboard", freezer: "Freezer" };
 
@@ -913,13 +913,24 @@ document.addEventListener("click", (event) => {
   const field = chip.dataset.field;
   const input = container.parentElement.querySelector(`.${field}`) || $(`#${field}`);
   if (input) input.value = location;
-  sessionLocation = location;
+  reviewForm.dataset.locationSource = "";
+  $("#f-location-source").classList.add("hidden");
   container.querySelectorAll(".location-chip").forEach((button) => {
     button.setAttribute("aria-pressed", String(button === chip));
   });
 });
 
-function openReviewForm({ barcode, notFound }) {
+function setAddLocation(location, source) {
+  const selected = LOCATION_CHOICES.includes(location) ? location : "";
+  $("#f-location").value = selected;
+  renderLocationChips($("#f-location-chips"), selected, "f-location");
+  reviewForm.dataset.locationSource = source || "";
+  const line = $("#f-location-source");
+  line.textContent = source === "suggestion" ? "Suggested from the product's category" : "Remembered from last time";
+  line.classList.toggle("hidden", !source);
+}
+
+function openReviewForm({ barcode, notFound, location = "", locationSource = "" }) {
   scanIdle.classList.add("hidden");
   $("#scan-pantry-sections").classList.add("hidden");
   scanBusy.classList.add("hidden");
@@ -927,8 +938,7 @@ function openReviewForm({ barcode, notFound }) {
   document.body.classList.add("add-form-open");
   reviewForm.dataset.barcode = barcode || "";
   reviewForm.dataset.liveBarcode = liveBarcodeCapture ? "1" : "";
-  $("#f-location").value = sessionLocation;
-  renderLocationChips($("#f-location-chips"), sessionLocation, "f-location");
+  setAddLocation(location, locationSource);
   $("#review-not-found").classList.toggle("hidden", !notFound);
   $("#btn-product-photo").classList.toggle("hidden", !barcode);
   if (barcode) {
@@ -954,7 +964,12 @@ async function handleScannedBarcode(code) {
       toast("Couldn't reach Open Food Facts - fill in the details");
       return;
     }
-    openReviewForm({ barcode: code, notFound: false });
+    openReviewForm({
+      barcode: code,
+      notFound: false,
+      location: data.location || data.suggested_location || "",
+      locationSource: data.location ? "memory" : (data.suggested_location ? "suggestion" : ""),
+    });
     if (data.display_image_url) {
       setViewablePhoto($("#review-product-image"), data.display_image_url);
       $("#review-product-image").classList.remove("hidden");
@@ -965,9 +980,6 @@ async function handleScannedBarcode(code) {
       $("#f-quantity").value = data.quantity || "";
       $("#f-category").value = data.category || "";
       $("#f-image-url").value = data.image_url || "";
-      const defaultLocation = data.location || sessionLocation;
-      $("#f-location").value = defaultLocation;
-      renderLocationChips($("#f-location-chips"), defaultLocation, "f-location");
       if (data.cached) {
         $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
       }

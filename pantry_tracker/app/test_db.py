@@ -267,9 +267,13 @@ def test_cache_barcode_roundtrip():
 
 
 def test_cache_barcode_overwrites_on_recache():
-    db.cache_barcode("123", {"name": "Old Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
+    db.cache_barcode("123", {"name": "Old Name", "brand": "", "quantity": "", "category": "", "image_url": "", "suggested_location": "cupboard"})
+    db.update_cached_barcode("123", location="fridge")
     db.cache_barcode("123", {"name": "New Name", "brand": "", "quantity": "", "category": "", "image_url": ""})
-    assert db.get_cached_barcode("123")["name"] == "New Name"
+    cached = db.get_cached_barcode("123")
+    assert cached["name"] == "New Name"
+    assert cached["location"] == "fridge"
+    assert cached["suggested_location"] == "cupboard"
 
 
 def test_state_roundtrip():

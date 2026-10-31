@@ -148,6 +148,7 @@ def init_db() -> None:
         )
         _ensure_column(conn, "barcode_cache", "location", "location TEXT")
         _ensure_column(conn, "barcode_cache", "opened_days", "opened_days INTEGER")
+        _ensure_column(conn, "barcode_cache", "suggested_location", "suggested_location TEXT")
         conn.execute("""CREATE TABLE IF NOT EXISTS item_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,
             barcode TEXT, name TEXT NOT NULL, category TEXT, outcome TEXT NOT NULL,
@@ -603,11 +604,12 @@ def get_cached_barcode(barcode: str) -> dict | None:
 def cache_barcode(barcode: str, product: dict) -> None:
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO barcode_cache (barcode, name, brand, quantity, category, image_url, cached_at) "
-            "VALUES (?,?,?,?,?,?,?) "
+            "INSERT INTO barcode_cache (barcode, name, brand, quantity, category, image_url, cached_at, suggested_location) "
+            "VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(barcode) DO UPDATE SET name = excluded.name, brand = excluded.brand, "
             "quantity = excluded.quantity, category = excluded.category, image_url = excluded.image_url, "
-            "cached_at = excluded.cached_at",
+            "cached_at = excluded.cached_at, "
+            "suggested_location = COALESCE(excluded.suggested_location, barcode_cache.suggested_location)",
             (
                 barcode,
                 product.get("name", ""),
@@ -616,6 +618,7 @@ def cache_barcode(barcode: str, product: dict) -> None:
                 product.get("category", ""),
                 product.get("image_url", ""),
                 now_iso(),
+                product.get("suggested_location"),
             ),
         )
 
