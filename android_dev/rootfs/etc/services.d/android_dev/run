@@ -1,0 +1,14 @@
+#!/usr/bin/with-contenv bashio
+export ACCEPT_ANDROID_SDK_LICENSE="$(bashio::config 'accept_android_sdk_license')"
+export MCP_TOKEN="$(bashio::config 'mcp_token')"
+export GRADLE_MAX_HEAP_GB="$(bashio::config 'gradle_max_heap_gb')"
+export GRADLE_MAX_WORKERS="$(bashio::config 'gradle_max_workers')"
+export GRADLE_JOB_TIMEOUT_MINUTES="$(bashio::config 'gradle_job_timeout_minutes')"
+export ANDROID_HOME=/data/android-sdk
+export ANDROID_SDK_ROOT=/data/android-sdk
+export GRADLE_USER_HOME=/data/gradle
+export ANDROID_USER_HOME=/data/adb
+export HOME=/data/adb
+export PATH="/data/tools/gradle-9.8.2/bin:/data/android-sdk/platform-tools:$PATH"
+mkdir -p /data /share/android_dev/projects /share/android_dev/screenshots /data/jobs /data/keystores /data/adb
+exec python3 /app/server.py

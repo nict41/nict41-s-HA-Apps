@@ -8,6 +8,14 @@ This repository can be used as an app repository for Home Assistant.
 
 This repository contains the following apps
 
+### [Android Dev](./android_dev)
+
+![Android Dev logo](android_dev/logo.png)
+
+![Supports amd64 Architecture][amd64-shield]
+
+Provides Android SDK and Gradle tools to Claude Code through an authenticated MCP server, with wireless phone deployment and UI inspection.
+
 ### [3D Print Timelapse](./print_timelapse)
 
 ![3D Print Timelapse logo](print_timelapse/logo.png)

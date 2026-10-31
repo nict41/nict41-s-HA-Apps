@@ -1,0 +1,16 @@
+configuration:
+  accept_android_sdk_license:
+    name: Accept Android SDK licence
+    description: Enable runtime Android SDK downloads and accept Google's Android SDK licence.
+  mcp_token:
+    name: MCP bearer token
+    description: Secret token (at least 32 characters) required for every MCP request.
+  gradle_max_heap_gb:
+    name: Gradle maximum heap (GB)
+    description: Maximum Java heap for Gradle builds.
+  gradle_max_workers:
+    name: Gradle maximum workers
+    description: Maximum parallel Gradle workers.
+  gradle_job_timeout_minutes:
+    name: Gradle job timeout (minutes)
+    description: Maximum runtime for one Gradle job.
