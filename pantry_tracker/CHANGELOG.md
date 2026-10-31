@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.2
+
+- Rescans that cannot read a new photo now say when the existing date is still
+  in use. Labelled or manually reviewed dates with a stale printed year can
+  receive a one-year repair when the corrected date is still within the grace
+  window.
+- Added the soup-pack reader output to the saved regression cases.
+
 ## 0.12.1
 
 - Camera capture now closes immediately on press, with photo encoding moved

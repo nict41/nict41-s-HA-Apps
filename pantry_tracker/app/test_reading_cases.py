@@ -65,6 +65,32 @@ def test_ranked_dates_and_repairs():
     assert ranked[0]["date"] == "2027-09-30"
 
 
+def test_near_miss_year_repair_requires_context_and_stays_bounded():
+    candidates = vision.date_candidates("USE BY:\n10/11/25 03 G 01:45")
+    assert candidates[0]["date"] == "2026-11-10"
+    assert candidates[0]["repaired"] is True
+    assert db.reconcile_readings([], candidates) == ("2026-11-10", "check", [])
+    assert vision.date_candidates("USE BY:\n14/03/2023") == []
+    candidates = vision.date_candidates("USE BY:\n10/11/25\n28/09/2027")
+    assert candidates[0]["date"] == "2027-09-28"
+    assert candidates[0]["repaired"] is False
+    assert vision.date_candidates("08.03.2026\n30.03.2025:12") == []
+    assert vision.date_candidates("context\n10/11/25 03 G 01:45", lenient=True)[0]["repaired"] is True
+    assert vision.date_candidates("USE BY:\n01/09/2026")[0]["date"] == "2026-09-01"
+
+
+def test_a_year_moved_on_a_single_line_counts_as_repaired():
+    candidates = vision.date_candidates("10/11/25 03 G 01:45")
+    assert candidates[0]["date"] == "2026-11-10"
+    assert candidates[0]["repaired"] is True
+    assert db.reconcile_readings(candidates, candidates) == ("2026-11-10", "check", [])
+
+
+def test_a_repair_beats_a_batch_code_but_not_a_real_date():
+    assert vision.date_candidates("Use By:\n03 10V\nL8 190327")[0]["date"] == "2026-11-03"
+    assert vision.date_candidates("USE BY:\n10/11/25\n28/09/2027")[0]["date"] == "2027-09-28"
+
+
 def test_reconcile_candidate_rules():
     def c(day, repaired=False): return {"date": f"2027-01-{day:02d}", "repaired": repaired}
     assert db.reconcile_readings([c(1)], [c(1)]) == ("2027-01-01", "confirmed", [])

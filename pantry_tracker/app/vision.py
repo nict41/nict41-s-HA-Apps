@@ -139,7 +139,7 @@ def _repaired_line(line: str) -> str:
     return _DATE_SHAPE_RE.sub(lambda m: m.group().translate(str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1"})), repaired)
 
 
-def _line_dates(line: str, *, lenient: bool = False) -> list[tuple[date, bool]]:
+def _line_dates(line: str, *, lenient: bool = False, repair_old_year: bool = False) -> list[tuple[date, bool]]:
     found = []
     variants = [(line, False)]
     repaired = _repaired_line(line)
@@ -159,6 +159,10 @@ def _line_dates(line: str, *, lenient: bool = False) -> list[tuple[date, bool]]:
                 parsed = _read_date(match.group())
                 if parsed and _is_recent_or_future(parsed):
                     found.append((parsed, was_repaired))
+                elif parsed and (repair_old_year or lenient) and _has_printed_year(match.group()):
+                    repaired_date = _next_year_if_recent(parsed)
+                    if repaired_date:
+                        found.append((repaired_date, True))
         # Split a line around obvious separators to discover multiple dates.
         for part in re.split(r"\s{2,}|\s+(?=(?:USE\s*BY|BEST\s*BEFORE|BB|EXP)\b)", value, flags=re.I):
             parsed = _read_date(part)
@@ -169,6 +173,31 @@ def _line_dates(line: str, *, lenient: bool = False) -> list[tuple[date, bool]]:
         if parsed not in unique or unique[parsed] and not repaired_flag:
             unique[parsed] = repaired_flag
     return [(parsed, flag) for parsed, flag in unique.items()]
+
+
+def _has_printed_year(text: str) -> bool:
+    patterns = (_ISO_RE, _DMY_RE, _TEXT_DATE_RE, _SPACED_DATE_RE, _COMPACT_DATE_RE)
+    return any(pattern.search(text) for pattern in patterns)
+
+
+def _next_year_if_recent(parsed: date) -> date | None:
+    if (date.today() - parsed).days <= _MAX_PAST_DAYS:
+        return None
+    try:
+        repaired = date(parsed.year + 1, parsed.month, parsed.day)
+    except ValueError:
+        return None
+    if (date.today() - repaired).days <= _NO_YEAR_GRACE_DAYS:
+        return repaired
+    return None
+
+
+def _candidate_tier(candidate: dict) -> int:
+    """A well-formed date beats any repair, but a repair beats a bare run of
+    digits that scored badly and is probably a batch code."""
+    if candidate["repaired"]:
+        return 1
+    return 2 if candidate["score"] >= CONFIDENT_SCORE else 0
 
 
 def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
@@ -185,15 +214,15 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
         lines = [line for line in lines if not _DATE_LINE_RE.match(line)]
     candidates = []
     for index, line in enumerate(lines):
-        reads = _line_dates(line, lenient=lenient)
-        if not reads and lenient:
-            # Human-assisted mode accepts day/month only and repaired forms.
-            reads = _line_dates(_repaired_line(line), lenient=True)
         labelled_here = bool(_LABEL_RE.search(line))
         label_previous = any(
             _LABEL_RE.search(previous)
             for previous in lines[max(0, index - 2):index]
         )
+        reads = _line_dates(line, lenient=lenient, repair_old_year=labelled_here or label_previous)
+        if not reads and lenient:
+            # Human-assisted mode accepts day/month only and repaired forms.
+            reads = _line_dates(_repaired_line(line), lenient=True)
         for parsed, repaired in reads:
             score = SCORE_LABELLED if labelled_here else (SCORE_PREVIOUS_LABEL if label_previous else 0)
             if re.search(r"[./-]|\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b", line, re.I): score += SCORE_SEPARATORS
@@ -223,13 +252,21 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
     best = {}
     for candidate in candidates:
         old = best.get(candidate["date"])
-        if old is None or (candidate["score"], candidate["repaired"]) > (old["score"], old["repaired"]):
+        if old is None or (not candidate["repaired"], candidate["score"]) > (not old["repaired"], old["score"]):
             best[candidate["date"]] = candidate
     if not best and len(lines) == 1 and not _DATE_LINE_RE.match(lines[0]):
         parsed = _parse_date_text(lines[0])
         if parsed:
-            best[parsed] = {"date": parsed, "score": 0, "repaired": False, "line": lines[0]}
-    return sorted(best.values(), key=lambda c: (c["score"], c["date"]), reverse=True)
+            # _parse_date_text may have moved a misread year, which is as much
+            # a guess as any other repair.
+            printed = _read_date(lines[0])
+            best[parsed] = {
+                "date": parsed,
+                "score": 0,
+                "repaired": not printed or printed.isoformat() != parsed,
+                "line": lines[0],
+            }
+    return sorted(best.values(), key=lambda c: (_candidate_tier(c), c["score"], c["date"]), reverse=True)
 
 
 def is_confident(candidate: dict) -> bool:

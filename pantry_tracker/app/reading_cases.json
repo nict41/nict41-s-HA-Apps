@@ -71,5 +71,10 @@
     "truth": "2027-04-30",
     "paddle": "BestBefore End:\nFILM\nAPR 2027\nRECYCLE AT\nRECYCLING\n6239 11:04 BLA\nPOINT\nDon't recycle\nat home",
     "glm": ""
+  },
+  "5": {
+    "truth": "2026-11-10",
+    "paddle": "CU\nUSE BY:\n1/12603G01:46",
+    "glm": "USE BY:\n10/11/25 03 G 01:45"
   }
 }
