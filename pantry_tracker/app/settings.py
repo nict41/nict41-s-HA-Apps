@@ -32,6 +32,7 @@ _DEFAULTS = {
     "notify_days_before": int(os.environ.get("NOTIFY_DAYS_BEFORE", "3")),
     "notify_repeat_hours": int(os.environ.get("NOTIFY_REPEAT_HOURS", "24")),
     "check_interval_hours": int(os.environ.get("CHECK_INTERVAL_HOURS", "12")),
+    "notify_hour": int(os.environ.get("NOTIFY_HOUR", "8")),
 }
 
 # Inclusive (min, max) bounds, mirroring config.yaml's schema so the in-app
@@ -40,6 +41,7 @@ _BOUNDS = {
     "notify_days_before": (0, 30),
     "notify_repeat_hours": (1, 168),
     "check_interval_hours": (1, 24),
+    "notify_hour": (0, 23),
 }
 
 INT_KEYS = tuple(_BOUNDS)

@@ -51,6 +51,71 @@ def test_summary_includes_needs_date_count():
     assert state["attributes"]["needs_date"] == 1
 
 
+def test_summary_contains_effective_and_printed_dates_and_frozen_count():
+    item = _make_item(expiry_date="2030-02-01", location="freezer", count=2)
+    state = ha_sync._summary_state([(item, db.BUCKET_FROZEN)])
+    assert state["attributes"]["frozen"] == 1
+    entry = state["attributes"]["items"][0]
+    assert entry["expiry_date"] is None
+    assert entry["printed_date"] == "2030-02-01"
+    assert entry["count"] == 2
+
+
+def test_summary_notification_marks_only_after_success(monkeypatch):
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
+    monkeypatch.setattr(ha_sync, "_request", lambda *args, **kwargs: False)
+    item_id = db.add_item(barcode=None, name="Milk", expiry_date="2020-01-01")
+    assert ha_sync.notify_summary([db.get_item(item_id)]) == 0
+    assert db.get_item(item_id)["last_notified_at"] is None
+
+
+def test_summary_notification_text_and_actions(monkeypatch):
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
+    calls = []
+    monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(body) or True)
+    item_id = db.add_item(barcode=None, name="Milk", count=3, expiry_date="2020-01-01")
+    assert ha_sync.notify_summary([db.get_item(item_id)]) == 1
+    payload = calls[0]
+    assert payload["title"] == "1 item to use"
+    assert payload["message"] == "Expired: Milk ×3."
+    assert "day(s)" not in payload["message"]
+    assert "2020-01-01" not in payload["message"]
+    assert [action["action"] for action in payload["data"]["actions"]] == [
+        f"PANTRY_EATEN_{item_id}", f"PANTRY_BINNED_{item_id}", f"PANTRY_SNOOZE_{item_id}"
+    ]
+
+
+def test_multiple_items_make_one_summary_with_snooze_only(monkeypatch):
+    monkeypatch.setenv("NOTIFY_SERVICE", "notify.phone")
+    calls = []
+    monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append(body) or True)
+    first = db.add_item(barcode=None, name="Milk", expiry_date=(db.today() + timedelta(days=1)).isoformat())
+    second = db.add_item(barcode=None, name="Soup", expiry_date=(db.today() + timedelta(days=2)).isoformat())
+    assert ha_sync.notify_summary([db.get_item(first), db.get_item(second)]) == 1
+    payload = calls[0]
+    assert "Tomorrow: Milk." in payload["message"]
+    assert "In 2 days: Soup." in payload["message"]
+    assert payload["data"]["actions"] == [{"action": f"PANTRY_SNOOZE_{first},{second}", "title": "Snooze"}]
+
+
+def test_snooze_and_bucket_change_due(monkeypatch):
+    item_id = db.add_item(barcode=None, name="Milk", expiry_date="2020-01-01")
+    db.update_item(item_id, snoozed_until=(db.today() + timedelta(days=2)).isoformat())
+    db.update_item(item_id, last_notified_bucket=db.BUCKET_EXPIRED,
+                   last_notified_at=datetime.now(timezone.utc).isoformat())
+    item = db.get_item(item_id)
+    assert ha_sync._due_for_notification(item, db.BUCKET_EXPIRED) is False
+    db.update_item(item_id, last_notified_bucket=db.BUCKET_EXPIRING_SOON, last_notified_at=datetime.now(timezone.utc).isoformat())
+    assert ha_sync._due_for_notification(db.get_item(item_id), db.BUCKET_EXPIRED) is True
+
+
+def test_repeat_window_allows_one_hour_of_slack(monkeypatch):
+    item_id = db.add_item(barcode=None, name="Milk", expiry_date="2020-01-01")
+    last_at = (datetime.now(timezone.utc) - timedelta(hours=23, minutes=5)).isoformat()
+    db.update_item(item_id, last_notified_bucket=db.BUCKET_EXPIRED, last_notified_at=last_at)
+    assert ha_sync._due_for_notification(db.get_item(item_id), db.BUCKET_EXPIRED) is True
+
+
 def test_sync_deletes_stale_entities(monkeypatch):
     monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     calls = []
@@ -67,18 +132,18 @@ def test_sync_deletes_stale_entities(monkeypatch):
     assert deletes == [f"/states/{ha_sync.entity_id_for(first_item)}"]
 
 
-def test_notify_if_due_requires_configured_service(monkeypatch):
+def test_notify_summary_requires_configured_service(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "")
-    assert ha_sync.notify_if_due(_make_item(), db.BUCKET_EXPIRED) is False
+    assert ha_sync.notify_summary([_make_item(expiry_date="2020-01-01")]) == 0
 
 
-def test_notify_if_due_skips_ok_bucket(monkeypatch):
+def test_notify_summary_skips_non_due_item(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     monkeypatch.setattr(ha_sync, "_request", lambda *a, **k: True)
-    assert ha_sync.notify_if_due(_make_item(), db.BUCKET_OK) is False
+    assert ha_sync.notify_summary([_make_item(expiry_date="2099-01-01")]) == 0
 
 
-def test_notify_if_due_sends_and_marks_notified(monkeypatch):
+def test_notify_summary_sends_and_marks_notified(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     calls = []
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append((method, path, body)) or True)
@@ -86,8 +151,8 @@ def test_notify_if_due_sends_and_marks_notified(monkeypatch):
     item_id = db.add_item(barcode=None, name="Yoghurt", expiry_date="2020-01-01")
     item = db.get_item(item_id)
 
-    sent = ha_sync.notify_if_due(item, db.BUCKET_EXPIRED)
-    assert sent is True
+    sent = ha_sync.notify_summary([item])
+    assert sent == 1
     assert calls[0] == ("POST", "/services/notify/mobile_app_phone", calls[0][2])
     assert "Yoghurt" in calls[0][2]["message"]
 
@@ -96,7 +161,7 @@ def test_notify_if_due_sends_and_marks_notified(monkeypatch):
     assert refreshed["last_notified_at"] is not None
 
 
-def test_notify_if_due_sets_click_action_to_own_ingress_panel(monkeypatch):
+def test_notify_summary_sets_click_action_to_own_ingress_panel(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     # The real hostname format, from `ha apps info` - hyphens, not the slug.
     monkeypatch.setattr(ha_sync.socket, "gethostname", lambda: "beb500c8-pantry-tracker")
@@ -104,13 +169,13 @@ def test_notify_if_due_sets_click_action_to_own_ingress_panel(monkeypatch):
     monkeypatch.setattr(ha_sync, "_request", lambda method, path, body=None: calls.append((method, path, body)) or True)
 
     item_id = db.add_item(barcode=None, name="Yoghurt", expiry_date="2020-01-01")
-    ha_sync.notify_if_due(db.get_item(item_id), db.BUCKET_EXPIRED)
+    ha_sync.notify_summary([db.get_item(item_id)])
 
     assert calls[0][2]["data"]["clickAction"] == "/beb500c8_pantry_tracker/pantry"
     assert calls[0][2]["data"]["url"] == "/beb500c8_pantry_tracker/pantry"
 
 
-def test_notify_if_due_respects_repeat_window(monkeypatch):
+def test_notify_summary_respects_repeat_window(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -121,11 +186,11 @@ def test_notify_if_due_respects_repeat_window(monkeypatch):
     item = db.get_item(item_id)
 
     # Just notified moments ago, in the same bucket - no repeat yet.
-    assert ha_sync.notify_if_due(item, db.BUCKET_EXPIRED) is False
+    assert ha_sync.notify_summary([item]) == 0
     assert calls == []
 
 
-def test_notify_if_due_sends_again_after_repeat_window(monkeypatch):
+def test_notify_summary_sends_again_after_repeat_window(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -136,11 +201,11 @@ def test_notify_if_due_sends_again_after_repeat_window(monkeypatch):
     db.update_item(item_id, last_notified_at=stale, last_notified_bucket=db.BUCKET_EXPIRED)
     item = db.get_item(item_id)
 
-    assert ha_sync.notify_if_due(item, db.BUCKET_EXPIRED) is True
+    assert ha_sync.notify_summary([item]) == 1
     assert calls == [1]
 
 
-def test_notify_if_due_bucket_change_bypasses_repeat_window(monkeypatch):
+def test_notify_summary_bucket_change_bypasses_repeat_window(monkeypatch):
     monkeypatch.setenv("NOTIFY_SERVICE", "notify.mobile_app_phone")
     settings.set_many({"notify_repeat_hours": 24})
     calls = []
@@ -151,5 +216,5 @@ def test_notify_if_due_bucket_change_bypasses_repeat_window(monkeypatch):
     item = db.get_item(item_id)
 
     # Degraded from expiring_soon to expired just now - should alert immediately.
-    assert ha_sync.notify_if_due(item, db.BUCKET_EXPIRED) is True
+    assert ha_sync.notify_summary([item]) == 1
     assert calls == [1]

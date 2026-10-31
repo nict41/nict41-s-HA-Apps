@@ -10,7 +10,8 @@ import os
 import re
 import sqlite3
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -33,10 +34,24 @@ BUCKET_OK = "ok"
 BUCKET_EXPIRING_SOON = "expiring_soon"
 BUCKET_EXPIRED = "expired"
 BUCKET_UNKNOWN = "unknown"
+BUCKET_FROZEN = "frozen"
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def local_zone():
+    """Returns the configured local zone, or UTC for a missing or bad TZ."""
+    try:
+        value = os.environ.get("TZ", "UTC").strip()
+        return ZoneInfo(value) if value else timezone.utc
+    except Exception:
+        return timezone.utc
+
+
+def today() -> date:
+    return datetime.now(local_zone()).date()
 
 
 @contextmanager
@@ -101,6 +116,16 @@ def init_db() -> None:
         _ensure_column(conn, "items", "date_ocr_candidates", "date_ocr_candidates TEXT")
         _ensure_column(conn, "items", "date_confidence", "date_confidence TEXT")
         _ensure_column(conn, "items", "date_candidates", "date_candidates TEXT")
+        for column, ddl in (
+            ("count", "count INTEGER NOT NULL DEFAULT 1"),
+            ("location", "location TEXT"),
+            ("opened_at", "opened_at TEXT"),
+            ("use_within_days", "use_within_days INTEGER"),
+            ("defrosted_at", "defrosted_at TEXT"),
+            ("snoozed_until", "snoozed_until TEXT"),
+            ("consumed_outcome", "consumed_outcome TEXT"),
+        ):
+            _ensure_column(conn, "items", column, ddl)
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
         # notify_service moved to add-on-configuration-only (settings.py) -
         # a value saved here from an older version would otherwise go on
@@ -121,16 +146,55 @@ def init_db() -> None:
             )
             """
         )
+        _ensure_column(conn, "barcode_cache", "location", "location TEXT")
+        _ensure_column(conn, "barcode_cache", "opened_days", "opened_days INTEGER")
+        conn.execute("""CREATE TABLE IF NOT EXISTS item_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, item_id INTEGER NOT NULL,
+            barcode TEXT, name TEXT NOT NULL, category TEXT, outcome TEXT NOT NULL,
+            created_at TEXT NOT NULL)""")
 
 
-def bucket_for(expiry_date: str | None, notify_days_before: int) -> str:
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def effective_date(item: dict) -> str | None:
+    if item.get("location") == "freezer":
+        return None
+    candidates = []
+    defrosted = _parse_date(item.get("defrosted_at"))
+    expiry = _parse_date(item.get("expiry_date"))
+    if defrosted:
+        candidates.append((date.fromisoformat(defrosted) + timedelta(days=1)).isoformat())
+    elif expiry:
+        candidates.append(expiry)
+    opened = _parse_date(item.get("opened_at"))
+    try:
+        days = int(item.get("use_within_days"))
+    except (TypeError, ValueError):
+        days = 0
+    if opened and days > 0:
+        candidates.append((date.fromisoformat(opened) + timedelta(days=days)).isoformat())
+    return min(candidates) if candidates else None
+
+
+def bucket_for(expiry_date: str | dict | None, notify_days_before: int) -> str:
     """Which urgency bucket an expiry date falls into today. `notify_days_before`
     is the same threshold the notifier uses, so the dashboard's "expiring
     soon" grouping always matches what triggers a notification."""
+    if isinstance(expiry_date, dict):
+        if expiry_date.get("location") == "freezer":
+            return BUCKET_FROZEN
+        expiry_date = effective_date(expiry_date)
     if not expiry_date:
         return BUCKET_UNKNOWN
     try:
-        days_left = (date.fromisoformat(expiry_date) - date.today()).days
+        days_left = (date.fromisoformat(expiry_date) - today()).days
     except ValueError:
         return BUCKET_UNKNOWN
     if days_left < 0:
@@ -140,11 +204,13 @@ def bucket_for(expiry_date: str | None, notify_days_before: int) -> str:
     return BUCKET_OK
 
 
-def days_left_for(expiry_date: str | None) -> int | None:
+def days_left_for(expiry_date: str | dict | None) -> int | None:
+    if isinstance(expiry_date, dict):
+        expiry_date = effective_date(expiry_date)
     if not expiry_date:
         return None
     try:
-        return (date.fromisoformat(expiry_date) - date.today()).days
+        return (date.fromisoformat(expiry_date) - today()).days
     except ValueError:
         return None
 
@@ -160,12 +226,16 @@ def add_item(
     notes: str = "",
     image_url: str = "",
     source: str = "manual",
+    count: int = 1,
+    location: str | None = None,
+    opened_at: str | None = None,
+    use_within_days: int | None = None,
 ) -> int:
     now = now_iso()
     with _connect() as conn:
         cur = conn.execute(
             "INSERT INTO items (barcode, name, brand, quantity, category, expiry_date, notes, "
-            "image_url, status, source, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "image_url, status, source, created_at, updated_at, count, location, opened_at, use_within_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 barcode,
                 name,
@@ -179,6 +249,10 @@ def add_item(
                 source,
                 now,
                 now,
+                count,
+                location,
+                opened_at,
+                use_within_days,
             ),
         )
         return cur.lastrowid
@@ -190,14 +264,18 @@ def list_items(statuses: list[str] | None = None) -> list[dict]:
             placeholders = ",".join("?" for _ in statuses)
             rows = conn.execute(
                 f"SELECT * FROM items WHERE status IN ({placeholders}) "
-                "ORDER BY (expiry_date IS NULL), expiry_date ASC, created_at DESC",
+                "ORDER BY created_at DESC",
                 tuple(statuses),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM items ORDER BY (expiry_date IS NULL), expiry_date ASC, created_at DESC"
+                "SELECT * FROM items ORDER BY created_at DESC"
             ).fetchall()
-        return [dict(r) for r in rows]
+        items = [dict(r) for r in rows]
+        return sorted(
+            items,
+            key=lambda item: (effective_date(item) is None, effective_date(item) or "", -item["id"]),
+        )
 
 
 def get_item(item_id: int) -> dict | None:
@@ -224,8 +302,103 @@ def update_item(item_id: int, **fields) -> None:
         conn.execute(f"UPDATE items SET {assignments} WHERE id = ?", (*fields.values(), item_id))
 
 
-def consume_item(item_id: int) -> None:
-    update_item(item_id, status=STATUS_CONSUMED, consumed_at=now_iso())
+def transition_item(item_id: int, *, opened: bool | None = None, location: str | None = None,
+                    use_within_days: int | None = None, opened_at: str | None = None) -> dict | None:
+    item = get_item(item_id)
+    if not item:
+        return None
+    fields = {}
+    if opened is not None:
+        fields["opened_at"] = (opened_at or today().isoformat()) if opened else None
+        fields["use_within_days"] = use_within_days if opened else None
+    if location is not None:
+        previous = item.get("location") or ""
+        fields["location"] = location or None
+        if location == "freezer":
+            fields["defrosted_at"] = None
+        elif previous == "freezer":
+            fields["defrosted_at"] = today().isoformat()
+    if fields:
+        update_item(item_id, **fields)
+    return get_item(item_id)
+
+
+def add_one(item_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM items WHERE id=? AND status=?", (item_id, STATUS_ACTIVE)).fetchone()
+        if not row:
+            return None
+        if row["count"] >= 99:
+            return None
+        conn.execute("UPDATE items SET count=count+1,updated_at=? WHERE id=?", (now_iso(), row["id"]))
+        return dict(conn.execute("SELECT * FROM items WHERE id=?", (row["id"],)).fetchone())
+
+
+def stats() -> dict:
+    current = today().replace(day=1)
+    previous = (current - timedelta(days=1)).replace(day=1)
+    following = (current.replace(day=28) + timedelta(days=4)).replace(day=1)
+    with _connect() as conn:
+        rows = conn.execute("SELECT outcome,created_at,name FROM item_events").fetchall()
+    zone = local_zone()
+
+    def event_date(row):
+        try:
+            value = datetime.fromisoformat(row["created_at"])
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=zone)
+            return value.astimezone(zone).date()
+        except (TypeError, ValueError):
+            return None
+
+    def counts(start, end):
+        selected = [r for r in rows if (event_date(r) is not None and start <= event_date(r) < end)]
+        return {outcome: sum(r["outcome"] == outcome for r in selected) for outcome in ("eaten", "binned")}
+    month_rows = [r for r in rows if event_date(r) is not None and current <= event_date(r) < following]
+    names = {}
+    for row in month_rows:
+        if row["outcome"] == "binned":
+            names[row["name"]] = names.get(row["name"], 0) + 1
+    top = sorted(names.items(), key=lambda pair: (-pair[1], pair[0]))[:5]
+    return {"this_month": counts(current, following),
+            "last_month": counts(previous, current), "most_binned": [{"name": n, "count": c} for n, c in top]}
+
+
+def finish_item(item_id: int, outcome: str) -> int | None:
+    if outcome not in {"eaten", "binned"}:
+        return None
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM items WHERE id = ? AND status = ?", (item_id, STATUS_ACTIVE)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        cur = conn.execute(
+            "INSERT INTO item_events (item_id, barcode, name, category, outcome, created_at) VALUES (?,?,?,?,?,?)",
+            (item_id, item.get("barcode"), item["name"], item.get("category"), outcome, now_iso()),
+        )
+        if item["count"] <= 1:
+            conn.execute("UPDATE items SET count=1,status=?,consumed_at=?,consumed_outcome=?,updated_at=? WHERE id=?",
+                         (STATUS_CONSUMED, now_iso(), outcome, now_iso(), item_id))
+        else:
+            conn.execute("UPDATE items SET count=count-1,updated_at=? WHERE id=?", (now_iso(), item_id))
+        return cur.lastrowid
+
+
+def undo_event(event_id: int) -> bool:
+    with _connect() as conn:
+        event = conn.execute("SELECT * FROM item_events WHERE id=?", (event_id,)).fetchone()
+        if not event:
+            return False
+        row = conn.execute("SELECT * FROM items WHERE id=?", (event["item_id"],)).fetchone()
+        if row:
+            item = dict(row)
+            if item["status"] == STATUS_CONSUMED:
+                conn.execute("UPDATE items SET status=?,count=1,consumed_at=NULL,consumed_outcome=NULL,updated_at=? WHERE id=?",
+                             (STATUS_ACTIVE, now_iso(), item["id"]))
+            else:
+                conn.execute("UPDATE items SET count=count+1,updated_at=? WHERE id=?", (now_iso(), item["id"]))
+        conn.execute("DELETE FROM item_events WHERE id=?", (event_id,))
+        return True
 
 
 def delete_item(item_id: int) -> None:
@@ -400,6 +573,14 @@ def cache_barcode(barcode: str, product: dict) -> None:
                 now_iso(),
             ),
         )
+
+
+def update_cached_barcode(barcode: str, **fields) -> None:
+    if not fields:
+        return
+    with _connect() as conn:
+        conn.execute("UPDATE barcode_cache SET " + ",".join(f"{key}=?" for key in fields) + " WHERE barcode=?",
+                     (*fields.values(), barcode))
 
 
 def get_state(key: str, default: str | None = None) -> str | None:

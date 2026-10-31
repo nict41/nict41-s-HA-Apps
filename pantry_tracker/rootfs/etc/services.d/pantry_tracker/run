@@ -7,6 +7,7 @@ declare notify_service
 declare notify_days_before
 declare notify_repeat_hours
 declare check_interval_hours
+declare notify_hour
 declare vision_api_base
 declare vision_api_key
 declare vision_model
@@ -15,6 +16,7 @@ notify_service=$(bashio::config 'notify_service')
 notify_days_before=$(bashio::config 'notify_days_before')
 notify_repeat_hours=$(bashio::config 'notify_repeat_hours')
 check_interval_hours=$(bashio::config 'check_interval_hours')
+notify_hour=$(bashio::config 'notify_hour')
 vision_api_base=$(bashio::config 'vision_api_base')
 vision_api_key=$(bashio::config 'vision_api_key')
 vision_model=$(bashio::config 'vision_model')
@@ -23,6 +25,7 @@ export NOTIFY_SERVICE="${notify_service}"
 export NOTIFY_DAYS_BEFORE="${notify_days_before}"
 export NOTIFY_REPEAT_HOURS="${notify_repeat_hours}"
 export CHECK_INTERVAL_HOURS="${check_interval_hours}"
+export NOTIFY_HOUR="${notify_hour}"
 export VISION_API_BASE="${vision_api_base}"
 export VISION_API_KEY="${vision_api_key}"
 export VISION_MODEL="${vision_model}"

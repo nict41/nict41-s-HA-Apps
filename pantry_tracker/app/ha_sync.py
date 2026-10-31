@@ -1,6 +1,6 @@
-"""Exposes pantry items to Home Assistant as sensor entities, and sends a
-direct notification through a configured `notify.*` service when an item
-newly becomes due. Both use the add-on's own Supervisor-granted access to
+"""Exposes pantry items to Home Assistant as sensor entities, and sends
+one summary notification through a configured `notify.*` service when
+items become due. Both use the add-on's own Supervisor-granted access to
 the Home Assistant Core API (`homeassistant_api: true` in config.yaml), so
 no MQTT setup or extra credentials are needed - the same pattern Parcel
 Tracker uses elsewhere in this repo.
@@ -11,10 +11,9 @@ exists so automations can trigger on a specific item's state, the same
 reasoning Parcel Tracker applies to per-parcel entities.
 
 States set this way aren't registered with any integration, so they don't
-survive a Home Assistant restart on their own - but since every check cycle
-re-sets them, they reappear within `check_interval_hours` of HA coming back
-up (sooner if the dashboard is used, since every item mutation re-syncs
-immediately).
+survive a Home Assistant restart on their own - but a separate five-minute
+job checks the summary sensor after startup and republishes the entities if
+Home Assistant lost them.
 """
 
 import json
@@ -40,15 +39,33 @@ _BUCKET_ICONS = {
     db.BUCKET_EXPIRING_SOON: "mdi:clock-alert-outline",
     db.BUCKET_EXPIRED: "mdi:alert-circle",
     db.BUCKET_UNKNOWN: "mdi:help-circle-outline",
+    db.BUCKET_FROZEN: "mdi:snowflake",
 }
 
-# Buckets worth alerting on. BUCKET_OK and BUCKET_UNKNOWN never notify - an
-# item with no known expiry date has nothing to warn about yet.
+# Buckets worth alerting on. OK, unknown, and frozen items have no current
+# use-by warning to send.
 _NOTIFIABLE_BUCKETS = (db.BUCKET_EXPIRING_SOON, db.BUCKET_EXPIRED)
 
 
 def configured() -> bool:
     return bool(SUPERVISOR_TOKEN)
+
+
+def summary_state_exists() -> bool | None:
+    """Checks whether the summary entity survived a Home Assistant restart."""
+    if not configured():
+        return None
+    req = urllib.request.Request(
+        f"{_BASE_URL}/states/{_SUMMARY_ENTITY_ID}",
+        headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10):
+            return True
+    except urllib.error.HTTPError as exc:
+        return False if exc.code == 404 else None
+    except (urllib.error.URLError, TimeoutError):
+        return None
 
 
 def _slugify(value: str) -> str:
@@ -88,8 +105,11 @@ def _item_state(item: dict, bucket: str) -> dict:
             "brand": item["brand"],
             "quantity": item["quantity"],
             "category": item["category"],
-            "expiry_date": item["expiry_date"],
-            "days_left": db.days_left_for(item["expiry_date"]),
+            "expiry_date": db.effective_date(item),
+            "printed_date": item["expiry_date"],
+            "location": item.get("location"),
+            "count": item.get("count", 1),
+            "days_left": db.days_left_for(item),
             "barcode": item["barcode"],
         },
     }
@@ -104,13 +124,17 @@ def _summary_state(items_with_buckets: list[tuple[dict, str]]) -> dict:
             "expiring_soon": sum(1 for _, b in items_with_buckets if b == db.BUCKET_EXPIRING_SOON),
             "expired": sum(1 for _, b in items_with_buckets if b == db.BUCKET_EXPIRED),
             "needs_date": sum(1 for _, b in items_with_buckets if b == db.BUCKET_UNKNOWN),
+            "frozen": sum(1 for _, b in items_with_buckets if b == db.BUCKET_FROZEN),
             "items": [
                 {
                     "entity_id": entity_id_for(item),
                     "name": item["name"],
                     "brand": item["brand"],
-                    "expiry_date": item["expiry_date"],
-                    "days_left": db.days_left_for(item["expiry_date"]),
+                    "expiry_date": db.effective_date(item),
+                    "printed_date": item["expiry_date"],
+                    "location": item.get("location"),
+                    "count": item.get("count", 1),
+                    "days_left": db.days_left_for(item),
                     "status": bucket,
                 }
                 for item, bucket in items_with_buckets
@@ -127,7 +151,7 @@ def sync(active_items: list[dict]) -> None:
         return
 
     notify_days_before = settings.get_int("notify_days_before")
-    items_with_buckets = [(item, db.bucket_for(item["expiry_date"], notify_days_before)) for item in active_items]
+    items_with_buckets = [(item, db.bucket_for(item, notify_days_before)) for item in active_items]
 
     _request("POST", f"/states/{_SUMMARY_ENTITY_ID}", _summary_state(items_with_buckets))
 
@@ -144,21 +168,6 @@ def sync(active_items: list[dict]) -> None:
     db.set_state(_SYNCED_IDS_STATE_KEY, json.dumps(sorted(current_ids)))
 
 
-def _notify_message(item: dict, bucket: str) -> tuple[str, str]:
-    days_left = db.days_left_for(item["expiry_date"])
-    label = f"{item['name']} ({item['brand']})" if item["brand"] else item["name"]
-    if bucket == db.BUCKET_EXPIRED:
-        overdue = abs(days_left) if days_left is not None else 0
-        return (
-            "Pantry item expired",
-            f"{label} expired {overdue} day(s) ago ({item['expiry_date']}).",
-        )
-    return (
-        "Pantry item expiring soon",
-        f"{label} expires in {days_left} day(s) ({item['expiry_date']}).",
-    )
-
-
 def _pantry_panel_path() -> str:
     """This add-on's sidebar panel, on its Pantry tab. Home Assistant
     registers the panel at /<slug>, and passes anything after that to the
@@ -173,34 +182,55 @@ def _pantry_panel_path() -> str:
 def _due_for_notification(item: dict, bucket: str) -> bool:
     last_bucket = item.get("last_notified_bucket")
     last_at = item.get("last_notified_at")
+    snoozed = item.get("snoozed_until")
     if last_bucket != bucket or not last_at:
         # Either never notified, or the item just moved into a worse bucket
         # (e.g. expiring_soon -> expired) - always worth a fresh alert.
         return True
+    if snoozed and snoozed >= db.today().isoformat():
+        return False
     repeat_hours = settings.get_int("notify_repeat_hours")
     elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last_at)
-    return elapsed >= timedelta(hours=repeat_hours)
+    return elapsed >= timedelta(hours=repeat_hours) - timedelta(hours=1)
 
 
-def notify_if_due(item: dict, bucket: str) -> bool:
-    """Sends a notification through the configured `notify.*` service if
-    this item is in an alertable bucket and is due one (new bucket, or a
-    repeat reminder once `notify_repeat_hours` has passed). Returns whether
-    a notification was sent."""
+def notify_summary(items: list[dict]) -> int:
     service = settings.notify_service()
-    if not service or "." not in service or bucket not in _NOTIFIABLE_BUCKETS:
-        return False
-    if not _due_for_notification(item, bucket):
-        return False
-
-    domain, _, service_name = service.partition(".")
-    title, message = _notify_message(item, bucket)
+    if not service or "." not in service:
+        return 0
+    due = []
+    for item in items:
+        bucket = db.bucket_for(item, settings.get_int("notify_days_before"))
+        if bucket in _NOTIFIABLE_BUCKETS and _due_for_notification(item, bucket):
+            due.append((item, bucket))
+    if not due:
+        return 0
+    grouped = {"Expired": [], "Today": [], "Tomorrow": []}
+    for item, bucket in due:
+        days = db.days_left_for(item)
+        if bucket == db.BUCKET_EXPIRED:
+            label = "Expired"
+        elif days == 0:
+            label = "Today"
+        elif days == 1:
+            label = "Tomorrow"
+        else:
+            label = f"In {days} days"
+        name = item["name"] + (f" ×{item.get('count', 1)}" if item.get("count", 1) > 1 else "")
+        grouped.setdefault(label, []).append(name)
+    order = {"Expired": 0, "Today": 1, "Tomorrow": 2}
+    labels = sorted(grouped, key=lambda label: (order.get(label, 3), int(label[3:-5]) if label.startswith("In ") else 0))
+    message = " ".join(f"{label}: {', '.join(grouped[label])}." for label in labels if grouped[label])
     path = _pantry_panel_path()
-    _request(
-        "POST",
-        f"/services/{domain}/{service_name}",
-        # clickAction is the Android companion app's key, url the iOS one.
-        {"title": title, "message": message, "data": {"clickAction": path, "url": path}},
-    )
-    db.mark_notified(item["id"], bucket)
-    return True
+    ids = [str(item["id"]) for item, _ in due]
+    actions = ([{"action": f"PANTRY_EATEN_{ids[0]}", "title": "Eaten"},
+                {"action": f"PANTRY_BINNED_{ids[0]}", "title": "Binned"},
+                {"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"}]
+               if len(ids) == 1 else [{"action": f"PANTRY_SNOOZE_{','.join(ids)}", "title": "Snooze"}])
+    domain, _, name = service.partition(".")
+    ok = _request("POST", f"/services/{domain}/{name}", {"title": f"{len(due)} item{'s' if len(due) != 1 else ''} to use",
+        "message": message, "data": {"tag": "pantry-summary", "clickAction": path, "url": path, "actions": actions}})
+    if ok:
+        for item, bucket in due:
+            db.mark_notified(item["id"], bucket)
+    return 1 if ok else 0

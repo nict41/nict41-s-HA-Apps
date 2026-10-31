@@ -24,6 +24,7 @@ from io import BytesIO
 from PIL import Image, ImageOps
 
 import settings
+import db
 
 # Long enough for a model that has to load first, which was seen taking most
 # of a minute on a shared GPU.
@@ -181,13 +182,13 @@ def _has_printed_year(text: str) -> bool:
 
 
 def _next_year_if_recent(parsed: date) -> date | None:
-    if (date.today() - parsed).days <= _MAX_PAST_DAYS:
+    if (db.today() - parsed).days <= _MAX_PAST_DAYS:
         return None
     try:
         repaired = date(parsed.year + 1, parsed.month, parsed.day)
     except ValueError:
         return None
-    if (date.today() - repaired).days <= _NO_YEAR_GRACE_DAYS:
+    if (db.today() - repaired).days <= _NO_YEAR_GRACE_DAYS:
         return repaired
     return None
 
@@ -227,7 +228,7 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
             score = SCORE_LABELLED if labelled_here else (SCORE_PREVIOUS_LABEL if label_previous else 0)
             if re.search(r"[./-]|\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b", line, re.I): score += SCORE_SEPARATORS
             if re.search(rf"(?<![:\d])(?:{parsed.year}|{parsed.year % 100:02d})(?![:\d])", line): score += SCORE_PRINTED_YEAR
-            if parsed < date.today(): score -= PENALTY_PAST
+            if parsed < db.today(): score -= PENALTY_PAST
             if re.search(r"(?<!\d)\d{6}(?!\d)", line) and not (labelled_here or label_previous): score -= PENALTY_COMPACT
             if re.search(r"\b\d{1,2}:\d{2}\b", line) and not re.search(r"\b\d{1,2}\s+[A-Z]{3}\s+\d{1,2}:\d{2}\b", line, re.I): score -= PENALTY_TIME
             if re.search(r"\b(?:L|LOT)\s*\w*\d", line, re.I): score -= PENALTY_BATCH
@@ -287,13 +288,13 @@ def _month_year_date(month: int, year: int) -> date | None:
 
 
 def _within_month_year_window(parsed: date) -> bool:
-    return parsed <= date(date.today().year + _MAX_FUTURE_YEARS, 12, 31)
+    return parsed <= date(db.today().year + _MAX_FUTURE_YEARS, 12, 31)
 
 
 def _resolve_unknown_year(month: int, day: int) -> int:
     """The year of the nearest occurrence of a day and month that isn't
     long past. Scans forward a few years to also cover 29 February."""
-    earliest = date.today() - timedelta(days=_NO_YEAR_GRACE_DAYS)
+    earliest = db.today() - timedelta(days=_NO_YEAR_GRACE_DAYS)
     for year in range(earliest.year, earliest.year + 9):
         try:
             if date(year, month, day) >= earliest:
@@ -304,7 +305,7 @@ def _resolve_unknown_year(month: int, day: int) -> int:
 
 
 def _read_unseparated_date(text: str) -> date | None:
-    today = date.today()
+    today = db.today()
     earliest = today - timedelta(days=_MAX_PAST_DAYS)
     latest = today + timedelta(days=_MAX_FUTURE_YEARS * 365)
     for pattern in (_SPACED_DATE_RE, _COMPACT_DATE_RE):
@@ -369,7 +370,7 @@ def _parse_date_text(text: str) -> str | None:
     parsed = _read_date(text.strip())
     if parsed is None:
         return None
-    if (date.today() - parsed).days > _MAX_PAST_DAYS:
+    if (db.today() - parsed).days > _MAX_PAST_DAYS:
         try:
             parsed = date(_resolve_unknown_year(parsed.month, parsed.day), parsed.month, parsed.day)
         except ValueError:
@@ -378,7 +379,7 @@ def _parse_date_text(text: str) -> str | None:
 
 
 def _is_recent_or_future(parsed: date) -> bool:
-    return (date.today() - parsed).days <= _MAX_PAST_DAYS
+    return (db.today() - parsed).days <= _MAX_PAST_DAYS
 
 
 def parse_transcript(text: str) -> str | None:

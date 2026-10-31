@@ -6,7 +6,8 @@ RUN apk add --no-cache \
         python3 \
         py3-pip \
         zbar \
-        curl
+        curl \
+        tzdata
 
 COPY app/requirements.txt /app/requirements.txt
 # --break-system-packages: Alpine's python3 marks itself "externally managed"

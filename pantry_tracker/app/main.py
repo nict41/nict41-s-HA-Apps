@@ -27,8 +27,12 @@ import lookup
 import photos
 import settings
 import vision
+import tidy
+import ha_events
 
 _CHECK_JOB_ID = "check_cycle"
+_REPUBLISH_JOB_ID = "republish_after_restart"
+_NOTIFY_JOB_ID = "daily_notification"
 _IMAGE_BACKFILL_STATE_KEY = "image_backfill_done"
 # Open Food Facts asks clients to keep product lookups well under 100/minute.
 _BACKFILL_LOOKUP_DELAY_SECONDS = 1
@@ -49,24 +53,16 @@ _CLIENT_TIMING_PATHS = {"steady", "live", "shutter"}
 
 db.init_db()
 
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone=db.local_zone())
 
 
 def run_check_cycle() -> None:
-    """Re-evaluates every active item's urgency, sends any notifications
-    that are due, and pushes current state to Home Assistant. Runs on a
-    schedule (`check_interval_hours`) and can also be triggered on demand
-    from the dashboard's "Check now" action."""
+    """Sends one due-item summary and pushes current state to Home Assistant.
+    Runs daily at `notify_hour` and on demand from "Check now"."""
     items = db.list_items([db.STATUS_ACTIVE])
-    notify_days_before = settings.get_int("notify_days_before")
+    notified = ha_sync.notify_summary(items)
 
-    notified = 0
-    for item in items:
-        bucket = db.bucket_for(item["expiry_date"], notify_days_before)
-        if ha_sync.notify_if_due(item, bucket):
-            notified += 1
-
-    # Re-fetch: notify_if_due() may have updated last_notified_* on some
+    # Re-fetch: notify_summary() may have updated last_notified_* on some
     # items, and the summary/entity sync doesn't need that field, but
     # keeping the list fresh avoids syncing stale in-memory copies.
     items = db.list_items([db.STATUS_ACTIVE])
@@ -74,6 +70,12 @@ def run_check_cycle() -> None:
 
     db.set_state("last_check_at", db.now_iso())
     db.set_state("last_check_summary", f"checked {len(items)} item(s), sent {notified} notification(s)")
+
+
+def run_republish_check() -> None:
+    """Republishes entities when Home Assistant has lost transient states."""
+    if ha_sync.summary_state_exists() is False:
+        ha_sync.sync(db.list_items([db.STATUS_ACTIVE]))
 
 
 def _sync_now() -> None:
@@ -146,17 +148,33 @@ def run_pending_date_extractions() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    tidy_existing_data()
     scheduler.add_job(
-        run_check_cycle,
+        lambda: ha_sync.sync(db.list_items([db.STATUS_ACTIVE])),
         "interval",
         hours=settings.get_int("check_interval_hours"),
         next_run_time=datetime.now(),
         id=_CHECK_JOB_ID,
     )
+    scheduler.add_job(run_republish_check, "interval", minutes=5, next_run_time=datetime.now(), id=_REPUBLISH_JOB_ID)
+    scheduler.add_job(run_check_cycle, "cron", hour=settings.get_int("notify_hour"), id=_NOTIFY_JOB_ID,
+                      misfire_grace_time=3600, coalesce=True)
+    print(
+        f"[pantry_tracker] Daily summary at {settings.get_int('notify_hour'):02d}:00 {db.local_zone()}",
+        flush=True,
+    )
     scheduler.add_job(run_image_backfill, next_run_time=datetime.now())
     scheduler.add_job(run_pending_date_extractions, next_run_time=datetime.now())
     scheduler.start()
+    stop_events = threading.Event()
+    event_thread = None
+    if ha_sync.configured():
+        event_thread = threading.Thread(target=ha_events.run, args=(stop_events,), daemon=True)
+        event_thread.start()
     yield
+    stop_events.set()
+    if event_thread is not None:
+        event_thread.join(timeout=2)
     scheduler.shutdown(wait=False)
 
 
@@ -170,6 +188,37 @@ def _reschedule_check_job() -> None:
         scheduler.reschedule_job(_CHECK_JOB_ID, trigger="interval", hours=settings.get_int("check_interval_hours"))
     except JobLookupError:
         pass
+
+
+def tidy_existing_data() -> None:
+    key = "tidy_names_013_done"
+    with db._connect() as conn:
+        if conn.execute("SELECT 1 FROM app_state WHERE key=?", (key,)).fetchone():
+            return
+        for item in conn.execute("SELECT id,name,brand FROM items").fetchall():
+            conn.execute(
+                "UPDATE items SET name=?,brand=? WHERE id=?",
+                (tidy.tidy_name(item["name"]), tidy.tidy_name(item["brand"]) if item["brand"] is not None else None, item["id"]),
+            )
+        for cached in conn.execute("SELECT barcode,name,brand FROM barcode_cache").fetchall():
+            conn.execute(
+                "UPDATE barcode_cache SET name=?,brand=? WHERE barcode=?",
+                (tidy.tidy_name(cached["name"] or ""), tidy.tidy_name(cached["brand"]) if cached["brand"] is not None else None, cached["barcode"]),
+            )
+        conn.execute("INSERT INTO app_state (key,value) VALUES (?,?)", (key, "1"))
+
+
+def _reschedule_notify_job() -> None:
+    if not scheduler.running:
+        return
+    try:
+        scheduler.reschedule_job(_NOTIFY_JOB_ID, trigger="cron", hour=settings.get_int("notify_hour"))
+        print(
+            f"[pantry_tracker] Daily summary at {settings.get_int('notify_hour'):02d}:00 {db.local_zone()}",
+            flush=True,
+        )
+    except JobLookupError:
+        return
 
 
 class _StaticFiles(StaticFiles):
@@ -206,16 +255,36 @@ def _display_image_url(barcode: str | None, image_url: str | None) -> str:
 
 def _item_view(item: dict) -> dict:
     notify_days_before = settings.get_int("notify_days_before")
-    bucket = db.bucket_for(item["expiry_date"], notify_days_before)
+    bucket = db.bucket_for(item, notify_days_before)
+    cached = db.get_cached_barcode(item.get("barcode")) if item.get("barcode") else None
     return {
         **item,
         "bucket": bucket,
-        "days_left": db.days_left_for(item["expiry_date"]),
+        "days_left": db.days_left_for(item),
+        "effective_date": db.effective_date(item),
+        "group": tidy.food_group(item.get("category", ""), item.get("name", "")),
+        "opened_days": item.get("use_within_days") or (cached.get("opened_days") if cached else None),
         "display_image_url": _display_image_url(item.get("barcode"), item.get("image_url")),
         "has_date_photo": bool(item.get("has_date_photo")),
         "date_extraction_pending": bool(item.get("date_extraction_pending")),
         "date_candidates": json.loads(item.get("date_candidates") or "[]"),
     }
+
+
+def _cache_item_preference(item: dict, **fields) -> None:
+    """Stores a location or opened-days choice even when no lookup cache exists yet."""
+    barcode = item.get("barcode")
+    if not barcode:
+        return
+    if not db.get_cached_barcode(barcode):
+        db.cache_barcode(barcode, {
+            "name": item.get("name", ""),
+            "brand": item.get("brand", ""),
+            "quantity": item.get("quantity", ""),
+            "category": item.get("category", ""),
+            "image_url": item.get("image_url", ""),
+        })
+    db.update_cached_barcode(barcode, **fields)
 
 
 def _valid_ocr_date(value: str) -> str | None:
@@ -276,11 +345,15 @@ async def lookup_product(code: str):
             "category": cached["category"],
             "image_url": cached["image_url"],
             "display_image_url": _display_image_url(code, cached["image_url"]),
+            **({"location": cached.get("location")} if cached.get("location") else {}),
+            **({"opened_days": cached.get("opened_days")} if cached.get("opened_days") else {}),
         }
 
     product = await run_in_threadpool(lookup.lookup_barcode, code)
     if not product:
         return {"found": False, "display_image_url": _display_image_url(code, "")}
+    product["name"] = tidy.tidy_name(product.get("name", ""))
+    product["brand"] = tidy.tidy_name(product.get("brand", ""))
     db.cache_barcode(code, product)
     return {
         "found": True,
@@ -317,6 +390,15 @@ async def vision_configured():
 async def list_items():
     items = db.list_items([db.STATUS_ACTIVE])
     return {"items": [_item_view(i) for i in items]}
+
+
+@app.get("/api/barcodes/{code}/active")
+async def active_barcode_match(code: str):
+    matches = [item for item in db.list_items([db.STATUS_ACTIVE]) if item.get("barcode") == code]
+    if not matches:
+        return {"item": None}
+    item = max(matches, key=lambda value: (value["created_at"], value["id"]))
+    return {"item": _item_view(item)}
 
 
 @app.get("/api/items/{item_id}")
@@ -387,6 +469,10 @@ async def add_item(
     notes: str = Form(""),
     image_url: str = Form(""),
     source: str = Form("manual"),
+    count: int = Form(1),
+    location: str = Form(""),
+    opened_at: str = Form(""),
+    use_within_days: str = Form(""),
     date_photo: UploadFile | None = File(None),
     ocr_date: str = Form(""),
     ocr_raw: str = Form(""),
@@ -395,6 +481,14 @@ async def add_item(
     name = name.strip()
     if not name:
         return JSONResponse({"error": "A product name is required."}, status_code=400)
+    try:
+        opened_days = int(use_within_days) if use_within_days else None
+    except ValueError:
+        opened_days = 0
+    if (not 1 <= count <= 99 or location not in {"", "fridge", "cupboard", "freezer"}
+            or (opened_days is not None and not 1 <= opened_days <= 365)
+            or bool(opened_at) != (opened_days is not None)):
+        return JSONResponse({"error": "Invalid count or location."}, status_code=400)
     barcode = barcode.strip()
     brand = brand.strip()
     quantity = quantity.strip()
@@ -410,7 +504,14 @@ async def add_item(
         notes=notes.strip(),
         image_url=image_url,
         source=source.strip() or "manual",
+        count=count,
+        location=None,
+        opened_at=None,
+        use_within_days=None,
     )
+    if location or opened_at or opened_days is not None:
+        db.transition_item(item_id, location=location, opened=bool(opened_at),
+                          opened_at=opened_at or None, use_within_days=opened_days)
     # Whatever was confirmed here - corrected or not - becomes the new
     # cached product for this barcode, so a garbled or wrong Open Food
     # Facts entry (crowd-sourced data is sometimes just bad) only has to
@@ -418,6 +519,10 @@ async def add_item(
     # corrected version straight from the cache instead of the original.
     if barcode:
         db.cache_barcode(barcode, {"name": name, "brand": brand, "quantity": quantity, "category": category, "image_url": image_url})
+        if location:
+            db.update_cached_barcode(barcode, location=location)
+        if opened_days is not None:
+            db.update_cached_barcode(barcode, opened_days=opened_days)
     # A use-by date photo captured before the item existed (the normal case
     # when adding something new) is attached here instead - reading it is
     # queued in the background rather than making "Add to pantry" wait on
@@ -477,6 +582,10 @@ async def edit_item(
     expiry_date: str = Form(""),
     notes: str = Form(""),
     date_chosen: str = Form(""),
+    count: int | None = Form(None),
+    location: str | None = Form(None),
+    opened_at: str | None = Form(None),
+    use_within_days: str | None = Form(None),
 ):
     name = name.strip()
     if not name:
@@ -484,6 +593,17 @@ async def edit_item(
     existing = db.get_item(item_id)
     if not existing:
         return JSONResponse({"error": "Item not found."}, status_code=404)
+    if ((count is not None and not 1 <= count <= 99)
+            or (location is not None and location not in {"", "fridge", "cupboard", "freezer"})):
+        return JSONResponse({"error": "Invalid count or location."}, status_code=400)
+    try:
+        days = int(use_within_days) if use_within_days else None
+    except ValueError:
+        days = 0
+    if use_within_days is not None and days is not None and not 1 <= days <= 365:
+        return JSONResponse({"error": "Use within days must be between 1 and 365."}, status_code=400)
+    if opened_at is not None and use_within_days is not None and bool(opened_at) != (days is not None):
+        return JSONResponse({"error": "Opened date and use-within days must be set together."}, status_code=400)
     brand = brand.strip()
     quantity = quantity.strip()
     category = category.strip()
@@ -501,8 +621,20 @@ async def edit_item(
         category=category,
         expiry_date=expiry_date,
         notes=notes.strip(),
+        **({"count": count} if count is not None else {}),
         **confidence,
     )
+    if location is not None or opened_at is not None or use_within_days is not None:
+        prior_location = existing.get("location") or ""
+        new_location = location if location is not None else prior_location
+        if opened_at is not None or use_within_days is not None:
+            is_opened = bool(opened_at) and (days is not None)
+            opened_value = opened_at or None
+        else:
+            is_opened = None
+            opened_value = None
+        db.transition_item(item_id, opened=is_opened, location=new_location,
+                           use_within_days=days, opened_at=opened_value)
     # Same reasoning as add_item: a correction made here (e.g. fixing a
     # garbled Open Food Facts name after the fact, from the Pantry tab
     # instead of at add-time) should also fix this barcode's cached
@@ -512,15 +644,66 @@ async def edit_item(
             existing["barcode"],
             {"name": name, "brand": brand, "quantity": quantity, "category": category, "image_url": existing["image_url"] or ""},
         )
+        if location:
+            db.update_cached_barcode(existing["barcode"], location=location)
+        if days is not None:
+            db.update_cached_barcode(existing["barcode"], opened_days=days)
     await run_in_threadpool(_sync_now)
     return _item_view(db.get_item(item_id))
 
 
-@app.post("/api/items/{item_id}/consume")
-async def consume_item(item_id: int):
-    if not db.get_item(item_id):
+@app.post("/api/items/{item_id}/finish")
+async def finish_item(item_id: int, outcome: str = Form(...)):
+    if outcome not in {"eaten", "binned"}:
+        return JSONResponse({"error": "Invalid outcome."}, status_code=400)
+    event_id = db.finish_item(item_id, outcome)
+    if event_id is None:
+        return JSONResponse({"error": "Item not found or no longer active."}, status_code=404)
+    await run_in_threadpool(_sync_now)
+    return {"ok": True, "event_id": event_id}
+
+
+@app.post("/api/items/{item_id}/opened")
+async def set_opened(item_id: int, days: int | None = Form(None), opened: bool = Form(True)):
+    if opened and (days is None or not 1 <= days <= 365):
+        return JSONResponse({"error": "Use within days must be between 1 and 365."}, status_code=400)
+    item = db.transition_item(item_id, opened=opened, use_within_days=days)
+    if not item:
         return JSONResponse({"error": "Item not found."}, status_code=404)
-    db.consume_item(item_id)
+    if opened:
+        _cache_item_preference(item, opened_days=days)
+    await run_in_threadpool(_sync_now)
+    return _item_view(item)
+
+
+@app.post("/api/items/{item_id}/location")
+async def set_location(item_id: int, location: str = Form(...)):
+    if location not in {"", "fridge", "cupboard", "freezer"}:
+        return JSONResponse({"error": "Invalid location."}, status_code=400)
+    item = db.transition_item(item_id, location=location)
+    if not item:
+        return JSONResponse({"error": "Item not found."}, status_code=404)
+    _cache_item_preference(item, location=location or None)
+    await run_in_threadpool(_sync_now)
+    return _item_view(item)
+
+
+@app.post("/api/items/{item_id}/add-one")
+async def add_one(item_id: int):
+    item = db.get_item(item_id)
+    if not item or item["status"] != db.STATUS_ACTIVE:
+        return JSONResponse({"error": "Item not found."}, status_code=404)
+    updated = db.add_one(item_id)
+    if not updated:
+        return JSONResponse({"error": "Item count cannot exceed 99."}, status_code=400)
+    await run_in_threadpool(_sync_now)
+    return _item_view(updated)
+
+
+@app.post("/api/events/{event_id}/undo")
+async def undo_event(event_id: int):
+    if not db.undo_event(event_id):
+        return JSONResponse({"error": "Event not found."}, status_code=404)
     await run_in_threadpool(_sync_now)
     return {"ok": True}
 
@@ -542,22 +725,31 @@ async def get_settings():
     return values
 
 
+@app.get("/api/stats")
+async def get_stats():
+    return db.stats()
+
+
 @app.post("/api/settings")
 async def save_settings(
     notify_days_before: int = Form(...),
     notify_repeat_hours: int = Form(...),
     check_interval_hours: int = Form(...),
+    notify_hour: int | None = Form(None),
 ):
     # notify_service isn't settable here - see settings.py's module
     # docstring for why it's add-on-configuration-only.
-    settings.set_many(
-        {
-            "notify_days_before": notify_days_before,
-            "notify_repeat_hours": notify_repeat_hours,
-            "check_interval_hours": check_interval_hours,
-        }
-    )
+    setting_values = {
+        "notify_days_before": notify_days_before,
+        "notify_repeat_hours": notify_repeat_hours,
+        "check_interval_hours": check_interval_hours,
+    }
+    if notify_hour is not None:
+        setting_values["notify_hour"] = notify_hour
+    settings.set_many(setting_values)
     _reschedule_check_job()
+    if notify_hour is not None:
+        _reschedule_notify_job()
     return await get_settings()
 
 
@@ -570,7 +762,9 @@ async def check_now():
 @app.get("/export")
 async def export_data():
     items = [_item_view(i) for i in db.list_items()]
-    payload = json.dumps({"items": items}, indent=2)
+    with db._connect() as conn:
+        events = [dict(row) for row in conn.execute("SELECT * FROM item_events ORDER BY id").fetchall()]
+    payload = json.dumps({"items": items, "item_events": events}, indent=2)
     return Response(
         content=payload,
         media_type="application/json",

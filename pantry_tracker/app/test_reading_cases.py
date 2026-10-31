@@ -16,7 +16,7 @@ class FrozenDate(real_date):
 
 @pytest.fixture(autouse=True)
 def freeze_today(monkeypatch):
-    monkeypatch.setattr(vision, "date", FrozenDate)
+    monkeypatch.setattr(db, "today", FrozenDate.today)
 
 
 CASES = json.loads((Path(__file__).parent / "reading_cases.json").read_text())

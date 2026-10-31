@@ -44,15 +44,15 @@ from a phone-first ingress panel.
 3. Review and **add it to your pantry**. Everything is editable before
    saving, and a barcode that isn't found (or isn't scannable) just falls
    back to manual entry - nothing blocks you from tracking an item.
-4. The **Pantry** tab lists everything you're tracking, grouped into
-   Expired / Expiring soon / OK / Needs a date, with a banner linking to
-   items that still need a date and quick actions to edit,
-   mark consumed, or delete.
-5. A background check (configurable interval) re-evaluates every item and
-   sends a **Home Assistant notification** through a `notify.*` service of
-   your choice when something newly becomes due - with a repeat reminder
-   until you deal with it. Tapping the notification opens straight to the
-   **Pantry** tab.
+4. The **Pantry** tab groups items by effective use-by date and storage
+   location, with an Eat first list, search and filters. Rows let you edit,
+   mark one unit **Eaten** or **Binned**, undo a finish, record when an item
+   was opened, adjust its count, or delete it.
+5. A daily check sends one **Home Assistant summary notification** through
+   your chosen `notify.*` service for due items, with a repeat reminder
+   until you deal with them. Tapping it opens the **Pantry** tab. The
+   configurable `check_interval_hours` setting only refreshes Home
+   Assistant sensors; **Check now** sends the summary immediately.
 6. Every active item is also exposed as a Home Assistant sensor entity (no
    extra setup), so you can build your own automations or dashboards
    around your pantry too - see [Home Assistant entities](#home-assistant-entities).
@@ -63,7 +63,7 @@ from a phone-first ingress panel.
 
 Set the options below (**Settings → Add-ons → Pantry Tracker →
 Configuration**), then start the app. `notify_days_before`,
-`notify_repeat_hours` and `check_interval_hours` can be left at their
+`notify_repeat_hours`, `notify_hour` and `check_interval_hours` can be left at their
 defaults here and changed later from the app's own **Settings** tab
 without a restart - `notify_service` and the vision model connection
 live in this Configuration tab only (restart the add-on after changing
@@ -75,7 +75,8 @@ later change made here, across an app update or otherwise.
 | `notify_service` | _(blank)_ | A Home Assistant `notify.*` service, e.g. `notify.mobile_app_your_phone`. Blank disables notifications. Restart the add-on after changing it. |
 | `notify_days_before` | `3` | How many days before the use-by date counts as "expiring soon". |
 | `notify_repeat_hours` | `24` | How often to resend a reminder for an item still due. |
-| `check_interval_hours` | `12` | How often to re-check every item and send any due notifications. |
+| `notify_hour` | `8` | Hour of the day to send the daily summary notification, using the add-on's time zone. |
+| `check_interval_hours` | `12` | How often to refresh Home Assistant sensors. It does not send notifications. |
 | `vision_api_base` | _(blank)_ | Base URL of an OpenAI-compatible `/chat/completions` endpoint hosting a vision model (Open WebUI, Ollama, etc.), e.g. `http://192.168.1.50:8080/api`. Blank disables photo date extraction. |
 | `vision_api_key` | _(blank)_ | Optional bearer token for the endpoint above. |
 | `vision_model` | `glm-ocr:latest` | The vision model name to request. |
@@ -86,8 +87,7 @@ search for "notify", and use the dotted id shown there (e.g.
 
 ### 2. Open it on your phone
 
-Open the app from the Home Assistant sidebar (or add it to your phone's
-home screen for an app-like shortcut) and use the **Scan** tab - it's
+Open the app from the Home Assistant sidebar and use the **Scan** tab - it's
 built mobile-first, with big touch targets and native camera capture.
 
 ### A note on live camera access
@@ -100,14 +100,10 @@ around - over plain HTTP, live scanning is unavailable everywhere, not
 just here, and the app detects this and tells you rather than failing
 silently.
 
-Taking a photo (for either the barcode or the use-by date) doesn't need
-HTTPS and always works - but **the Home Assistant companion app's own
-built-in browser has been seen to open a generic photo picker instead of
-jumping straight to the camera**, even though a normal mobile browser
-handles the same page correctly. If that happens, the Scan tab shows a
-link to open the app directly in your phone's browser (its direct port,
-same network only) - the exact same app and data, just without that
-limitation.
+Taking a photo (for either the barcode or the use-by date) does not need
+HTTPS.
+
+Open the panel directly at `/<slug>/add` to start scanning.
 
 ## Using the app
 
@@ -132,8 +128,12 @@ limitation.
   (correct the name, quantity, category, or notes; pick a new date by
   hand, or tap **Rescan use-by date** to read it from a fresh photo the
   same way as when first adding the item - this also runs in the
-  background), **Consumed** (remove it from active tracking), and
-  **Delete**.
+  background), **Eaten** and **Binned** (one unit at a time, with a short
+  Undo action), opened-date and storage-location controls, quantity, and
+  **Delete**. The Eat first list shows up to five items due within a week.
+  Search and location or food-group filters stay in place while the list
+  refreshes. Settings includes this and last month's eaten and binned
+  totals, plus the most-binned items this month.
 - **Settings** - the notification knobs above, a **Check now** button to
   run a check immediately instead of waiting for the next scheduled one,
   status lines showing whether the vision model and Home Assistant sync
@@ -155,7 +155,7 @@ extra credentials needed.
   plus an `items` list with every active item's id, name, expiry date,
   days left, and status.
 - `sensor.pantry_tracker_<id>_<name>` - one entity per active item, state
-  is its urgency bucket (`ok`, `expiring_soon`, `expired`, or `unknown`) -
+  is its urgency bucket (`ok`, `expiring_soon`, `expired`, `unknown`, or `frozen`) -
   useful as an automation trigger for a specific item. The entity
   disappears once that item is consumed or deleted.
 
@@ -181,8 +181,8 @@ automation:
 ```
 
 States set this way aren't tied to a registered integration, so they
-briefly disappear across a Home Assistant restart until the next scheduled
-check (governed by `check_interval_hours`) re-creates them.
+briefly disappear across a Home Assistant restart until the republish job
+checks for them (within five minutes) and restores them.
 
 ## Storage
 

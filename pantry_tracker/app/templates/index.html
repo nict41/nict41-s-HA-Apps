@@ -95,7 +95,7 @@
   }
   button.danger { color: var(--expired); border-color: var(--expired); }
   button.ghost { background: transparent; }
-  .needs-date-banner { width: auto; min-height: 34px; padding: 6px 10px; margin-bottom: 10px; font-size: 13px; }
+  .needs-date-banner { width: auto; min-height: 44px; padding: 6px 10px; margin-bottom: 10px; font-size: 13px; }
   button:disabled { opacity: 0.5; cursor: default; }
   .row { display: flex; gap: 10px; }
   .row > * { flex: 1; }
@@ -130,6 +130,7 @@
   .badge.expiring_soon { background: color-mix(in srgb, var(--soon) 20%, transparent); color: var(--soon); }
   .badge.expired { background: color-mix(in srgb, var(--expired) 20%, transparent); color: var(--expired); }
   .badge.unknown { background: color-mix(in srgb, var(--unknown) 20%, transparent); color: var(--unknown); }
+  .badge.frozen { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
   .section-title {
     font-size: 13px;
@@ -148,21 +149,27 @@
   }
   .item-row:last-child { border-bottom: none; }
   .item-main { flex: 1; min-width: 0; }
-  .item-name { font-weight: 600; }
-  .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .item-name { font-weight: 600; overflow-wrap: anywhere; }
+  .item-meta { color: var(--muted); font-size: 13px; margin-top: 2px; overflow-wrap: anywhere; }
   .link-btn {
-    width: auto; min-height: 0; padding: 0; border: none; border-radius: 0;
+    width: auto; min-height: 44px; padding: 0; border: none; border-radius: 0;
     background: none; color: var(--accent); font-size: inherit; text-decoration: underline;
   }
   [data-photo-url] { cursor: zoom-in; }
   .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .item-actions button { width: auto; min-height: 36px; padding: 6px 10px; font-size: 13px; }
+  .item-actions button { width: auto; min-height: 44px; padding: 7px 10px; font-size: 13px; }
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .chip-row button { width: auto; min-height: 44px; padding: 7px 12px; font-size: 13px; }
+  .chip-row button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .pantry-controls { margin-bottom: 12px; }
+  .eat-first-row { display: flex; width: 100%; justify-content: space-between; min-height: 44px; margin: 3px 0; }
+  .item-row.highlight { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
   .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
   .date-confidence { color: var(--soon); font-size: 13px; margin-top: 4px; }
   .date-confidence.confirmed { color: var(--ok); }
   .date-candidates { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-  .date-candidates button { width: auto; min-height: 34px; padding: 5px 9px; font-size: 13px; }
+  .date-candidates button { width: auto; min-height: 44px; padding: 5px 9px; font-size: 13px; }
   .date-confidence.unread { color: var(--expired); }
 
   .photo-step {
@@ -193,11 +200,14 @@
     opacity: 0;
     transition: opacity 0.2s ease;
     pointer-events: none;
-    z-index: 20;
+    z-index: 70;
     max-width: 90vw;
+    overflow-wrap: anywhere;
     text-align: center;
   }
   .toast.show { opacity: 1; }
+  .toast-content { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
+  .toast-action { pointer-events: auto; width: auto; min-height: 44px; padding: 6px 12px; background: transparent; border-color: currentColor; color: inherit; }
 
   nav.tabs {
     position: fixed;
@@ -367,16 +377,21 @@
       </div>
 
       <label for="f-category">Category</label>
-      <input type="text" id="f-category" name="category" list="category-suggestions" placeholder="e.g. Fridge, Freezer, Tinned">
+      <input type="text" id="f-category" name="category" list="category-suggestions" placeholder="e.g. Tinned, Snacks">
       <datalist id="category-suggestions">
-        <option value="Fridge">
-        <option value="Freezer">
-        <option value="Cupboard">
-        <option value="Tinned">
-        <option value="Spices">
-        <option value="Snacks">
-        <option value="Drinks">
+        <option value="Dairy & eggs"><option value="Meat & fish"><option value="Fruit & veg">
+        <option value="Bakery"><option value="Snacks & sweets"><option value="Tins & jars">
+        <option value="Pasta, rice & cereal"><option value="Ready meals"><option value="Drinks">
+        <option value="Cooking & condiments"><option value="Other">
       </datalist>
+
+      <label for="f-count">How many</label>
+      <div class="row"><button type="button" class="ghost" id="f-count-minus" aria-label="Decrease count">−</button>
+        <input type="number" id="f-count" name="count" min="1" max="99" value="1">
+        <button type="button" class="ghost" id="f-count-plus" aria-label="Increase count">+</button></div>
+      <label>Location</label><div id="f-location-chips" class="chip-row"></div>
+      <input type="hidden" id="f-location" name="location" value="">
+      <div id="already-in-pantry" class="muted hidden"></div>
 
       <div class="photo-step">
         <img id="date-photo-thumb" class="photo-thumb hidden" alt="">
@@ -401,6 +416,12 @@
 
   <!-- ───────────────────────── Pantry ───────────────────────── -->
   <section id="view-pantry" class="view">
+    <div class="pantry-controls card">
+      <input type="search" id="pantry-search" aria-label="Search pantry" placeholder="Search pantry">
+      <div id="pantry-location-filters" class="chip-row" aria-label="Filter by location"></div>
+      <select id="pantry-group-filter" aria-label="Food group"><option value="">All food groups</option></select>
+    </div>
+    <div id="eat-first" class="card hidden"></div>
     <div id="pantry-list"></div>
   </section>
 
@@ -423,8 +444,11 @@
         </div>
       </div>
 
-      <label for="s-check-interval">Check for expiring items every (hours)</label>
+      <label for="s-check-interval">Refresh Home Assistant sensors every (hours)</label>
       <input type="number" id="s-check-interval" name="check_interval_hours" min="1" max="24">
+      <p class="muted">This only refreshes Home Assistant sensors. Daily summaries are sent at the hour below.</p>
+      <label for="s-notify-hour">Send daily summary at (hour, 0–23)</label>
+      <input type="number" id="s-notify-hour" name="notify_hour" min="0" max="23">
 
       <div style="margin-top:16px">
         <button type="submit" class="primary">Save settings</button>
@@ -437,6 +461,12 @@
       <p class="muted" id="status-ha"></p>
       <p class="muted" id="status-last-check"></p>
       <button class="ghost" id="btn-check-now">Check now</button>
+      <p class="muted">Check now sends the summary now.</p>
+    </div>
+
+    <div class="card" id="food-waste-card">
+      <div class="section-title" style="margin-top:0">Food waste</div>
+      <div id="food-waste-summary" class="muted">Loading…</div>
     </div>
 
     <div class="card">
@@ -476,7 +506,7 @@
   <button type="button" class="ghost" id="btn-photo-modal-close">Close</button>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast"><span class="toast-content"><span id="toast-message"></span><button type="button" id="toast-action" class="toast-action hidden"></button></span></div>
 
 <nav class="tabs">
   <button data-view="scan" class="active"><span class="icon">📷</span>Scan</button>
@@ -492,13 +522,24 @@ const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
 // ── Toast ────────────────────────────────────────────────────────────────
 let toastTimer = null;
-function toast(message) {
+let toastActionHandler = null;
+function toast(message, actionLabel = "", actionHandler = null, duration = 2200) {
   const el = $("#toast");
-  el.textContent = message;
+  $("#toast-message").textContent = message;
+  const action = $("#toast-action");
+  action.textContent = actionLabel;
+  action.classList.toggle("hidden", !actionLabel);
+  toastActionHandler = actionHandler;
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 2200);
+  toastTimer = setTimeout(() => el.classList.remove("show"), duration);
 }
+$("#toast-action").addEventListener("click", async () => {
+  const action = toastActionHandler;
+  $("#toast").classList.remove("show");
+  toastActionHandler = null;
+  if (action) await action();
+});
 
 // ── Photo viewer ─────────────────────────────────────────────────────────
 // Photos open here, in the page, because a link to one would leave Home
@@ -532,9 +573,11 @@ $$("nav.tabs button").forEach((b) => b.addEventListener("click", () => showView(
 const scanIdle = $("#scan-idle");
 const scanBusy = $("#scan-busy");
 const reviewForm = $("#review-form");
+let liveBarcodeCapture = false;
 
 function resetScan() {
   closeCamera();
+  liveBarcodeCapture = false;
   reviewForm.reset();
   $("#review-not-found").classList.add("hidden");
   $("#review-barcode-line").classList.add("hidden");
@@ -543,6 +586,8 @@ function resetScan() {
   $("#date-photo-thumb").classList.add("hidden");
   $("#date-extract-status").classList.add("hidden");
   reviewForm.dataset.barcode = "";
+  reviewForm.dataset.liveBarcode = "";
+  $("#already-in-pantry").classList.add("hidden");
   reviewForm.classList.add("hidden");
   scanBusy.classList.add("hidden");
   scanIdle.classList.remove("hidden");
@@ -553,11 +598,38 @@ function resetScan() {
   addOcrAutofill = "";
 }
 
+let sessionLocation = "";
+const LOCATION_CHOICES = ["", "fridge", "cupboard", "freezer"];
+const LOCATION_LABELS = { "": "No location", fridge: "Fridge", cupboard: "Cupboard", freezer: "Freezer" };
+
+function renderLocationChips(container, selected, fieldName) {
+  container.innerHTML = LOCATION_CHOICES.map((location) =>
+    `<button type="button" class="ghost location-chip" data-location="${escapeAttr(location)}" data-field="${fieldName}" aria-pressed="${location === selected}">${LOCATION_LABELS[location]}</button>`
+  ).join("");
+}
+
+document.addEventListener("click", (event) => {
+  const chip = event.target.closest(".location-chip");
+  if (!chip) return;
+  const container = chip.parentElement;
+  const location = chip.dataset.location;
+  const field = chip.dataset.field;
+  const input = container.parentElement.querySelector(`.${field}`) || $(`#${field}`);
+  if (input) input.value = location;
+  sessionLocation = location;
+  container.querySelectorAll(".location-chip").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button === chip));
+  });
+});
+
 function openReviewForm({ barcode, notFound }) {
   scanIdle.classList.add("hidden");
   scanBusy.classList.add("hidden");
   reviewForm.classList.remove("hidden");
   reviewForm.dataset.barcode = barcode || "";
+  reviewForm.dataset.liveBarcode = liveBarcodeCapture ? "1" : "";
+  $("#f-location").value = sessionLocation;
+  renderLocationChips($("#f-location-chips"), sessionLocation, "f-location");
   $("#review-not-found").classList.toggle("hidden", !notFound);
   $("#product-photo-step").classList.toggle("hidden", !barcode);
   if (barcode) {
@@ -575,6 +647,7 @@ async function handleScannedBarcode(code) {
   scanBusy.classList.remove("hidden");
   try {
     const res = await fetch(`api/lookup/${encodeURIComponent(code)}`);
+    if (!res.ok) throw new Error("Lookup failed");
     const data = await res.json();
     openReviewForm({ barcode: code, notFound: false });
     if (data.display_image_url) {
@@ -587,8 +660,18 @@ async function handleScannedBarcode(code) {
       $("#f-quantity").value = data.quantity || "";
       $("#f-category").value = data.category || "";
       $("#f-image-url").value = data.image_url || "";
+      const defaultLocation = data.location || sessionLocation;
+      $("#f-location").value = defaultLocation;
+      renderLocationChips($("#f-location-chips"), defaultLocation, "f-location");
       if (data.cached) {
         $("#review-barcode-line").textContent = `Barcode: ${code} (from cache - instant lookup)`;
+      }
+      const activeResponse = await fetch(`api/barcodes/${encodeURIComponent(code)}/active`);
+      if (activeResponse.ok) {
+        const active = (await activeResponse.json()).item;
+        if (active) showExistingBarcodeChoice(active);
+      } else {
+        toast("Could not check the pantry for this barcode.");
       }
     } else {
       toast("Barcode scanned, but not found in Open Food Facts - fill in the details.");
@@ -599,7 +682,33 @@ async function handleScannedBarcode(code) {
   }
 }
 
+function showExistingBarcodeChoice(item) {
+  const target = $("#already-in-pantry");
+  const useBy = item.effective_date ? `, use by ${formatDisplayDate(item.effective_date)}` : "";
+  target.replaceChildren();
+  target.append(document.createTextNode(`Already in pantry: ${item.count}${useBy} `));
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "ghost";
+  button.textContent = "Add 1 to that";
+  button.addEventListener("click", async () => {
+    try {
+      const response = await fetch(`api/items/${item.id}/add-one`, { method: "POST" });
+      if (!response.ok) throw new Error("Could not add one");
+      const reopenCamera = reviewForm.dataset.liveBarcode === "1";
+      resetScan();
+      toast("Added one to pantry");
+      if (reopenCamera) await openCamera("barcode", { quietFailure: true, doneLabel: true });
+    } catch (err) {
+      toast("Could not add one");
+    }
+  });
+  target.append(button);
+  target.classList.remove("hidden");
+}
+
 async function handleBarcodePhoto(file) {
+  liveBarcodeCapture = false;
   scanIdle.classList.add("hidden");
   scanBusy.classList.remove("hidden");
 
@@ -710,20 +819,12 @@ function openFallbackPicker(mode) {
   $(`#input-${mode}-photo`).click();
 }
 
-// Where to open this app directly (bypassing the Home Assistant app's own
-// embedded webview, which - independently of the HTTPS issue above - has
-// been seen not to honour a file input's `capture` hint, opening a generic
-// photo picker instead of the camera). Only reachable on the same network
-// as this Home Assistant instance.
-const directAppUrl = `${location.protocol}//${location.hostname}:8000/`;
-
 (function setupCameraHintNote() {
   const note = $("#camera-hint-note");
   if (!note) return;
-  const link = `<a href="${directAppUrl}" target="_blank" rel="noopener">your phone's browser</a>`;
-  note.innerHTML = window.isSecureContext
-    ? `Camera not opening properly here? Try this app in ${link} instead of the Home Assistant app.`
-    : `Live barcode scanning needs HTTPS, which this Home Assistant isn't using, so it's off for now - photo capture still works, and opens the camera more reliably in ${link} than in the Home Assistant app.`;
+  note.textContent = window.isSecureContext
+    ? "If live scanning is unavailable, use the photo option instead."
+    : "Live barcode scanning needs HTTPS. Photo capture is still available.";
 })();
 
 // Maps the on-screen "scanner-frame" guide box to the matching region of
@@ -950,12 +1051,14 @@ function sendCaptureTiming(path, ocrDoneAt = null) {
   fetch("api/client-timing", { method: "POST", body }).catch(() => {});
 }
 
-async function openCamera(mode) {
+async function openCamera(mode, options = {}) {
+  if (cameraMode) return;
   const overlay = $("#camera-overlay");
   const video = $("#camera-video");
   const hint = $("#camera-hint");
   const shutter = $("#btn-camera-shutter");
   const fallbackBtn = $("#btn-camera-fallback");
+  $("#btn-camera-cancel").textContent = options.doneLabel ? "Done" : "Cancel";
 
   cameraMode = mode;
   dateCameraSession++;
@@ -990,8 +1093,10 @@ async function openCamera(mode) {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: videoConstraints, audio: false });
   } catch (err) {
     closeCamera();
-    toast("Couldn't open the camera - choose a photo instead.");
-    openFallbackPicker(mode);
+    if (!options.quietFailure) {
+      toast("Couldn't open the camera - choose a photo instead.");
+      openFallbackPicker(mode);
+    }
     return;
   }
 
@@ -1015,6 +1120,7 @@ async function openCamera(mode) {
         if (codes.length > 0) {
           barcodeScanBusy = true;
           const code = codes[0].rawValue;
+          liveBarcodeCapture = true;
           closeCamera();
           await handleScannedBarcode(code);
         }
@@ -1139,6 +1245,12 @@ $("#btn-scan-start").addEventListener("click", () => {
   } else {
     openFallbackPicker("barcode");
   }
+});
+$("#f-count-minus").addEventListener("click", () => {
+  $("#f-count").value = Math.max(1, Number($("#f-count").value || 1) - 1);
+});
+$("#f-count-plus").addEventListener("click", () => {
+  $("#f-count").value = Math.min(99, Number($("#f-count").value || 1) + 1);
 });
 
 // Which form a captured use-by date photo belongs to (from either the add
@@ -1488,8 +1600,17 @@ reviewForm.addEventListener("submit", async (e) => {
       toast(err.error || "Could not save that item.");
       return;
     }
-    toast(pendingAddDatePhoto ? "Added - reading use-by date in the background…" : "Added to pantry");
+    const reopenCamera = reviewForm.dataset.liveBarcode === "1";
+    const addedName = $("#f-name").value;
+    const hasDatePhoto = Boolean(pendingAddDatePhoto);
     resetScan();
+    if (reopenCamera) {
+      showView("scan");
+      toast(`${addedName} added`, "", null, 2200);
+      await openCamera("barcode", { quietFailure: true, doneLabel: true });
+    } else {
+      toast(hasDatePhoto ? "Added - reading use-by date in the background…" : "Added to pantry");
+    }
   } catch (err) {
     toast("Could not save that item - check your connection.");
   } finally {
@@ -1498,15 +1619,21 @@ reviewForm.addEventListener("submit", async (e) => {
 });
 
 // ── Pantry list ──────────────────────────────────────────────────────────
-const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Expiring soon", ok: "OK", unknown: "Needs a date" };
-const BUCKET_ORDER = ["expired", "expiring_soon", "ok", "unknown"];
+const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Expiring soon", ok: "OK", unknown: "Needs a date", frozen: "Freezer" };
+const BUCKET_ORDER = ["expired", "expiring_soon", "ok", "unknown", "frozen"];
+const FOOD_GROUPS = ["Dairy & eggs", "Meat & fish", "Fruit & veg", "Bakery", "Snacks & sweets", "Tins & jars",
+  "Pasta, rice & cereal", "Ready meals", "Drinks", "Cooking & condiments", "Other"];
+const OPENED_DAYS = [1, 2, 3, 5, 7, 14, 30];
+let pantryLocationFilter = "all";
+let pantryGroupFilter = "";
+let deleteResetTimer = null;
 
 function humanDays(days) {
   if (days === null || days === undefined) return "";
-  if (days < 0) return `${Math.abs(days)} day(s) ago`;
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  return `in ${days} days`;
+  if (days < 0) return `Expired ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago`;
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  return `In ${days} days`;
 }
 
 // "2027-07-01" -> "1 July 2027". The stored/wire format stays ISO (sorting,
@@ -1521,12 +1648,17 @@ function formatDisplayDate(iso) {
 }
 
 function itemRowHtml(item) {
-  const meta = [item.brand, item.quantity, item.category].filter(Boolean).join(" · ");
+  const meta = [item.brand, item.quantity, item.group].filter(Boolean).join(" · ");
+  const daysText = item.days_left === null ? "" : humanDays(item.days_left);
+  const effective = item.effective_date;
   const dateLine = item.date_extraction_pending
     ? '<span class="spinner" style="width:12px;height:12px;vertical-align:middle"></span> Reading use-by date…'
-    : escapeHtml(
-        item.expiry_date ? `${formatDisplayDate(item.expiry_date)} (${humanDays(item.days_left)})` : "No use-by date set"
-      );
+    : item.bucket === "frozen" ? "Frozen"
+    : effective ? `${escapeHtml(daysText)} · ${escapeHtml(formatDisplayDate(effective))}`
+    : "No use-by date set";
+  const openedLine = item.opened_at && item.use_within_days
+    ? `<div class="item-meta">Opened ${escapeHtml(new Date(item.opened_at + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }))}, use within ${item.use_within_days} ${item.use_within_days === 1 ? "day" : "days"}</div>`
+    : "";
   const photoCaption = item.expiry_date ? `Read as ${formatDisplayDate(item.expiry_date)}` : "No date read yet";
   const photoLink = item.has_date_photo
     ? `<div class="item-meta"><button type="button" class="link-btn" data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
@@ -1539,16 +1671,19 @@ function itemRowHtml(item) {
     <div class="item-row" data-id="${item.id}">
       ${productImg}
       <div class="item-main">
-        <div class="item-name">${escapeHtml(item.name)}</div>
+        <div class="item-name">${escapeHtml(item.name)}${item.count > 1 ? ` ×${item.count}` : ""}</div>
         <div class="item-meta">${escapeHtml(meta)}</div>
         <div class="item-meta">${dateLine}</div>
+        ${openedLine}
         ${confidence}
         ${photoLink}
         <div class="item-actions">
           <button class="ghost btn-edit" type="button">Edit</button>
-          <button class="ghost btn-consume" type="button">Consumed</button>
-          <button class="danger btn-delete" type="button">Delete</button>
+          <button class="ghost btn-opened" type="button">Opened</button>
+          <button class="ghost btn-finish" type="button" data-outcome="eaten">${item.count > 1 ? "Eaten 1" : "Eaten"}</button>
+          <button class="ghost btn-finish" type="button" data-outcome="binned">${item.count > 1 ? "Binned 1" : "Binned"}</button>
         </div>
+        <div class="opened-picker hidden"></div>
         <div class="edit-form hidden"></div>
       </div>
       <span class="badge ${item.bucket}">${BUCKET_LABELS[item.bucket]}</span>
@@ -1573,7 +1708,10 @@ function editFormHtml(item) {
       <div><label>Quantity</label><input type="text" class="e-quantity" value="${escapeAttr(item.quantity || "")}"></div>
     </div>
     <label>Category</label>
-    <input type="text" class="e-category" value="${escapeAttr(item.category || "")}">
+    <input type="text" class="e-category" list="category-suggestions" value="${escapeAttr(item.category || "")}">
+    <label>How many</label><input type="number" class="e-count" min="1" max="99" value="${item.count || 1}">
+    <label>Location</label><div class="chip-row e-location-chips"></div>
+    <input type="hidden" class="e-location" value="${escapeAttr(item.location || "")}">
 
     ${
       item.barcode
@@ -1601,11 +1739,18 @@ function editFormHtml(item) {
 
     <label>Use-by date</label>
     <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
+    <label>Opened date and use within days</label>
+    <div class="row"><input type="date" class="e-opened-at" value="${escapeAttr(item.opened_at || "")}">
+      <input type="number" class="e-opened-days" min="1" max="365" value="${escapeAttr(item.use_within_days || "")}"></div>
+    <button type="button" class="ghost e-not-opened">Not opened</button>
     <label>Notes</label>
     <textarea class="e-notes">${escapeHtml(item.notes || "")}</textarea>
     <div class="row" style="margin-top:10px">
       <button type="button" class="ghost e-cancel">Cancel</button>
       <button type="button" class="primary e-save">Save</button>
+    </div>
+    <div style="margin-top:10px">
+      <button type="button" class="danger btn-delete">Delete</button>
     </div>`;
 }
 
@@ -1667,6 +1812,7 @@ function escapeAttr(s) {
 }
 
 let pantryCache = [];
+let pantryLoadErrorShown = false;
 // While any item has a background date extraction still running, poll for
 // it to finish instead of leaving the "Reading use-by date…" spinner
 // showing stale state until the next manual visit to this tab - cleared
@@ -1678,7 +1824,7 @@ let pantryPollTimer = null;
 // out whatever the person has typed so far. The next tick (or the next
 // time this tab is opened) picks up whatever changed in the meantime.
 function pollPantryIfIdle() {
-  if ($$(".edit-form").some((el) => !el.classList.contains("hidden"))) return;
+  if ($$(".edit-form, .opened-picker.open").some((el) => !el.classList.contains("hidden"))) return;
   loadPantry();
 }
 
@@ -1753,10 +1899,14 @@ async function loadPantry() {
   if (pantryCache.length === 0) list.innerHTML = '<p class="muted">Loading…</p>';
   try {
     const res = await fetch("api/items");
+    if (!res.ok) throw new Error("Could not load pantry");
     const data = await res.json();
     pantryCache = data.items || [];
+    pantryLoadErrorShown = false;
   } catch (err) {
     list.innerHTML = '<p class="muted">Could not load your pantry.</p>';
+    if (!pantryLoadErrorShown) toast("Could not load your pantry");
+    pantryLoadErrorShown = true;
     return;
   }
   renderPantry();
@@ -1764,6 +1914,26 @@ async function loadPantry() {
 
 function renderPantry() {
   const list = $("#pantry-list");
+  const search = $("#pantry-search").value.trim().toLocaleLowerCase();
+  const filters = ["all", "fridge", "cupboard", "freezer", "needs_date"];
+  $("#pantry-location-filters").innerHTML = filters.map((filter) => {
+    const label = filter === "all" ? "All" : filter === "needs_date" ? "Needs a date" : LOCATION_LABELS[filter];
+    return `<button type="button" class="ghost pantry-filter" data-filter="${filter}" aria-pressed="${pantryLocationFilter === filter}">${label}</button>`;
+  }).join("");
+  const groupSelect = $("#pantry-group-filter");
+  if (groupSelect.options.length !== FOOD_GROUPS.length + 1) {
+    groupSelect.innerHTML = '<option value="">All food groups</option>' +
+      FOOD_GROUPS.map((group) => `<option value="${escapeAttr(group)}">${escapeHtml(group)}</option>`).join("");
+  }
+  groupSelect.value = pantryGroupFilter;
+  const searchActive = Boolean(search) || pantryLocationFilter !== "all" || Boolean(pantryGroupFilter);
+  const visible = pantryCache.filter((item) => {
+    const locationMatch = pantryLocationFilter === "all" ||
+      (pantryLocationFilter === "needs_date" ? item.bucket === "unknown" : (item.location || "") === pantryLocationFilter);
+    const groupMatch = !pantryGroupFilter || item.group === pantryGroupFilter;
+    const searchable = [item.name, item.brand, item.category, item.group, item.notes].join(" ").toLocaleLowerCase();
+    return locationMatch && groupMatch && (!search || searchable.includes(search));
+  });
 
   const anyPending = pantryCache.some((i) => i.date_extraction_pending);
   if (anyPending) {
@@ -1775,24 +1945,30 @@ function renderPantry() {
 
   if (pantryCache.length === 0) {
     list.innerHTML = '<div class="empty-state">Nothing tracked yet - scan something to get started.</div>';
+    $("#eat-first").classList.add("hidden");
     return;
   }
   const needsDateCount = pantryCache.filter((item) => item.bucket === "unknown").length;
   let html = needsDateCount
     ? `<button type="button" class="ghost needs-date-banner" id="needs-date-banner">${needsDateCount === 1 ? "1 item needs" : `${needsDateCount} items need`} a date</button>`
     : "";
+  const eatFirst = $("#eat-first");
+  const dueSoon = pantryCache.filter((item) => item.effective_date && item.days_left <= 7).slice(0, 5);
+  eatFirst.classList.toggle("hidden", searchActive || dueSoon.length === 0);
+  if (!searchActive && dueSoon.length) {
+    eatFirst.innerHTML = '<div class="section-title" style="margin-top:0">Eat first</div>' +
+      dueSoon.map((item) => `<button type="button" class="ghost eat-first-row" data-target-id="${item.id}"><span>${escapeHtml(item.name)}</span><span>${escapeHtml(humanDays(item.days_left))}</span></button>`).join("");
+  }
+  if (!visible.length) html += '<div class="empty-state">Nothing matches</div>';
   for (const bucket of BUCKET_ORDER) {
-    const items = pantryCache.filter((i) => i.bucket === bucket);
+    const items = visible.filter((i) => i.bucket === bucket);
     if (items.length === 0) continue;
-    html += `<div class="section-title"${bucket === "unknown" ? ' id="needs-date-group"' : ""}>${BUCKET_LABELS[bucket]} (${items.length})</div><div class="card">`;
+    const title = bucket === "frozen" ? "Freezer" : BUCKET_LABELS[bucket];
+    html += `<div class="section-title"${bucket === "unknown" ? ' id="needs-date-group"' : ""}>${title} (${items.length})</div><div class="card">`;
     html += items.map(itemRowHtml).join("");
     html += "</div>";
   }
   list.innerHTML = html;
-  const needsDateBanner = $("#needs-date-banner");
-  if (needsDateBanner) {
-    needsDateBanner.addEventListener("click", () => $("#needs-date-group")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  }
 
   $$(".btn-edit").forEach((btn) =>
     btn.addEventListener("click", () => {
@@ -1802,6 +1978,7 @@ function renderPantry() {
       const editEl = row.querySelector(".edit-form");
       editEl.innerHTML = editFormHtml(item);
       editEl.classList.remove("hidden");
+      renderLocationChips(editEl.querySelector(".e-location-chips"), item.location || "", "e-location");
       editEl.querySelector(".e-cancel").addEventListener("click", () => {
         editEl.classList.add("hidden");
         // Picks up a product photo taken while the panel was open.
@@ -1822,6 +1999,32 @@ function renderPantry() {
           statusEl: editEl.querySelector(".e-date-status"),
         });
       });
+      const deleteBtn = editEl.querySelector(".btn-delete");
+      deleteBtn.addEventListener("click", async () => {
+        if (deleteBtn.dataset.confirm !== "yes") {
+          deleteBtn.dataset.confirm = "yes";
+          deleteBtn.textContent = "Tap again to delete";
+          clearTimeout(deleteResetTimer);
+          deleteResetTimer = setTimeout(() => {
+            deleteBtn.dataset.confirm = "";
+            deleteBtn.textContent = "Delete";
+          }, 4000);
+          return;
+        }
+        try {
+          const res = await fetch(`api/items/${id}/delete`, { method: "POST" });
+          if (!res.ok) throw new Error("Could not delete item");
+          editEl.classList.add("hidden");
+          await loadPantry();
+          toast("Deleted");
+        } catch (err) {
+          toast("Could not delete item");
+        }
+      });
+      editEl.querySelector(".e-not-opened").addEventListener("click", () => {
+        editEl.querySelector(".e-opened-at").value = "";
+        editEl.querySelector(".e-opened-days").value = "";
+      });
 
       const saveBtn = editEl.querySelector(".e-save");
       saveBtn.addEventListener("click", async () => {
@@ -1837,14 +2040,21 @@ function renderPantry() {
         body.append("category", editEl.querySelector(".e-category").value);
         body.append("expiry_date", editEl.querySelector(".e-expiry").value);
         body.append("notes", editEl.querySelector(".e-notes").value);
+        body.append("count", editEl.querySelector(".e-count").value);
+        body.append("location", editEl.querySelector(".e-location").value);
+        body.append("opened_at", editEl.querySelector(".e-opened-at").value);
+        body.append("use_within_days", editEl.querySelector(".e-opened-days").value);
         try {
           const res = await fetch(`api/items/${id}`, { method: "POST", body });
           if (res.ok) {
-            toast("Saved");
-            loadPantry();
+            const updated = await res.json();
+            toast(item.location === "freezer" && updated.location !== "freezer" ? "Defrosted: use by tomorrow" : "Saved");
+            await loadPantry();
           } else {
             toast("Could not save changes");
           }
+        } catch (err) {
+          toast("Could not save changes");
         } finally {
           saveBtn.disabled = false;
         }
@@ -1852,36 +2062,106 @@ function renderPantry() {
     })
   );
 
-  $$(".btn-consume").forEach((btn) =>
+  $$(".btn-finish").forEach((btn) =>
     btn.addEventListener("click", async () => {
       const id = Number(btn.closest(".item-row").dataset.id);
-      await fetch(`api/items/${id}/consume`, { method: "POST" });
-      toast("Marked as consumed");
-      loadPantry();
+      try {
+        const res = await fetch(`api/items/${id}/finish`, { method: "POST", body: new URLSearchParams({ outcome: btn.dataset.outcome }) });
+        if (!res.ok) throw new Error("Could not finish item");
+        const result = await res.json();
+        const label = btn.dataset.outcome === "eaten" ? "Marked as eaten" : "Marked as binned";
+        toast(label, "Undo", async () => {
+          try {
+            const undo = await fetch(`api/events/${result.event_id}/undo`, { method: "POST" });
+            if (!undo.ok) throw new Error("Could not undo");
+            toast("Undo complete");
+            await loadPantry();
+          } catch (err) {
+            toast("Could not undo");
+          }
+        }, 6000);
+        await loadPantry();
+      } catch (err) {
+        toast("Could not finish item");
+      }
     })
   );
 
-  $$(".btn-delete").forEach((btn) =>
-    btn.addEventListener("click", async () => {
-      const id = Number(btn.closest(".item-row").dataset.id);
-      if (!confirm("Delete this item? This can't be undone.")) return;
-      await fetch(`api/items/${id}/delete`, { method: "POST" });
-      toast("Deleted");
-      loadPantry();
-    })
-  );
+  $$(".btn-opened").forEach((btn) => btn.addEventListener("click", () => {
+    const row = btn.closest(".item-row");
+    const item = pantryCache.find((entry) => entry.id === Number(row.dataset.id));
+    const picker = row.querySelector(".opened-picker");
+    picker.classList.toggle("hidden");
+    picker.classList.toggle("open", !picker.classList.contains("hidden"));
+    if (picker.classList.contains("hidden")) return;
+    const selected = item.use_within_days || item.opened_days || 3;
+    picker.dataset.days = String(selected);
+    picker.innerHTML = '<div class="chip-row">' + [1, 2, 3, 5, 7, 14, 30].map((days) =>
+      `<button type="button" class="ghost opened-chip" data-days="${days}" aria-pressed="${days === selected}">${days}</button>`
+    ).join("") + '</div><button type="button" class="primary btn-save-opened">Save</button>';
+    picker.querySelectorAll(".opened-chip").forEach((chip) => chip.addEventListener("click", () => {
+      picker.dataset.days = chip.dataset.days;
+      picker.querySelectorAll(".opened-chip").forEach((other) => other.setAttribute("aria-pressed", String(other === chip)));
+    }));
+    picker.querySelector(".btn-save-opened").addEventListener("click", async () => {
+      try {
+        const res = await fetch(`api/items/${item.id}/opened`, { method: "POST", body: new URLSearchParams({ days: picker.dataset.days }) });
+        if (!res.ok) throw new Error("Could not save opened date");
+        await loadPantry();
+        toast("Opened date saved");
+      } catch (err) {
+        toast("Could not save opened date");
+      }
+    });
+  }));
 }
+
+$("#pantry-search").addEventListener("input", renderPantry);
+$("#pantry-location-filters").addEventListener("click", (event) => {
+  const button = event.target.closest(".pantry-filter");
+  if (!button) return;
+  pantryLocationFilter = button.dataset.filter;
+  renderPantry();
+});
+$("#pantry-group-filter").addEventListener("change", (event) => {
+  pantryGroupFilter = event.target.value;
+  renderPantry();
+});
+$("#pantry-list").addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (button?.matches(".needs-date-banner")) {
+    pantryLocationFilter = "needs_date";
+    renderPantry();
+    $("#needs-date-group")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+});
+$("#eat-first").addEventListener("click", (event) => {
+  const button = event.target.closest(".eat-first-row");
+  if (!button) return;
+  const target = document.querySelector(`.item-row[data-id="${button.dataset.targetId}"]`);
+  target?.scrollIntoView({ behavior: "smooth", block: "center" });
+  target?.classList.add("highlight");
+  setTimeout(() => target?.classList.remove("highlight"), 1800);
+});
 
 // ── Settings ─────────────────────────────────────────────────────────────
 async function loadSettings() {
-  const res = await fetch("api/settings");
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch("api/settings");
+    if (!res.ok) throw new Error("Could not load settings");
+    data = await res.json();
+  } catch (err) {
+    toast("Could not load settings");
+    return;
+  }
   $("#status-notify-service").textContent = data.notify_service
     ? `✅ Notifying ${data.notify_service}.`
     : "⚠️ No notify service configured - notifications are off.";
   $("#s-days-before").value = data.notify_days_before;
   $("#s-repeat-hours").value = data.notify_repeat_hours;
   $("#s-check-interval").value = data.check_interval_hours;
+  $("#s-notify-hour").value = data.notify_hour;
   $("#status-vision").textContent = data.vision_configured
     ? "✅ Use-by photo extraction is configured."
     : "⚠️ Use-by photo extraction is not configured - set vision_api_base in the add-on Configuration tab.";
@@ -1891,16 +2171,33 @@ async function loadSettings() {
   $("#status-last-check").textContent = data.last_check_summary
     ? `Last check: ${data.last_check_summary} (${data.last_check_at || ""})`
     : "No check has run yet.";
+  try {
+    const statsResponse = await fetch("api/stats");
+    if (!statsResponse.ok) throw new Error("Could not load food waste stats");
+    const stats = await statsResponse.json();
+    const waste = $("#food-waste-summary");
+    waste.textContent = `This month: ${stats.this_month.eaten} eaten, ${stats.this_month.binned} binned. Last month: ${stats.last_month.eaten} eaten, ${stats.last_month.binned} binned.`;
+    if (stats.most_binned.length) {
+      const names = document.createElement("p");
+      names.className = "muted";
+      names.textContent = `Most binned this month: ${stats.most_binned.map((entry) => `${entry.name} (${entry.count})`).join(", ")}`;
+      waste.append(names);
+    }
+  } catch (err) {
+    $("#food-waste-summary").textContent = "Could not load food waste stats.";
+    toast("Could not load food waste stats");
+  }
 }
 
 $("#settings-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const body = new FormData(e.target);
-  const res = await fetch("api/settings", { method: "POST", body });
-  if (res.ok) {
+  try {
+    const res = await fetch("api/settings", { method: "POST", body });
+    if (!res.ok) throw new Error("Could not save settings");
     toast("Settings saved");
     loadSettings();
-  } else {
+  } catch (err) {
     toast("Could not save settings");
   }
 });
@@ -1908,8 +2205,11 @@ $("#settings-form").addEventListener("submit", async (e) => {
 $("#btn-check-now").addEventListener("click", async () => {
   $("#btn-check-now").disabled = true;
   try {
-    await fetch("api/check-now", { method: "POST" });
-    toast("Check complete");
+    const res = await fetch("api/check-now", { method: "POST" });
+    if (!res.ok) throw new Error("Check failed");
+    toast("Summary sent");
+  } catch (err) {
+    toast("Could not send summary");
   } finally {
     $("#btn-check-now").disabled = false;
     loadSettings();
@@ -1919,15 +2219,18 @@ $("#btn-check-now").addEventListener("click", async () => {
 // Deep links. Inside Home Assistant this page is an iframe at a fixed
 // ingress URL, so a notification's /<slug>/pantry path (see ha_sync.py's
 // _pantry_panel_path) never reaches location - the parent passes it over
-// postMessage instead. Reached directly on port 8000, a #pantry hash works.
-const APP_VIEWS = ["scan", "pantry", "settings"];
+// postMessage instead. Hash links work when opened directly.
+const APP_VIEWS = ["scan", "pantry", "settings", "add"];
 
 window.addEventListener("message", (e) => {
   if (e.source !== window.parent || e.data?.type !== "home-assistant/properties") return;
   const { route } = e.data;
   const view = (route?.path || "").split("/")[1];
   if (!APP_VIEWS.includes(view)) return;
-  showView(view);
+  showView(view === "add" ? "scan" : view);
+  if (view === "add" && !cameraMode && cameraSupported() && barcodeDetectorSupported()) {
+    openCamera("barcode", { quietFailure: true });
+  }
   // Properties are re-sent on every resize, and a repeat tap of the same
   // notification wouldn't count as a route change - so consume the path,
   // leaving the person free to switch tabs and the next tap to work.
@@ -1940,7 +2243,10 @@ if (window.parent !== window) {
 
 const deepLinkView = location.hash.replace("#", "");
 if (APP_VIEWS.includes(deepLinkView)) {
-  showView(deepLinkView);
+  showView(deepLinkView === "add" ? "scan" : deepLinkView);
+  if (deepLinkView === "add" && !cameraMode && cameraSupported() && barcodeDetectorSupported()) {
+    openCamera("barcode", { quietFailure: true });
+  }
 }
 </script>
 </body>
