@@ -6,6 +6,7 @@ full workflow.
 import json
 import mimetypes
 import re
+import threading
 import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime
@@ -39,6 +40,12 @@ mimetypes.add_type("application/wasm", ".wasm")
 mimetypes.add_type("text/javascript", ".mjs")
 
 _MAX_OCR_RAW_LENGTH = 2000
+_VISION_READ_LOCK = threading.Lock()
+_CLIENT_TIMING_FIELDS = {
+    "open_ms", "stream_ms", "first_sample_ms", "steady_ms", "capture_ms",
+    "ocr_ms", "read_ms", "soft",
+}
+_CLIENT_TIMING_PATHS = {"steady", "live", "shutter"}
 
 db.init_db()
 
@@ -91,7 +98,14 @@ def _extract_and_update(item_id: int, *, only_if_blank: bool = False) -> None:
     path = db.date_photo_path(item_id)
     if not path.exists():
         return
-    result = vision.extract_use_by_date(path.read_bytes())
+    try:
+        image_bytes = path.read_bytes()
+    except FileNotFoundError:
+        return
+    with _VISION_READ_LOCK:
+        result = vision.extract_use_by_date(image_bytes)
+        if result.get("retryable"):
+            result = vision.extract_use_by_date(image_bytes)
     if not db.get_item(item_id):
         return  # deleted while extraction was running
     candidates = result.get("candidates") or ([{"date": result["date"], "repaired": False}] if result.get("date") else [])
@@ -123,6 +137,13 @@ def run_image_backfill() -> None:
         db.set_state(_IMAGE_BACKFILL_STATE_KEY, db.now_iso())
 
 
+def run_pending_date_extractions() -> None:
+    """Restarts pending photo reads left behind by a process restart."""
+    # only_if_blank: a date typed in before the restart must survive it.
+    for item_id in db.pending_date_extractions():
+        _extract_and_update(item_id, only_if_blank=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     scheduler.add_job(
@@ -133,6 +154,7 @@ async def lifespan(_app: FastAPI):
         id=_CHECK_JOB_ID,
     )
     scheduler.add_job(run_image_backfill, next_run_time=datetime.now())
+    scheduler.add_job(run_pending_date_extractions, next_run_time=datetime.now())
     scheduler.start()
     yield
     scheduler.shutdown(wait=False)
@@ -313,7 +335,43 @@ async def parse_date(text: str = Form(""), lenient: str = Form("0")):
     """Turns what the browser's on-device OCR read into a date, so there's
     only one date parser to keep right."""
     candidates = vision.date_candidates(text, lenient=lenient == "1")
-    return {"date": candidates[0]["date"] if candidates else None, "candidates": [{"date": c["date"], "repaired": c["repaired"]} for c in candidates]}
+    return {
+        "date": candidates[0]["date"] if candidates else None,
+        "confident": bool(candidates) and vision.is_confident(candidates[0]),
+        "candidates": [{"date": c["date"], "repaired": c["repaired"]} for c in candidates],
+    }
+
+
+@app.post("/api/client-timing")
+async def client_timing(request: Request):
+    """Accepts only bounded numeric measurements and a known reader path."""
+    form = await request.form()
+    values = {}
+    for name in _CLIENT_TIMING_FIELDS:
+        value = form.get(name)
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if number >= 0 and number < 3600000:
+            values[name] = number
+    path = form.get("path")
+    if not isinstance(path, str) or path not in _CLIENT_TIMING_PATHS:
+        return JSONResponse({"error": "Invalid path."}, status_code=400)
+    print(
+        "Capture timing: "
+        f"path={path} open={values.get('open_ms', 0):g} "
+        f"stream={values.get('stream_ms', 0):g} "
+        f"first={values.get('first_sample_ms', 0):g} "
+        f"steady={values.get('steady_ms', 0):g} "
+        f"capture={values.get('capture_ms', 0):g} "
+        f"ocr_done={values.get('ocr_ms', 0):g} "
+        f"read={values.get('read_ms', 0):g} soft={values.get('soft', 0):g}",
+        flush=True,
+    )
+    return {"ok": True}
 
 
 @app.post("/api/items")

@@ -206,6 +206,15 @@ def get_item(item_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def pending_date_extractions() -> list[int]:
+    """Returns queued reads whose saved photo is still present."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id FROM items WHERE date_extraction_pending = 1",
+        ).fetchall()
+    return [row["id"] for row in rows if date_photo_path(row["id"]).exists()]
+
+
 def update_item(item_id: int, **fields) -> None:
     if not fields:
         return

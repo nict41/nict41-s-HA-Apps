@@ -12,8 +12,10 @@ so the scan flow always falls through to manual entry.
 """
 
 import base64
+import calendar
 import json
 import re
+import socket
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
@@ -62,6 +64,7 @@ _COMPACT_DATE_RE = re.compile(r"(?<![\w:./-])(\d{2})(\d{2})[ \t]?(\d{4}|\d{2})(?
 # label: elsewhere in a transcript, "2.5 OZ" would be 2 May.
 _LABEL_PATTERN = r"(?:use\s*by|best\s*before(?:\s*end)?|bbe|bb|exp(?:iry)?)"
 _DM_RE = re.compile(rf"^(?:{_LABEL_PATTERN}\W*)?(\d{{1,2}})[./-](\d{{2}})$", re.IGNORECASE)
+_LABEL_RE = re.compile(rf"\b{_LABEL_PATTERN}\b", re.IGNORECASE)
 _DATE_LINE_RE = re.compile(r"^\s*DATE:\s*(\S.*)$", re.IGNORECASE | re.MULTILINE)
 
 _MONTH_NAMES = (
@@ -87,6 +90,8 @@ _DAY_PATTERN = r"(\d{1,2})(?:st|nd|rd|th)?"
 # "02 Nov 11:26" is not 2011.
 _TEXT_DATE_RE = re.compile(rf"{_DAY_PATTERN}\s*{_MONTH_PATTERN}\s*(\d{{4}}|\d{{2}})(?![\d:])", re.IGNORECASE)
 _TEXT_DATE_NO_YEAR_RE = re.compile(rf"{_DAY_PATTERN}\s*{_MONTH_PATTERN}", re.IGNORECASE)
+_MONTH_YEAR_TEXT_RE = re.compile(rf"(?<![A-Za-z0-9]){_MONTH_PATTERN}\s+(\d{{2}}|\d{{4}})(?![\d:])", re.IGNORECASE)
+_MONTH_YEAR_NUMERIC_RE = re.compile(r"(?<![\w:./-])(0?[1-9]|1[0-2])(?:([/.])(\d{2}|\d{4})| (\d{4}))(?![\w:./-])")
 
 # How far past a date with no year can be and still mean this year's - long
 # enough that something bought and forgotten still shows as expired, instead
@@ -109,6 +114,12 @@ PENALTY_BATCH = 6
 PENALTY_REPAIRED = 5
 # A production date is always behind us, and packs print it near the use-by.
 PENALTY_PAST = 6
+# Under any date with a day, but over a bare run of digits that may be a
+# batch code.
+SCORE_MONTH_YEAR = -1
+# What live reading needs before it captures: a separated date, so a batch
+# code or a half-framed date doesn't fire it.
+CONFIDENT_SCORE = 3
 
 _MONTH_REPAIRS = {
     "jn": "jan", "jpn": "jan", "ja n": "jan",
@@ -178,8 +189,11 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
         if not reads and lenient:
             # Human-assisted mode accepts day/month only and repaired forms.
             reads = _line_dates(_repaired_line(line), lenient=True)
-        labelled_here = bool(re.search(_LABEL_PATTERN, line, re.I))
-        label_previous = bool(index and re.search(_LABEL_PATTERN, lines[index - 1], re.I))
+        labelled_here = bool(_LABEL_RE.search(line))
+        label_previous = any(
+            _LABEL_RE.search(previous)
+            for previous in lines[max(0, index - 2):index]
+        )
         for parsed, repaired in reads:
             score = SCORE_LABELLED if labelled_here else (SCORE_PREVIOUS_LABEL if label_previous else 0)
             if re.search(r"[./-]|\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b", line, re.I): score += SCORE_SEPARATORS
@@ -190,6 +204,22 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
             if re.search(r"\b(?:L|LOT)\s*\w*\d", line, re.I): score -= PENALTY_BATCH
             if repaired: score -= PENALTY_REPAIRED
             candidates.append({"date": parsed.isoformat(), "score": score, "repaired": repaired, "line": line})
+        # A two-digit year needs a label, since "APR 27" could be a day. A
+        # four-digit one doesn't, or a tight crop would lose the date.
+        has_label = labelled_here or label_previous
+        for match in _MONTH_YEAR_TEXT_RE.finditer(line):
+            if re.search(r"\d\s*$", line[:match.start()]) or not (has_label or len(match[2]) == 4):
+                continue
+            parsed = _month_year_date(_MONTHS[match[1].lower()], int(match[2]))
+            if parsed and _is_recent_or_future(parsed) and _within_month_year_window(parsed):
+                candidates.append({"date": parsed.isoformat(), "score": SCORE_MONTH_YEAR, "repaired": False, "line": line})
+        for match in _MONTH_YEAR_NUMERIC_RE.finditer(line):
+            year_text = match[3] or match[4]
+            if not (has_label or len(year_text) == 4):
+                continue
+            parsed = _month_year_date(int(match[1]), int(year_text))
+            if parsed and _is_recent_or_future(parsed) and _within_month_year_window(parsed):
+                candidates.append({"date": parsed.isoformat(), "score": SCORE_MONTH_YEAR, "repaired": False, "line": line})
     best = {}
     for candidate in candidates:
         old = best.get(candidate["date"])
@@ -202,9 +232,25 @@ def date_candidates(text: str, *, lenient: bool = False) -> list[dict]:
     return sorted(best.values(), key=lambda c: (c["score"], c["date"]), reverse=True)
 
 
+def is_confident(candidate: dict) -> bool:
+    return not candidate["repaired"] and candidate["score"] >= CONFIDENT_SCORE
+
+
 def _normalise_year(year: int) -> int:
     # Two-digit years on packaging are always near-future, never 1900s.
     return 2000 + year if year < 100 else year
+
+
+def _month_year_date(month: int, year: int) -> date | None:
+    year = _normalise_year(year)
+    try:
+        return date(year, month, calendar.monthrange(year, month)[1])
+    except ValueError:
+        return None
+
+
+def _within_month_year_window(parsed: date) -> bool:
+    return parsed <= date(date.today().year + _MAX_FUTURE_YEARS, 12, 31)
 
 
 def _resolve_unknown_year(month: int, day: int) -> int:
@@ -305,7 +351,11 @@ def parse_transcript(text: str) -> str | None:
     packs that print two show the production date first."""
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     if len(lines) == 1 and not _DATE_LINE_RE.match(lines[0]):
-        return _parse_date_text(lines[0])
+        parsed = _parse_date_text(lines[0])
+        if parsed:
+            return parsed
+        ranked_single = date_candidates(lines[0])
+        return ranked_single[0]["date"] if ranked_single else None
 
     match = _DATE_LINE_RE.search(text)
     if match:
@@ -375,8 +425,11 @@ def extract_use_by_date(image_bytes: bytes) -> dict:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_SECONDS) as resp:
             payload = json.loads(resp.read())
         reply = payload["choices"][0]["message"]["content"]
-    except (urllib.error.URLError, TimeoutError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
-        return {"date": None, "candidates": [], "raw": f"Vision request failed: {exc}"}
+    except (urllib.error.URLError, TimeoutError, ConnectionError, KeyError, IndexError, json.JSONDecodeError, ValueError) as exc:
+        retryable = isinstance(exc, (TimeoutError, ConnectionError))
+        if isinstance(exc, urllib.error.URLError) and not isinstance(exc, urllib.error.HTTPError):
+            retryable = isinstance(exc.reason, (TimeoutError, ConnectionError, socket.gaierror, OSError))
+        return {"date": None, "candidates": [], "raw": f"Vision request failed: {exc}", "retryable": retryable}
 
     reply = reply.strip()
     if reply.upper() == "UNKNOWN":

@@ -46,6 +46,11 @@ def test_sync_pushes_summary_and_item_states(monkeypatch):
     assert f"/states/{ha_sync.entity_id_for(item)}" in paths
 
 
+def test_summary_includes_needs_date_count():
+    state = ha_sync._summary_state([(_make_item(expiry_date=None), db.BUCKET_UNKNOWN)])
+    assert state["attributes"]["needs_date"] == 1
+
+
 def test_sync_deletes_stale_entities(monkeypatch):
     monkeypatch.setattr(ha_sync, "SUPERVISOR_TOKEN", "fake-token")
     calls = []

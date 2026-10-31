@@ -1,4 +1,6 @@
 from io import BytesIO
+import threading
+import time
 
 import db
 import main
@@ -369,7 +371,7 @@ def test_export_returns_json_attachment():
 
 
 def test_parse_date_endpoint(monkeypatch):
-    monkeypatch.setattr(main.vision, "date_candidates", lambda text, lenient=False: [{"date": "2027-03-01", "repaired": False}] if text == "01 03 27" else [])
+    monkeypatch.setattr(main.vision, "date_candidates", lambda text, lenient=False: [{"date": "2027-03-01", "repaired": False, "score": 5}] if text == "01 03 27" else [])
     assert client.post("/api/parse-date", data={"text": "01 03 27"}).json()["date"] == "2027-03-01"
     assert client.post("/api/parse-date", data={"text": "nothing"}).json()["date"] is None
 
@@ -445,3 +447,89 @@ def test_tapping_the_current_date_settles_its_confidence():
     assert db.get_item(item_id)["date_confidence"] == "check"
     client.post(f"/api/items/{item_id}", data={"name": "Soup", "expiry_date": "2027-01-01", "date_chosen": "1"})
     assert db.get_item(item_id)["date_confidence"] is None
+
+
+def test_client_timing_rejects_unknown_fields_and_paths(capsys):
+    response = client.post("/api/client-timing", data={"path": "live", "open_ms": "12", "secret": "never-log"})
+    assert response.status_code == 200
+    assert "secret" not in capsys.readouterr().out
+    response = client.post("/api/client-timing", data={"path": "unknown", "open_ms": "12"})
+    assert response.status_code == 400
+
+
+def test_vision_read_retries_once_on_timeout_only(monkeypatch):
+    item_id = db.add_item(barcode=None, name="Retry")
+    db.save_date_photo(item_id, b"photo")
+    calls = []
+    def extract(_photo):
+        calls.append(1)
+        if len(calls) == 1:
+            return {"date": None, "candidates": [], "raw": "Vision request failed: slow model", "retryable": True}
+        return {"date": None, "candidates": [], "raw": "UNKNOWN"}
+    monkeypatch.setattr(main.vision, "extract_use_by_date", extract)
+    main._extract_and_update(item_id)
+    assert len(calls) == 2
+
+
+def test_vision_read_does_not_retry_model_answer(monkeypatch):
+    item_id = db.add_item(barcode=None, name="No retry")
+    db.save_date_photo(item_id, b"photo")
+    calls = []
+    monkeypatch.setattr(main.vision, "extract_use_by_date", lambda _photo: calls.append(1) or {"date": None, "candidates": [], "raw": "UNKNOWN"})
+    main._extract_and_update(item_id)
+    assert len(calls) == 1
+
+
+def test_vision_reads_never_overlap(monkeypatch):
+    active = 0
+    maximum = 0
+    guard = threading.Lock()
+    def extract(_photo):
+        nonlocal active, maximum
+        with guard:
+            active += 1
+            maximum = max(maximum, active)
+        time.sleep(0.04)
+        with guard:
+            active -= 1
+        return {"date": None, "candidates": [], "raw": "UNKNOWN"}
+    monkeypatch.setattr(main.vision, "extract_use_by_date", extract)
+    ids = []
+    for name in ("One", "Two"):
+        item_id = db.add_item(barcode=None, name=name)
+        db.save_date_photo(item_id, b"photo")
+        ids.append(item_id)
+    threads = [threading.Thread(target=main._extract_and_update, args=(item_id,)) for item_id in ids]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert maximum == 1
+
+
+def test_startup_requeue_selects_pending_items_with_photos(monkeypatch):
+    selected = db.add_item(barcode=None, name="Selected")
+    db.start_date_extraction(selected)
+    db.save_date_photo(selected, b"photo")
+    missing_photo = db.add_item(barcode=None, name="No photo")
+    db.start_date_extraction(missing_photo)
+    not_pending = db.add_item(barcode=None, name="Not pending")
+    db.save_date_photo(not_pending, b"photo")
+    pending_with_photo = db.add_item(barcode=None, name="Pending photo")
+    db.update_item(pending_with_photo, date_extraction_pending=1)
+    db.save_date_photo(pending_with_photo, b"photo")
+    queued = []
+    monkeypatch.setattr(main, "_extract_and_update", lambda item_id, **kwargs: queued.append(item_id))
+    main.run_pending_date_extractions()
+    assert queued == [selected, pending_with_photo]
+
+
+def test_restart_requeue_keeps_a_typed_date(monkeypatch):
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2099-01-01")
+    db.save_date_photo(item_id, b"photo")
+    db.start_date_extraction(item_id)
+    monkeypatch.setattr(main.vision, "extract_use_by_date", lambda image_bytes: {"date": "2027-01-02", "candidates": [{"date": "2027-01-02", "repaired": False}], "raw": "x"})
+    main.run_pending_date_extractions()
+    item = db.get_item(item_id)
+    assert item["expiry_date"] == "2099-01-01"
+    assert not item["date_extraction_pending"]
