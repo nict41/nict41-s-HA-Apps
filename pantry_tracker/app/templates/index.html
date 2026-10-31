@@ -132,7 +132,6 @@
   }
   button.danger { color: var(--expired); border-color: var(--expired); }
   button.ghost { background: transparent; }
-  .needs-date-banner { width: auto; min-height: 44px; padding: 6px 10px; margin-bottom: 10px; font-size: var(--type-2); }
   button:disabled { opacity: 0.5; cursor: default; }
   .row { display: flex; gap: 10px; }
   .row > * { flex: 1; }
@@ -180,28 +179,69 @@
   }
 
   .item-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    padding: 12px 0;
+    width: 100%;
+    min-height: 60px;
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
     border-bottom: 1px solid var(--border);
   }
-  .item-row:last-child { border-bottom: none; }
-  .item-main { flex: 1; min-width: 0; }
-  .item-name { font-weight: 600; overflow-wrap: anywhere; }
-  .item-meta { color: var(--muted); font-size: var(--type-2); margin-top: 2px; overflow-wrap: anywhere; }
+  .pantry-entry:last-child .item-row { border-bottom: none; }
+  .item-summary { border: 0; border-radius: 0; background: transparent; color: inherit; padding: 0;
+    min-height: 44px; text-align: left; }
+  .item-main { min-width: 0; }
+  .item-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-meta { color: var(--muted); font-size: var(--type-2); margin-top: 2px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .item-thumb { width: 44px; height: 44px; display: grid; place-items: center; overflow: hidden;
+    border-radius: var(--radius-2); background: var(--surface-2); color: var(--muted); }
+  .item-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .item-thumb .icon-svg { width: 22px; height: 22px; }
+  .item-time { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: var(--type-2);
+    font-weight: 600; white-space: nowrap; }
+  .item-time.expired { color: var(--expired); }
+  .item-time.expiring_soon { color: var(--soon); }
+  .item-time.unknown { color: var(--unknown); }
+  .item-time.frozen { color: var(--accent); }
+  .urgency-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+  .item-expanded { padding: 4px 0 14px; }
+  .item-expanded .item-meta { white-space: normal; overflow-wrap: anywhere; }
+  .item-details { color: var(--muted); font-size: var(--type-2); margin: 4px 0; }
+  .item-attention { color: var(--soon); font-weight: 600; }
   .link-btn {
     width: auto; min-height: 44px; padding: 0; border: none; border-radius: 0;
     background: none; color: var(--accent); font-size: inherit; text-decoration: underline;
   }
   [data-photo-url] { cursor: zoom-in; }
-  .item-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-  .item-actions button { width: auto; min-height: 44px; padding: 7px 10px; font-size: var(--type-2); }
+  .item-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 12px; }
+  .item-actions button { min-width: 0; min-height: 52px; padding: 5px 2px; font-size: var(--type-1);
+    flex-direction: column; gap: 2px; }
+  .item-actions .icon-svg { width: 20px; height: 20px; }
+  .expanded-photo-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; }
+  .expanded-photo-actions .link-btn { min-height: 44px; }
   .chip-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .chip-row button { width: auto; min-height: 44px; padding: 7px 12px; font-size: var(--type-2); }
   .chip-row button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .pantry-controls { margin-bottom: 12px; }
-  .eat-first-row { display: flex; width: 100%; justify-content: space-between; min-height: 44px; margin: 3px 0; }
+  .pantry-controls { position: sticky; top: 57px; z-index: 4; padding: 8px; margin: 0 -16px 12px;
+    border-radius: 0; border-width: 0 0 1px; }
+  .search-wrap { position: relative; }
+  .search-wrap input { height: 40px; min-height: 40px; padding: 7px 40px 7px 38px; }
+  .search-wrap > .icon-svg { position: absolute; left: 9px; top: 8px; width: 22px; height: 22px; color: var(--muted); }
+  .search-clear { position: absolute; right: 0; top: 0; width: 40px; min-height: 40px; padding: 8px;
+    border: 0; background: transparent; }
+  .search-clear .icon-svg { width: 20px; height: 20px; }
+  #pantry-location-filters { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 6px 0 0; }
+  #pantry-location-filters::-webkit-scrollbar { display: none; }
+  #pantry-location-filters button { min-height: 44px; padding: 4px 12px; white-space: nowrap; }
+  #pantry-location-filters button.needs-date-filter { color: var(--soon); }
+  #pantry-group-filter { width: auto; min-height: 36px; padding: 5px 10px; border-radius: 999px; font-size: var(--type-2); }
+  .eat-first-row { display: flex; width: 100%; justify-content: space-between; min-height: 48px; margin: 0;
+    border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 6px 2px; }
+  .eat-first-row:last-of-type { border-bottom: 0; }
+  .eat-first-row .eat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .show-all { width: auto; min-height: 44px; padding: 4px 8px; border: 0; color: var(--accent); }
   .item-row.highlight { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
   .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
@@ -210,6 +250,13 @@
   .date-candidates { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .date-candidates button { width: auto; min-height: 44px; padding: 5px 9px; font-size: var(--type-2); }
   .date-confidence.unread { color: var(--expired); }
+  .edit-form { width: 100%; }
+  .opened-picker { padding-top: 6px; }
+  @media (max-width: 380px) {
+    .item-actions { gap: 3px; }
+    .item-actions button { font-size: 10px; }
+    .item-time { gap: 4px; font-size: 12px; }
+  }
 
   .photo-step {
     display: flex;
@@ -500,9 +547,15 @@
   <!-- ------------------------- Pantry ------------------------- -->
   <section id="view-pantry" class="view">
     <div class="pantry-controls card">
-      <input type="search" id="pantry-search" aria-label="Search pantry" placeholder="Search pantry">
+      <div class="search-wrap">
+        <svg class="icon-svg" aria-hidden="true"><use href="#icon-search"></use></svg>
+        <input type="search" id="pantry-search" aria-label="Search pantry" placeholder="Search pantry">
+        <button type="button" class="search-clear hidden" id="pantry-search-clear" aria-label="Clear search">
+          <svg class="icon-svg" aria-hidden="true"><use href="#icon-x"></use></svg>
+        </button>
+      </div>
       <div id="pantry-location-filters" class="chip-row" aria-label="Filter by location"></div>
-      <select id="pantry-group-filter" aria-label="Food group"><option value="">All food groups</option></select>
+      <select id="pantry-group-filter" aria-label="Food group"><option value="">Food group</option></select>
     </div>
     <div id="eat-first" class="card hidden"></div>
     <div id="pantry-list"></div>
@@ -1663,7 +1716,9 @@ async function uploadDatePhoto(itemId, file, statusEl, ocrPromise = Promise.reso
     statusEl.textContent = "Reading the date…";
     statusEl.classList.remove("hidden");
   }
-  const confidenceNote = document.querySelector(`.item-row[data-id="${itemId}"] .e-date-confidence`);
+  const confidenceNote = document.querySelector(
+    `.pantry-entry[data-id="${itemId}"] .e-date-confidence, .pantry-entry[data-id="${itemId}"] .date-confidence`
+  );
   if (confidenceNote) confidenceNote.innerHTML = "";
   const ocrStartedAt = performance.now();
   const ocrResult = await withOcrCap(ocrPromise);
@@ -1693,7 +1748,7 @@ async function uploadDatePhoto(itemId, file, statusEl, ocrPromise = Promise.reso
     // directly so its own fields (especially the date input) update the
     // moment extraction finishes - otherwise tapping Save before then
     // would submit the stale pre-rescan date and overwrite the fresh one.
-    const openEditEl = document.querySelector(`.item-row[data-id="${itemId}"] .edit-form`);
+    const openEditEl = document.querySelector(`.pantry-entry[data-id="${itemId}"] .edit-form`);
     if (openEditEl && !openEditEl.classList.contains("hidden")) watchEditFormExtraction(itemId, openEditEl);
   } catch (err) {
     if (statusEl) statusEl.textContent = "Could not upload that photo - try again.";
@@ -1743,21 +1798,25 @@ reviewForm.addEventListener("submit", async (e) => {
 });
 
 // -- Pantry list ----------------------------------------------------------
-const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Expiring soon", ok: "OK", unknown: "Needs a date", frozen: "Freezer" };
+const BUCKET_LABELS = { expired: "Expired", expiring_soon: "Use soon", ok: "Later", unknown: "Needs a date", frozen: "Freezer" };
 const BUCKET_ORDER = ["expired", "expiring_soon", "ok", "unknown", "frozen"];
 const FOOD_GROUPS = ["Dairy & eggs", "Meat & fish", "Fruit & veg", "Bakery", "Snacks & sweets", "Tins & jars",
   "Pasta, rice & cereal", "Ready meals", "Drinks", "Cooking & condiments", "Other"];
 const OPENED_DAYS = [1, 2, 3, 5, 7, 14, 30];
 let pantryLocationFilter = "all";
 let pantryGroupFilter = "";
+let expandedPantryItemId = null;
 let deleteResetTimer = null;
 
-function humanDays(days) {
-  if (days === null || days === undefined) return "";
-  if (days < 0) return `Expired ${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} ago`;
-  if (days === 0) return "Today";
-  if (days === 1) return "Tomorrow";
-  return `In ${days} days`;
+function pantryTimeLeft(item) {
+  if (item.bucket === "frozen") return "Frozen";
+  if (item.days_left === null || item.days_left === undefined) return "No date";
+  if (item.days_left < 0) return "Expired";
+  if (item.days_left === 0) return "Today";
+  if (item.days_left === 1) return "Tomorrow";
+  if (item.days_left <= 13) return `${item.days_left} days`;
+  if (item.days_left <= 60) return "2 weeks";
+  return "3 months";
 }
 
 // "2027-07-01" -> "1 July 2027". The stored/wire format stays ISO (sorting,
@@ -1772,50 +1831,94 @@ function formatDisplayDate(iso) {
 }
 
 function itemRowHtml(item) {
-  const meta = [item.brand, item.quantity, item.group].filter(Boolean).join(" · ");
-  const daysText = item.days_left === null ? "" : humanDays(item.days_left);
-  const effective = item.effective_date;
-  const dateLine = item.date_extraction_pending
-    ? '<span class="spinner spinner-small"></span> Reading use-by date…'
-    : item.bucket === "frozen" ? "Frozen"
-    : effective ? `${escapeHtml(daysText)} · ${escapeHtml(formatDisplayDate(effective))}`
-    : "No use-by date set";
-  const openedLine = item.opened_at && item.use_within_days
-    ? `<div class="item-meta">Opened ${escapeHtml(new Date(item.opened_at + "T00:00:00Z")
-      .toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }))}, use within ` +
-      `${item.use_within_days} ${item.use_within_days === 1 ? "day" : "days"}</div>`
+  const id = Number(item.id);
+  const expanded = id === expandedPantryItemId;
+  const meta = [item.brand || item.group || item.category, LOCATION_LABELS[item.location || ""]]
+    .filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(" · ");
+  const attention = item.date_extraction_pending || ["conflict", "check", "unread"].includes(item.date_confidence);
+  const time = pantryTimeLeft(item);
+  const timeIcon = item.bucket === "frozen"
+    ? '<svg class="icon-svg" aria-hidden="true"><use href="#icon-snowflake"></use></svg>'
+    : "";
+  const thumb = item.display_image_url
+    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" ` +
+      `data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
+    : '<svg class="icon-svg" aria-hidden="true"><use href="#icon-package"></use></svg>';
+  const useByLine = item.effective_date
+    ? `Use by ${formatDisplayDate(item.effective_date)}`
+    : "No use-by date";
+  const printedDate = item.expiry_date && item.effective_date && item.expiry_date !== item.effective_date
+    ? `<div class="item-details">Printed date ${escapeHtml(formatDisplayDate(item.expiry_date))}</div>`
+    : "";
+  const openedLine = item.opened_at
+    ? `<div class="item-details">Opened ${escapeHtml(formatDisplayDate(item.opened_at))}` +
+      `${item.use_within_days ? ` · use within ${item.use_within_days} ${item.use_within_days === 1 ? "day" : "days"}` : ""}</div>`
+    : "";
+  const defrostedLine = item.defrosted_at
+    ? `<div class="item-details">Defrosted ${escapeHtml(formatDisplayDate(item.defrosted_at))}</div>`
+    : "";
+  const quantityLine = item.quantity
+    ? `<div class="item-details">Quantity: ${escapeHtml(item.quantity)}</div>`
     : "";
   const photoCaption = item.expiry_date ? `Read as ${formatDisplayDate(item.expiry_date)}` : "No date read yet";
   const photoLink = item.has_date_photo
-    ? `<div class="item-meta"><button type="button" class="link-btn" ` +
-      `data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" ` +
-      `data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
+    ? `<button type="button" class="link-btn" data-photo-url="api/items/${id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" ` +
+      `data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button>`
     : "";
-  const confidence = item.date_extraction_pending ? "" : confidenceHtml(item);
-  const productImg = item.display_image_url
-    ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" ` +
-      `data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
+  const confidence = item.date_extraction_pending ? "" : confidenceHtml(item, id);
+  const productPhoto = item.barcode
+    ? '<button type="button" class="link-btn btn-expanded-product-photo">Product photo</button>'
     : "";
+  const openedPickerDays = item.use_within_days || item.opened_days || 3;
+  const openedPicker = [1, 2, 3, 5, 7, 14, 30].map((days) =>
+    `<button type="button" class="ghost opened-chip" data-days="${days}" aria-pressed="${days === openedPickerDays}">${days} days</button>`
+  ).join("");
   return `
-    <div class="item-row" data-id="${item.id}">
-      ${productImg}
-      <div class="item-main">
-        <div class="item-name">${escapeHtml(item.name)}${item.count > 1 ? ` ×${item.count}` : ""}</div>
-        <div class="item-meta">${escapeHtml(meta)}</div>
-        <div class="item-meta">${dateLine}</div>
-        ${openedLine}
-        ${confidence}
-        ${photoLink}
-        <div class="item-actions">
-          <button class="ghost btn-edit" type="button">Edit</button>
-          <button class="ghost btn-opened" type="button">Opened</button>
-          <button class="ghost btn-finish" type="button" data-outcome="eaten">${item.count > 1 ? "Eaten 1" : "Eaten"}</button>
-          <button class="ghost btn-finish" type="button" data-outcome="binned">${item.count > 1 ? "Binned 1" : "Binned"}</button>
+    <div class="pantry-entry" data-id="${id}">
+      <button type="button" class="item-row item-summary" aria-expanded="${expanded}" aria-controls="item-expanded-${id}">
+        <span class="item-thumb">${thumb}</span>
+        <span class="item-main">
+          <span class="item-name">${escapeHtml(item.name)}${item.count > 1 ? ` ×${item.count}` : ""}</span>
+          <span class="item-meta">${attention
+            ? `${escapeHtml(meta)}${meta ? " · " : ""}<span class="item-attention">` +
+              `${item.date_extraction_pending ? '<span class="spinner spinner-small"></span> Reading date' : "Check date"}</span>`
+            : escapeHtml(meta || " ")}</span>
+        </span>
+        <span class="item-time ${escapeAttr(item.bucket)}"><span class="urgency-dot"></span>${timeIcon}${escapeHtml(time)}</span>
+      </button>
+      <div class="item-expanded ${expanded ? "" : "hidden"}" id="item-expanded-${id}">
+        <div class="item-details">${escapeHtml(useByLine)}</div>
+        ${printedDate}${openedLine}${defrostedLine}${quantityLine}
+        ${item.date_extraction_pending
+          ? '<div class="item-details"><span class="spinner spinner-small"></span> Reading date</div>'
+          : confidence}
+        <div class="expanded-photo-actions">
+          ${photoLink}
+          <button type="button" class="link-btn btn-expanded-rescan">Rescan use-by date</button>
+          ${productPhoto}
         </div>
-        <div class="opened-picker hidden"></div>
+        <img class="photo-thumb expanded-date-thumb hidden" alt="Use-by date photo">
+        <div class="muted expanded-date-status hidden"></div>
+        <div class="item-actions">
+          <button class="primary btn-finish" type="button" data-outcome="eaten">
+            <svg class="icon-svg" aria-hidden="true"><use href="#icon-check"></use></svg>${item.count > 1 ? "Eaten 1" : "Eaten"}
+          </button>
+          <button class="ghost btn-finish" type="button" data-outcome="binned">
+            <svg class="icon-svg" aria-hidden="true"><use href="#icon-trash"></use></svg>${item.count > 1 ? "Binned 1" : "Binned"}
+          </button>
+          <button class="ghost btn-opened" type="button">
+            <svg class="icon-svg" aria-hidden="true"><use href="#icon-calendar"></use></svg>Opened
+          </button>
+          <button class="ghost btn-edit" type="button">
+            <svg class="icon-svg" aria-hidden="true"><use href="#icon-pencil"></use></svg>Edit
+          </button>
+        </div>
+        <div class="opened-picker hidden" data-days="${openedPickerDays}">
+          <div class="chip-row">${openedPicker}</div>
+          <button type="button" class="primary btn-save-opened">Save opened date</button>
+        </div>
         <div class="edit-form hidden"></div>
       </div>
-      <span class="badge ${item.bucket}">${BUCKET_LABELS[item.bucket]}</span>
     </div>`;
 }
 
@@ -2068,16 +2171,26 @@ async function loadPantry() {
 
 function renderPantry() {
   const list = $("#pantry-list");
+  const focusedFilter = document.activeElement?.matches(".pantry-filter")
+    ? document.activeElement.dataset.filter
+    : null;
   const search = $("#pantry-search").value.trim().toLocaleLowerCase();
   const filters = ["all", "fridge", "cupboard", "freezer", "needs_date"];
+  const needsDateCount = pantryCache.filter((item) => item.bucket === "unknown").length;
+  $("#pantry-search-clear").classList.toggle("hidden", !search);
   $("#pantry-location-filters").innerHTML = filters.map((filter) => {
-    const label = filter === "all" ? "All" : filter === "needs_date" ? "Needs a date" : LOCATION_LABELS[filter];
-    return `<button type="button" class="ghost pantry-filter" data-filter="${filter}" ` +
+    const label = filter === "all" ? "All" : filter === "needs_date" ?
+      `Needs a date${needsDateCount ? ` ${needsDateCount}` : ""}` : LOCATION_LABELS[filter];
+    const urgentClass = filter === "needs_date" && needsDateCount ? " needs-date-filter" : "";
+    return `<button type="button" class="ghost pantry-filter${urgentClass}" data-filter="${filter}" ` +
       `aria-pressed="${pantryLocationFilter === filter}">${label}</button>`;
   }).join("");
+  if (focusedFilter) {
+    $("#pantry-location-filters").querySelector(`[data-filter="${focusedFilter}"]`)?.focus();
+  }
   const groupSelect = $("#pantry-group-filter");
   if (groupSelect.options.length !== FOOD_GROUPS.length + 1) {
-    groupSelect.innerHTML = '<option value="">All food groups</option>' +
+    groupSelect.innerHTML = '<option value="">Food group</option>' +
       FOOD_GROUPS.map((group) => `<option value="${escapeAttr(group)}">${escapeHtml(group)}</option>`).join("");
   }
   groupSelect.value = pantryGroupFilter;
@@ -2090,7 +2203,7 @@ function renderPantry() {
     return locationMatch && groupMatch && (!search || searchable.includes(search));
   });
 
-  const anyPending = pantryCache.some((i) => i.date_extraction_pending);
+  const anyPending = pantryCache.some((item) => item.date_extraction_pending);
   if (anyPending) {
     ensurePantryPolling();
   } else if (pantryPollTimer) {
@@ -2098,186 +2211,220 @@ function renderPantry() {
     pantryPollTimer = null;
   }
 
-  if (pantryCache.length === 0) {
-    list.innerHTML = '<div class="empty-state">Nothing tracked yet - scan something to get started.</div>';
-    $("#eat-first").classList.add("hidden");
-    return;
-  }
-  const needsDateCount = pantryCache.filter((item) => item.bucket === "unknown").length;
-  let html = needsDateCount
-    ? `<button type="button" class="ghost needs-date-banner" id="needs-date-banner">` +
-      `${needsDateCount === 1 ? "1 item needs" : `${needsDateCount} items need`} a date</button>`
-    : "";
   const eatFirst = $("#eat-first");
-  const dueSoon = pantryCache.filter((item) => item.effective_date && item.days_left <= 7).slice(0, 5);
+  const dueSoon = pantryCache.filter((item) => item.effective_date && item.days_left <= 7).slice(0, 3);
   eatFirst.classList.toggle("hidden", searchActive || dueSoon.length === 0);
   if (!searchActive && dueSoon.length) {
+    const moreCount = pantryCache.filter((item) => item.effective_date && item.days_left <= 7).length;
     eatFirst.innerHTML = '<div class="section-title mt-0">Eat first</div>' +
       dueSoon.map((item) =>
         `<button type="button" class="ghost eat-first-row" data-target-id="${item.id}">` +
-        `<span>${escapeHtml(item.name)}</span><span>${escapeHtml(humanDays(item.days_left))}</span></button>`
-      ).join("");
+        `<span class="eat-name">${escapeHtml(item.name)}</span>` +
+        `<span>${escapeHtml(pantryTimeLeft(item))}</span></button>`
+      ).join("") + (moreCount > 3
+        ? '<button type="button" class="ghost show-all">Show all</button>'
+        : "");
   }
-  if (!visible.length) html += '<div class="empty-state">Nothing matches</div>';
+
+  if (pantryCache.length === 0) {
+    list.innerHTML = '<div class="empty-state">Nothing tracked yet. Scan something to get started.</div>';
+    eatFirst.classList.add("hidden");
+    return;
+  }
+  let html = "";
+  if (!visible.length) html = '<div class="empty-state">Nothing matches</div>';
   for (const bucket of BUCKET_ORDER) {
-    const items = visible.filter((i) => i.bucket === bucket);
-    if (items.length === 0) continue;
-    const title = bucket === "frozen" ? "Freezer" : BUCKET_LABELS[bucket];
-    const groupId = bucket === "unknown" ? ' id="needs-date-group"' : "";
-    html += `<div class="section-title"${groupId}>${title} (${items.length})</div><div class="card">`;
+    const items = visible.filter((item) => item.bucket === bucket);
+    if (!items.length) continue;
+    const title = bucket === "unknown" ? `Needs a date ${items.length}` : `${BUCKET_LABELS[bucket]} ${items.length}`;
+    html += `<div class="section-title">${title}</div><div class="card">`;
     html += items.map(itemRowHtml).join("");
     html += "</div>";
   }
   list.innerHTML = html;
-
-  $$(".btn-edit").forEach((btn) =>
-    btn.addEventListener("click", () => {
-      const row = btn.closest(".item-row");
-      const id = Number(row.dataset.id);
-      const item = pantryCache.find((i) => i.id === id);
-      const editEl = row.querySelector(".edit-form");
-      editEl.innerHTML = editFormHtml(item);
-      editEl.classList.remove("hidden");
-      renderLocationChips(editEl.querySelector(".e-location-chips"), item.location || "", "e-location");
-      editEl.querySelector(".e-cancel").addEventListener("click", () => {
-        editEl.classList.add("hidden");
-        // Picks up a product photo taken while the panel was open.
-        pollPantryIfIdle();
-      });
-      const productPhotoBtn = editEl.querySelector(".e-product-photo");
-      if (productPhotoBtn) {
-        productPhotoBtn.addEventListener("click", () => {
-          openProductPhotoCapture({ barcode: item.barcode, imgEl: editEl.querySelector(".e-product-thumb") });
-        });
-      }
-      if (item.date_extraction_pending) watchEditFormExtraction(id, editEl);
-
-      editEl.querySelector(".e-rescan-date").addEventListener("click", () => {
-        openDatePhotoCapture({
-          itemId: id,
-          thumbEl: editEl.querySelector(".e-date-thumb"),
-          statusEl: editEl.querySelector(".e-date-status"),
-        });
-      });
-      const deleteBtn = editEl.querySelector(".btn-delete");
-      deleteBtn.addEventListener("click", async () => {
-        if (deleteBtn.dataset.confirm !== "yes") {
-          deleteBtn.dataset.confirm = "yes";
-          deleteBtn.textContent = "Tap again to delete";
-          clearTimeout(deleteResetTimer);
-          deleteResetTimer = setTimeout(() => {
-            deleteBtn.dataset.confirm = "";
-            deleteBtn.textContent = "Delete";
-          }, 4000);
-          return;
-        }
-        try {
-          const res = await fetch(`api/items/${id}/delete`, { method: "POST" });
-          if (!res.ok) throw new Error("Could not delete item");
-          editEl.classList.add("hidden");
-          await loadPantry();
-          toast("Deleted");
-        } catch (err) {
-          toast("Could not delete item");
-        }
-      });
-      editEl.querySelector(".e-not-opened").addEventListener("click", () => {
-        editEl.querySelector(".e-opened-at").value = "";
-        editEl.querySelector(".e-opened-days").value = "";
-      });
-
-      const saveBtn = editEl.querySelector(".e-save");
-      saveBtn.addEventListener("click", async () => {
-        saveBtn.disabled = true;
-
-        // A rescan uploads and starts reading in the background the
-        // moment it's captured (see uploadDatePhoto) - Save never needs to
-        // wait on it, it just saves whatever's currently in the form.
-        const body = new FormData();
-        body.append("name", editEl.querySelector(".e-name").value);
-        body.append("brand", editEl.querySelector(".e-brand").value);
-        body.append("quantity", editEl.querySelector(".e-quantity").value);
-        body.append("category", editEl.querySelector(".e-category").value);
-        body.append("expiry_date", editEl.querySelector(".e-expiry").value);
-        body.append("notes", editEl.querySelector(".e-notes").value);
-        body.append("count", editEl.querySelector(".e-count").value);
-        body.append("location", editEl.querySelector(".e-location").value);
-        body.append("opened_at", editEl.querySelector(".e-opened-at").value);
-        body.append("use_within_days", editEl.querySelector(".e-opened-days").value);
-        try {
-          const res = await fetch(`api/items/${id}`, { method: "POST", body });
-          if (res.ok) {
-            const updated = await res.json();
-            toast(item.location === "freezer" && updated.location !== "freezer" ? "Defrosted: use by tomorrow" : "Saved");
-            await loadPantry();
-          } else {
-            toast("Could not save changes");
-          }
-        } catch (err) {
-          toast("Could not save changes");
-        } finally {
-          saveBtn.disabled = false;
-        }
-      });
-    })
-  );
-
-  $$(".btn-finish").forEach((btn) =>
-    btn.addEventListener("click", async () => {
-      const id = Number(btn.closest(".item-row").dataset.id);
-      try {
-        const res = await fetch(`api/items/${id}/finish`, { method: "POST", body: new URLSearchParams({ outcome: btn.dataset.outcome }) });
-        if (!res.ok) throw new Error("Could not finish item");
-        const result = await res.json();
-        const label = btn.dataset.outcome === "eaten" ? "Marked as eaten" : "Marked as binned";
-        toast(label, "Undo", async () => {
-          try {
-            const undo = await fetch(`api/events/${result.event_id}/undo`, { method: "POST" });
-            if (!undo.ok) throw new Error("Could not undo");
-            toast("Undo complete");
-            await loadPantry();
-          } catch (err) {
-            toast("Could not undo");
-          }
-        }, 6000);
-        await loadPantry();
-      } catch (err) {
-        toast("Could not finish item");
-      }
-    })
-  );
-
-  $$(".btn-opened").forEach((btn) => btn.addEventListener("click", () => {
-    const row = btn.closest(".item-row");
-    const item = pantryCache.find((entry) => entry.id === Number(row.dataset.id));
-    const picker = row.querySelector(".opened-picker");
-    picker.classList.toggle("hidden");
-    picker.classList.toggle("open", !picker.classList.contains("hidden"));
-    if (picker.classList.contains("hidden")) return;
-    const selected = item.use_within_days || item.opened_days || 3;
-    picker.dataset.days = String(selected);
-    picker.innerHTML = '<div class="chip-row">' + [1, 2, 3, 5, 7, 14, 30].map((days) =>
-      `<button type="button" class="ghost opened-chip" data-days="${days}" aria-pressed="${days === selected}">${days}</button>`
-    ).join("") + '</div><button type="button" class="primary btn-save-opened">Save</button>';
-    picker.querySelectorAll(".opened-chip").forEach((chip) => chip.addEventListener("click", () => {
-      picker.dataset.days = chip.dataset.days;
-      picker.querySelectorAll(".opened-chip").forEach((other) => other.setAttribute("aria-pressed", String(other === chip)));
-    }));
-    picker.querySelector(".btn-save-opened").addEventListener("click", async () => {
-      try {
-        const body = new URLSearchParams({ days: picker.dataset.days });
-        const res = await fetch(`api/items/${item.id}/opened`, { method: "POST", body });
-        if (!res.ok) throw new Error("Could not save opened date");
-        await loadPantry();
-        toast("Opened date saved");
-      } catch (err) {
-        toast("Could not save opened date");
-      }
-    });
-  }));
 }
 
+async function savePantryEdit(editEl, id, item) {
+  const saveBtn = editEl.querySelector(".e-save");
+  saveBtn.disabled = true;
+  const body = new FormData();
+  body.append("name", editEl.querySelector(".e-name").value);
+  body.append("brand", editEl.querySelector(".e-brand").value);
+  body.append("quantity", editEl.querySelector(".e-quantity").value);
+  body.append("category", editEl.querySelector(".e-category").value);
+  body.append("expiry_date", editEl.querySelector(".e-expiry").value);
+  body.append("notes", editEl.querySelector(".e-notes").value);
+  body.append("count", editEl.querySelector(".e-count").value);
+  body.append("location", editEl.querySelector(".e-location").value);
+  body.append("opened_at", editEl.querySelector(".e-opened-at").value);
+  body.append("use_within_days", editEl.querySelector(".e-opened-days").value);
+  try {
+    const response = await fetch(`api/items/${id}`, { method: "POST", body });
+    if (!response.ok) throw new Error("Could not save changes");
+    const updated = await response.json();
+    toast(item.location === "freezer" && updated.location !== "freezer" ? "Defrosted: use by tomorrow" : "Saved");
+    await loadPantry();
+  } catch (err) {
+    toast("Could not save changes");
+  } finally {
+    saveBtn.disabled = false;
+  }
+}
+
+$("#pantry-list").addEventListener("click", async (event) => {
+  const entry = event.target.closest(".pantry-entry");
+  if (!entry) return;
+  const id = Number(entry.dataset.id);
+  const item = pantryCache.find((candidate) => candidate.id === id);
+  if (!item) return;
+  const editEl = entry.querySelector(".edit-form");
+  const picker = entry.querySelector(".opened-picker");
+
+  if (event.target.closest(".item-summary")) {
+    expandedPantryItemId = expandedPantryItemId === id ? null : id;
+    renderPantry();
+    return;
+  }
+  if (event.target.closest(".btn-edit")) {
+    if (!editEl.classList.contains("hidden")) {
+      editEl.classList.add("hidden");
+      return;
+    }
+    editEl.innerHTML = editFormHtml(item);
+    editEl.classList.remove("hidden");
+    renderLocationChips(editEl.querySelector(".e-location-chips"), item.location || "", "e-location");
+    if (item.date_extraction_pending) watchEditFormExtraction(id, editEl);
+    return;
+  }
+  if (event.target.closest(".btn-expanded-rescan")) {
+    openDatePhotoCapture({
+      itemId: id,
+      thumbEl: entry.querySelector(".expanded-date-thumb"),
+      statusEl: entry.querySelector(".expanded-date-status"),
+    });
+    return;
+  }
+  if (event.target.closest(".btn-expanded-product-photo")) {
+    let image = entry.querySelector(".item-thumb img");
+    if (!image) {
+      image = document.createElement("img");
+      image.className = "product-thumb hidden";
+      image.alt = "";
+      entry.querySelector(".item-thumb").append(image);
+      entry.querySelector(".item-thumb > .icon-svg")?.classList.add("hidden");
+    }
+    openProductPhotoCapture({ barcode: item.barcode, imgEl: image });
+    return;
+  }
+  if (event.target.closest(".e-cancel")) {
+    editEl.classList.add("hidden");
+    pollPantryIfIdle();
+    return;
+  }
+  if (event.target.closest(".e-product-photo")) {
+    openProductPhotoCapture({ barcode: item.barcode, imgEl: editEl.querySelector(".e-product-thumb") });
+    return;
+  }
+  if (event.target.closest(".e-rescan-date")) {
+    openDatePhotoCapture({
+      itemId: id,
+      thumbEl: editEl.querySelector(".e-date-thumb"),
+      statusEl: editEl.querySelector(".e-date-status"),
+    });
+    return;
+  }
+  if (event.target.closest(".e-not-opened")) {
+    editEl.querySelector(".e-opened-at").value = "";
+    editEl.querySelector(".e-opened-days").value = "";
+    return;
+  }
+  if (event.target.closest(".e-save")) {
+    await savePantryEdit(editEl, id, item);
+    return;
+  }
+  const deleteBtn = event.target.closest(".btn-delete");
+  if (deleteBtn) {
+    if (deleteBtn.dataset.confirm !== "yes") {
+      deleteBtn.dataset.confirm = "yes";
+      deleteBtn.textContent = "Tap again to delete";
+      clearTimeout(deleteResetTimer);
+      deleteResetTimer = setTimeout(() => {
+        deleteBtn.dataset.confirm = "";
+        deleteBtn.textContent = "Delete";
+      }, 4000);
+      return;
+    }
+    try {
+      const response = await fetch(`api/items/${id}/delete`, { method: "POST" });
+      if (!response.ok) throw new Error("Could not delete item");
+      expandedPantryItemId = null;
+      await loadPantry();
+      toast("Deleted");
+    } catch (err) {
+      toast("Could not delete item");
+    }
+    return;
+  }
+  if (event.target.closest(".btn-opened")) {
+    picker.classList.toggle("hidden");
+    picker.classList.toggle("open", !picker.classList.contains("hidden"));
+    return;
+  }
+  const openedChip = event.target.closest(".opened-chip");
+  if (openedChip) {
+    picker.dataset.days = openedChip.dataset.days;
+    picker.querySelectorAll(".opened-chip").forEach((chip) => {
+      chip.setAttribute("aria-pressed", String(chip === openedChip));
+    });
+    return;
+  }
+  if (event.target.closest(".btn-save-opened")) {
+    try {
+      const body = new URLSearchParams({ days: picker.dataset.days });
+      const response = await fetch(`api/items/${id}/opened`, { method: "POST", body });
+      if (!response.ok) throw new Error("Could not save opened date");
+      picker.classList.add("hidden");
+      picker.classList.remove("open");
+      await loadPantry();
+      toast("Opened date saved");
+    } catch (err) {
+      toast("Could not save opened date");
+    }
+    return;
+  }
+  const finish = event.target.closest(".btn-finish");
+  if (finish) {
+    try {
+      const response = await fetch(`api/items/${id}/finish`, {
+        method: "POST",
+        body: new URLSearchParams({ outcome: finish.dataset.outcome }),
+      });
+      if (!response.ok) throw new Error("Could not finish item");
+      const result = await response.json();
+      const label = finish.dataset.outcome === "eaten" ? "Marked as eaten" : "Marked as binned";
+      toast(label, "Undo", async () => {
+        try {
+          const undo = await fetch(`api/events/${result.event_id}/undo`, { method: "POST" });
+          if (!undo.ok) throw new Error("Could not undo");
+          toast("Undo complete");
+          await loadPantry();
+        } catch (err) {
+          toast("Could not undo");
+        }
+      }, 6000);
+      await loadPantry();
+    } catch (err) {
+      toast("Could not finish item");
+    }
+  }
+});
+
 $("#pantry-search").addEventListener("input", renderPantry);
+$("#pantry-search-clear").addEventListener("click", () => {
+  $("#pantry-search").value = "";
+  $("#pantry-search").focus();
+  renderPantry();
+});
 $("#pantry-location-filters").addEventListener("click", (event) => {
   const button = event.target.closest(".pantry-filter");
   if (!button) return;
@@ -2288,18 +2435,16 @@ $("#pantry-group-filter").addEventListener("change", (event) => {
   pantryGroupFilter = event.target.value;
   renderPantry();
 });
-$("#pantry-list").addEventListener("click", (event) => {
-  const button = event.target.closest("button");
-  if (button?.matches(".needs-date-banner")) {
-    pantryLocationFilter = "needs_date";
-    renderPantry();
-    $("#needs-date-group")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-});
 $("#eat-first").addEventListener("click", (event) => {
+  if (event.target.closest(".show-all")) {
+    $("#pantry-list").scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   const button = event.target.closest(".eat-first-row");
   if (!button) return;
-  const target = document.querySelector(`.item-row[data-id="${button.dataset.targetId}"]`);
+  expandedPantryItemId = Number(button.dataset.targetId);
+  renderPantry();
+  const target = document.querySelector(`.pantry-entry[data-id="${button.dataset.targetId}"] .item-summary`);
   target?.scrollIntoView({ behavior: "smooth", block: "center" });
   target?.classList.add("highlight");
   setTimeout(() => target?.classList.remove("highlight"), 1800);
