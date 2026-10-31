@@ -1,0 +1,33 @@
+name: "Android Dev"
+version: "0.1.0"
+slug: "android_dev"
+description: "Android development tools and wireless device control for Claude Code"
+url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/android_dev"
+arch:
+  - amd64
+init: false
+startup: application
+boot: auto
+map:
+  - share:rw
+ports:
+  8200/tcp: null
+ports_description:
+  8200/tcp: "Authenticated Android Dev MCP server (internal app network)"
+watchdog: "http://[HOST]:[PORT:8200]/health"
+backup_exclude:
+  - "**/android-sdk/**"
+  - "**/gradle/**"
+  - "**/tools/**"
+options:
+  accept_android_sdk_license: false
+  mcp_token: ""
+  gradle_max_heap_gb: 6
+  gradle_max_workers: 3
+  gradle_job_timeout_minutes: 60
+schema:
+  accept_android_sdk_license: bool
+  mcp_token: password
+  gradle_max_heap_gb: int(2,16)
+  gradle_max_workers: int(1,4)
+  gradle_job_timeout_minutes: int(5,240)
