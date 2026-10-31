@@ -1613,7 +1613,12 @@ function confidenceHtml(item, id = item.id) {
   const confidence = item.date_confidence;
   if (!confidence) return "";
   if (confidence === "confirmed") return '<div class="date-confidence confirmed">✓ Both readers agree</div>';
-  if (confidence === "unread") return `<div class="date-confidence unread">Couldn\'t read the date. Tap a line to try it, or use Edit.<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
+  if (confidence === "unread") {
+    const message = item.expiry_date
+      ? "Couldn't read the new photo, so the old date is still in use. Tap a line to try it, or use Edit."
+      : "Couldn't read the date. Tap a line to try it, or use Edit.";
+    return `<div class="date-confidence unread">${escapeHtml(message)}<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
+  }
   if (confidence === "check") return `<div class="date-confidence check">Check this date against the photo<div class="date-candidates">${dateTextLines(item).map(line => `<button type="button" class="link-btn date-text-line" data-item-id="${id}" data-line="${escapeAttr(line)}">${escapeHtml(line)}</button>`).join("")}</div></div>`;
   if (confidence === "conflict") return `<div class="date-confidence conflict">Readings differ:<div class="date-candidates">${(item.date_candidates || []).map((candidate) =>
     `<button type="button" class="link-btn date-candidate" data-item-id="${id}" data-date="${escapeAttr(candidate)}">${escapeHtml(formatDisplayDate(candidate))}</button>`
