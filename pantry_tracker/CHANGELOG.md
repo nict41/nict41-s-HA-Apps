@@ -1,3 +1,15 @@
+## 0.13.0
+
+- Track printed and effective use-by dates, opened dates, fridge/cupboard/freezer
+  location, and quantities. Defrosting starts a tomorrow use-by date.
+- Add Eat first, pantry search and filters, food groups, opened-date chips,
+  per-item quantity controls, and rapid live-camera scanning.
+- Record Eaten and Binned events, undo finishes, and show monthly
+  food-waste totals. Daily summaries can be set to a chosen local hour.
+- Refresh Home Assistant sensors after a restart, add notification actions,
+  and include effective dates, location, counts, and freezer totals in sensors.
+- Tidy existing product names once, and add the `/<slug>/add` scanning route.
+
 # Changelog
 
 ## 0.12.2

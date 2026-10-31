@@ -34,13 +34,7 @@ def _mock_reply(monkeypatch, content: str):
 
 def _freeze_today(monkeypatch, year: int, month: int, day: int):
     from datetime import date as _date
-
-    class _FixedDate(_date):
-        @classmethod
-        def today(cls):
-            return _date(year, month, day)
-
-    monkeypatch.setattr(vision, "date", _FixedDate)
+    monkeypatch.setattr(vision.db, "today", lambda: _date(year, month, day))
 
 
 def test_not_configured_skips_network_entirely(monkeypatch):

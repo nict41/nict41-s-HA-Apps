@@ -1,9 +1,11 @@
 from io import BytesIO
+import asyncio
 import threading
 import time
 
 import db
 import main
+import settings
 from fastapi.testclient import TestClient
 from PIL import Image
 
@@ -180,13 +182,111 @@ def test_add_list_and_item_lifecycle():
     assert res.status_code == 200
     assert res.json()["name"] == "Milk (2%)"
 
-    res = client.post(f"/api/items/{item['id']}/consume")
+    res = client.post(f"/api/items/{item['id']}/finish", data={"outcome": "eaten"})
     assert res.status_code == 200
     assert db.get_item(item["id"])["status"] == db.STATUS_CONSUMED
 
     res = client.post(f"/api/items/{item['id']}/delete")
     assert res.status_code == 200
     assert db.get_item(item["id"]) is None
+
+
+def test_add_validates_count_location_and_opened_days():
+    assert client.post("/api/items", data={"name": "Soup", "count": 100}).status_code == 400
+    assert client.post("/api/items", data={"name": "Soup", "location": "garage"}).status_code == 400
+    assert client.post("/api/items", data={"name": "Soup", "use_within_days": 366}).status_code == 400
+
+
+def test_location_opened_and_add_one_routes(monkeypatch):
+    item_id = db.add_item(barcode="1234567", name="Soup", count=1)
+    assert client.post(f"/api/items/{item_id}/opened", data={"days": 3}).status_code == 200
+    assert db.get_item(item_id)["use_within_days"] == 3
+    assert client.post(f"/api/items/{item_id}/location", data={"location": "freezer"}).json()["bucket"] == db.BUCKET_FROZEN
+    assert client.post(f"/api/items/{item_id}/location", data={"location": "fridge"}).json()["defrosted_at"] == db.today().isoformat()
+    newest_id = db.add_item(barcode="1234567", name="Different date", count=4)
+    result = client.post(f"/api/items/{item_id}/add-one")
+    assert result.json()["count"] == 2
+    assert db.get_item(newest_id)["count"] == 4
+    full_id = db.add_item(barcode=None, name="Full", count=99)
+    assert client.post(f"/api/items/{full_id}/add-one").status_code == 400
+
+
+def test_republish_only_syncs_after_404(monkeypatch):
+    calls = []
+    monkeypatch.setattr(main.ha_sync, "summary_state_exists", lambda: False)
+    monkeypatch.setattr(main.ha_sync, "sync", lambda items: calls.append(items))
+    monkeypatch.setattr(main.ha_sync, "notify_summary", lambda items: (_ for _ in ()).throw(AssertionError("notifier called")))
+    main.run_republish_check()
+    assert len(calls) == 1
+    monkeypatch.setattr(main.ha_sync, "summary_state_exists", lambda: None)
+    main.run_republish_check()
+    assert len(calls) == 1
+
+
+def test_tidy_migration_runs_once(monkeypatch):
+    item_id = db.add_item(barcode=None, name="NATURAL SEA SALT", brand="BRAND NAME")
+    main.tidy_existing_data()
+    assert db.get_item(item_id)["name"] == "Natural Sea Salt"
+    db.update_item(item_id, name="Hand Edited")
+    main.tidy_existing_data()
+    assert db.get_item(item_id)["name"] == "Hand Edited"
+
+
+def test_tidy_migration_preserves_null_brand():
+    item_id = db.add_item(barcode=None, name="NATURAL SEA SALT", brand=None)
+    with db._connect() as conn:
+        conn.execute(
+            "INSERT INTO barcode_cache (barcode, brand, cached_at) VALUES (?,?,?)",
+            ("123456789", None, db.now_iso()),
+        )
+    main.tidy_existing_data()
+    assert db.get_item(item_id)["brand"] is None
+    assert db.get_cached_barcode("123456789")["brand"] is None
+
+
+def test_daily_summary_job_uses_local_time_grace_and_logs_reschedule(monkeypatch, capsys):
+    class FakeScheduler:
+        running = False
+
+        def __init__(self):
+            self.jobs = []
+            self.reschedules = []
+
+        def add_job(self, *args, **kwargs):
+            self.jobs.append((args, kwargs))
+
+        def start(self):
+            self.running = True
+
+        def shutdown(self, wait=False):
+            self.running = False
+
+        def reschedule_job(self, *args, **kwargs):
+            self.reschedules.append((args, kwargs))
+
+    scheduler = FakeScheduler()
+    monkeypatch.setattr(main, "scheduler", scheduler)
+    monkeypatch.setattr(main, "tidy_existing_data", lambda: None)
+    monkeypatch.setattr(main.ha_sync, "configured", lambda: False)
+    monkeypatch.setenv("TZ", "Europe/London")
+    settings.set_many({"notify_hour": 6})
+
+    async def run_lifespan():
+        async with main.lifespan(main.app):
+            pass
+
+    asyncio.run(run_lifespan())
+    daily = next(job for job in scheduler.jobs if job[1].get("id") == main._NOTIFY_JOB_ID)
+    assert daily[1]["hour"] == 6
+    assert daily[1]["misfire_grace_time"] == 3600
+    assert daily[1]["coalesce"] is True
+    assert "Daily summary at 06:00 Europe/London" in capsys.readouterr().out
+
+    scheduler.running = True
+    settings.set_many({"notify_hour": 9})
+    main._reschedule_notify_job()
+    assert scheduler.reschedules[-1][1]["hour"] == 9
+    assert "Daily summary at 09:00 Europe/London" in capsys.readouterr().out
 
 
 def test_edit_missing_item_returns_404():

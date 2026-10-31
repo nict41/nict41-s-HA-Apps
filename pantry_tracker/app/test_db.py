@@ -1,6 +1,6 @@
 import json
 import json
-from datetime import date, timedelta
+from datetime import timedelta
 
 import db
 
@@ -17,7 +17,7 @@ def test_add_and_get_item():
 def test_list_items_filters_by_status():
     active_id = db.add_item(barcode=None, name="Bread")
     consumed_id = db.add_item(barcode=None, name="Eggs")
-    db.consume_item(consumed_id)
+    db.finish_item(consumed_id, "eaten")
 
     active = db.list_items([db.STATUS_ACTIVE])
     assert [i["id"] for i in active] == [active_id]
@@ -134,8 +134,19 @@ def test_init_db_migrates_an_older_schema_missing_new_columns():
             )
             """
         )
+        conn.execute(
+            "INSERT INTO items (barcode,name,brand,quantity,category,expiry_date,notes,image_url,status,source,created_at,updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("321", "Legacy soup", "Brand", "400g", "Soup", "2027-04-02", "keep me", "", "active", "manual", db.now_iso(), db.now_iso()),
+        )
 
     db.init_db()  # simulates an add-on upgrade over an existing, older database
+
+    legacy = db.get_item(1)
+    assert legacy["name"] == "Legacy soup"
+    assert legacy["expiry_date"] == "2027-04-02"
+    assert legacy["notes"] == "keep me"
+    assert legacy["count"] == 1
 
     item_id = db.add_item(barcode=None, name="Migrated")
     db.start_date_extraction(item_id)
@@ -158,25 +169,85 @@ def test_bucket_for_unknown_when_no_date():
 
 
 def test_bucket_for_expired_when_in_past():
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (db.today() - timedelta(days=1)).isoformat()
     assert db.bucket_for(yesterday, notify_days_before=3) == db.BUCKET_EXPIRED
 
 
 def test_bucket_for_expiring_soon_within_threshold():
-    soon = (date.today() + timedelta(days=2)).isoformat()
+    soon = (db.today() + timedelta(days=2)).isoformat()
     assert db.bucket_for(soon, notify_days_before=3) == db.BUCKET_EXPIRING_SOON
 
 
 def test_bucket_for_ok_beyond_threshold():
-    later = (date.today() + timedelta(days=30)).isoformat()
+    later = (db.today() + timedelta(days=30)).isoformat()
     assert db.bucket_for(later, notify_days_before=3) == db.BUCKET_OK
 
 
 def test_days_left_for():
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (db.today() + timedelta(days=1)).isoformat()
     assert db.days_left_for(tomorrow) == 1
     assert db.days_left_for(None) is None
     assert db.days_left_for("garbage") is None
+
+
+def test_local_zone_falls_back_to_utc_for_blank_or_invalid_tz(monkeypatch):
+    from datetime import timezone
+
+    monkeypatch.setenv("TZ", "")
+    assert db.local_zone() is timezone.utc
+    monkeypatch.setenv("TZ", "not/a-real-zone")
+    assert db.local_zone() is timezone.utc
+    monkeypatch.setenv("TZ", "Europe/London")
+    assert db.local_zone().key == "Europe/London"
+
+
+def test_effective_date_opened_defrosted_and_frozen():
+    assert db.effective_date({"expiry_date": "2026-11-10", "opened_at": "2026-10-31", "use_within_days": 3}) == "2026-11-03"
+    assert db.effective_date({"expiry_date": "2026-10-31", "defrosted_at": "2026-11-05"}) == "2026-11-06"
+    assert db.effective_date({"expiry_date": "2026-11-10", "location": "freezer"}) is None
+    assert db.effective_date({"expiry_date": "bad", "opened_at": "also-bad", "use_within_days": 3}) is None
+
+
+def test_location_transition_freezing_and_defrosting():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2026-11-10")
+    frozen = db.transition_item(item_id, location="freezer")
+    assert frozen["defrosted_at"] is None
+    assert db.bucket_for(frozen, 3) == db.BUCKET_FROZEN
+    thawed = db.transition_item(item_id, location="fridge")
+    assert thawed["defrosted_at"] == db.today().isoformat()
+    assert db.effective_date(thawed) == (db.today() + timedelta(days=1)).isoformat()
+
+
+def test_finish_undo_and_double_undo_counts():
+    item_id = db.add_item(barcode=None, name="Beans", count=3)
+    event_id = db.finish_item(item_id, "eaten")
+    assert db.get_item(item_id)["count"] == 2
+    assert db.undo_event(event_id) is True
+    assert db.get_item(item_id)["count"] == 3
+    assert db.undo_event(event_id) is False
+    event_id = db.finish_item(item_id, "binned")
+    db.finish_item(item_id, "eaten")
+    final_event = db.finish_item(item_id, "eaten")
+    assert db.get_item(item_id)["status"] == db.STATUS_CONSUMED
+    assert db.undo_event(final_event) is True
+    assert db.get_item(item_id)["status"] == db.STATUS_ACTIVE
+    assert db.get_item(item_id)["count"] == 1
+    assert db.undo_event(event_id) is True
+    assert db.get_item(item_id)["count"] == 2
+
+
+def test_stats_counts_this_month_and_previous_month():
+    item_id = db.add_item(barcode=None, name="Soup")
+    current_month = db.today().replace(day=1).isoformat() + "T12:00:00+00:00"
+    previous_month_date = (db.today().replace(day=1) - timedelta(days=1)).replace(day=1)
+    previous_month = previous_month_date.isoformat() + "T12:00:00+00:00"
+    with db._connect() as conn:
+        conn.execute("INSERT INTO item_events (item_id,name,outcome,created_at) VALUES (?,?,?,?)", (item_id, "Soup", "binned", current_month))
+        conn.execute("INSERT INTO item_events (item_id,name,outcome,created_at) VALUES (?,?,?,?)", (item_id, "Soup", "eaten", previous_month))
+    result = db.stats()
+    assert result["this_month"]["binned"] == 1
+    assert result["last_month"]["eaten"] == 1
+    assert result["most_binned"] == [{"name": "Soup", "count": 1}]
 
 
 def test_get_cached_barcode_missing_returns_none():
