@@ -450,9 +450,15 @@ def test_tapping_the_current_date_settles_its_confidence():
 
 
 def test_client_timing_rejects_unknown_fields_and_paths(capsys):
-    response = client.post("/api/client-timing", data={"path": "live", "open_ms": "12", "secret": "never-log"})
+    response = client.post("/api/client-timing", data={
+        "path": "live", "open_ms": "12", "read_slow": "1", "tick_ms": "130",
+        "secret": "never-log",
+    })
     assert response.status_code == 200
-    assert "secret" not in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "read_slow=1" in output
+    assert "tick_ms=130" in output
+    assert "secret" not in output
     response = client.post("/api/client-timing", data={"path": "unknown", "open_ms": "12"})
     assert response.status_code == 400
 

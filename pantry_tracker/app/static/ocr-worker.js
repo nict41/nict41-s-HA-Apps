@@ -109,9 +109,9 @@ async function soften(source) {
   return createImageBitmap(canvas);
 }
 
-async function read(file, soft) {
+async function read(file, soft, sourceBitmap = false) {
   await loadModels();
-  bitmap = await createImageBitmap(file);
+  bitmap = sourceBitmap ? file : await createImageBitmap(file);
   if (soft) {
     const original = bitmap;
     bitmap = await soften(original);
@@ -135,7 +135,10 @@ self.onmessage = async ({ data }) => {
   if (data?.type === "init") { try { await loadModels(); self.postMessage({ type: "ready" }); } catch (error) { self.postMessage({ type: "init-error", error: String(error) }); } return; }
   if (!data || data.id === undefined) return;
   processing = processing.then(async () => {
-    try { self.postMessage({ id: data.id, lines: await read(data.file, data.soft) }); }
-    catch (error) { self.postMessage({ id: data.id, error: String(error?.message || error) }); }
+    try { self.postMessage({ id: data.id, lines: await read(data.bitmap || data.file, data.soft, Boolean(data.bitmap)) }); }
+    catch (error) {
+      if (data.bitmap) data.bitmap.close();
+      self.postMessage({ id: data.id, error: String(error?.message || error) });
+    }
   });
 };

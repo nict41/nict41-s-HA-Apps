@@ -43,7 +43,7 @@ _MAX_OCR_RAW_LENGTH = 2000
 _VISION_READ_LOCK = threading.Lock()
 _CLIENT_TIMING_FIELDS = {
     "open_ms", "stream_ms", "first_sample_ms", "steady_ms", "capture_ms",
-    "ocr_ms", "read_ms", "soft",
+    "ocr_ms", "read_ms", "soft", "read_slow", "tick_ms",
 }
 _CLIENT_TIMING_PATHS = {"steady", "live", "shutter"}
 
@@ -368,7 +368,8 @@ async def client_timing(request: Request):
         f"steady={values.get('steady_ms', 0):g} "
         f"capture={values.get('capture_ms', 0):g} "
         f"ocr_done={values.get('ocr_ms', 0):g} "
-        f"read={values.get('read_ms', 0):g} soft={values.get('soft', 0):g}",
+        f"read={values.get('read_ms', 0):g} soft={values.get('soft', 0):g} "
+        f"read_slow={values.get('read_slow', 0):g} tick_ms={values.get('tick_ms', 0):g}",
         flush=True,
     )
     return {"ok": True}
