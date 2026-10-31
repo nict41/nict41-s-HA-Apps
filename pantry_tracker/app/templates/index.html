@@ -158,6 +158,11 @@
   .item-actions button { width: auto; min-height: 36px; padding: 6px 10px; font-size: 13px; }
 
   .edit-form { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 10px; }
+  .date-confidence { color: var(--soon); font-size: 13px; margin-top: 4px; }
+  .date-confidence.confirmed { color: var(--ok); }
+  .date-candidates { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .date-candidates button { width: auto; min-height: 34px; padding: 5px 9px; font-size: 13px; }
+  .date-confidence.unread { color: var(--expired); }
 
   .photo-step {
     display: flex;
@@ -541,6 +546,9 @@ function resetScan() {
   scanBusy.classList.add("hidden");
   scanIdle.classList.remove("hidden");
   pendingAddDatePhoto = null;
+  pendingAddDateOcr = null;
+  addOcrGeneration++;
+  addOcrAutofill = "";
 }
 
 function openReviewForm({ barcode, notFound }) {
@@ -913,9 +921,83 @@ $("#btn-scan-start").addEventListener("click", () => {
 // absence means "a brand new item, not created yet" - see
 // onDatePhotoCaptured for what that distinction controls.
 let datePhotoTarget = null;
+let ocrWorker = null;
+let ocrNextId = 1;
+let ocrReads = 0;
+let ocrPending = new Map();
+let pendingAddDateOcr = null;
+let addOcrGeneration = 0;
+let addOcrAutofill = "";
+
+function terminateOcrWorker() {
+  if (ocrWorker) ocrWorker.terminate();
+  ocrWorker = null;
+  ocrReads = 0;
+  for (const pending of ocrPending.values()) pending.fail();
+  ocrPending.clear();
+}
+
+function ensureOcrWorker() {
+  if (!window.Worker || !window.createImageBitmap || !window.OffscreenCanvas || !window.WebAssembly) return null;
+  if (ocrWorker) return ocrWorker;
+  try {
+    ocrWorker = new Worker("static/ocr-worker.js");
+    ocrWorker.onmessage = (event) => {
+      const data = event.data || {};
+      if (data.type === "ready") return;
+      if (data.type === "init-error" || data.type === "error") { terminateOcrWorker(); return; }
+      const pending = ocrPending.get(data.id);
+      if (pending) pending.finish(data.error ? null : data.lines);
+    };
+    ocrWorker.onerror = () => terminateOcrWorker();
+    return ocrWorker;
+  } catch (err) { return null; }
+}
+
+function preloadDateOcr() {
+  const worker = ensureOcrWorker();
+  if (worker) { try { worker.postMessage({ type: "init" }); } catch (err) { terminateOcrWorker(); } }
+}
+
+function readDateOnDevice(file) {
+  return new Promise((resolve) => {
+    const worker = ensureOcrWorker();
+    if (!worker) { resolve(null); return; }
+    const id = ocrNextId++;
+    const timeout = ocrReads++ === 0 ? 30000 : 12000;
+    let settled = false;
+    let parsing = false;
+    const settle = (result) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); ocrPending.delete(id); resolve(result);
+    };
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; terminateOcrWorker(); resolve(null); }
+    }, timeout);
+    const finish = async (lines) => {
+      if (settled || parsing) return;
+      if (!lines) { settle(null); return; }
+      parsing = true;
+      const raw = lines.join("\n");
+      try {
+        const body = new FormData(); body.append("text", raw);
+        const response = await fetch("api/parse-date", { method: "POST", body });
+        const result = response.ok ? await response.json() : {};
+        settle({ date: result.date || null, raw });
+      } catch (err) { settle(null); }
+    };
+    ocrPending.set(id, { finish, fail: () => settle(null) });
+    try { worker.postMessage({ id, file }); } catch (err) { settle(null); }
+  });
+}
+
+function withOcrCap(promise) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), 2500))]);
+}
 
 function openDatePhotoCapture(target) {
   datePhotoTarget = target;
+  preloadDateOcr();
   if (cameraSupported()) {
     openCamera("date");
   } else {
@@ -1033,29 +1115,49 @@ function onDatePhotoCaptured(file) {
     target.thumbEl.classList.remove("hidden");
   }
 
+  const generation = ++addOcrGeneration;
   if (target.itemId) {
-    uploadDatePhoto(target.itemId, file, target.statusEl);
+    uploadDatePhoto(target.itemId, file, target.statusEl, readDateOnDevice(file));
   } else {
     pendingAddDatePhoto = file;
+    const oldAutofill = addOcrAutofill;
+    if (oldAutofill && $("#f-expiry").value === oldAutofill) $("#f-expiry").value = "";
+    addOcrAutofill = "";
     if (target.statusEl) {
-      target.statusEl.textContent = "Photo captured - the date will be read in the background once added.";
+      target.statusEl.textContent = "Reading the date…";
       target.statusEl.classList.remove("hidden");
     }
+    const task = readDateOnDevice(file).then((result) => {
+      if (generation !== addOcrGeneration) return null;
+      if (result?.date) {
+        const expiry = $("#f-expiry");
+        if (!expiry.value || expiry.value === oldAutofill) { expiry.value = result.date; addOcrAutofill = result.date; }
+        if (target.statusEl) target.statusEl.textContent = `Read as ${formatDisplayDate(result.date)}, double-checking in the background.`;
+      } else if (!result?.date && target.statusEl) target.statusEl.textContent = "Couldn't read it here. The background check will try, or retake it if it's blurry.";
+      return result;
+    });
+    pendingAddDateOcr = task;
   }
 }
 
 // Fire-and-forget from the caller's point of view - uploads the photo for
 // an item that already exists and lets the server's background task read
 // it whenever it's done, instead of waiting here.
-async function uploadDatePhoto(itemId, file, statusEl) {
+async function uploadDatePhoto(itemId, file, statusEl, ocrPromise = Promise.resolve(null)) {
   if (statusEl) {
-    statusEl.textContent = "Uploaded - reading the date in the background…";
+    statusEl.textContent = "Reading the date…";
     statusEl.classList.remove("hidden");
   }
+  const confidenceNote = document.querySelector(`.item-row[data-id="${itemId}"] .e-date-confidence`);
+  if (confidenceNote) confidenceNote.innerHTML = "";
+  const ocrResult = await withOcrCap(ocrPromise);
   const body = new FormData();
   body.append("photo", file, "use-by.jpg");
+  if (ocrResult?.raw) body.append("ocr_raw", ocrResult.raw);
+  if (ocrResult?.date) body.append("ocr_date", ocrResult.date);
   try {
-    await fetch(`api/items/${itemId}/date-photo`, { method: "POST", body });
+    const response = await fetch(`api/items/${itemId}/date-photo`, { method: "POST", body });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (statusEl) statusEl.textContent = "Reading the date in the background - check back in the Pantry tab.";
     // Not a plain loadPantry(): this is normally called while this very
     // item's edit panel is still open, and re-rendering the list would
@@ -1082,12 +1184,15 @@ reviewForm.addEventListener("submit", async (e) => {
   const saveBtn = $("#btn-review-save");
   saveBtn.disabled = true;
 
+  const ocrResult = pendingAddDateOcr ? await withOcrCap(pendingAddDateOcr) : null;
   const body = new FormData(reviewForm);
   body.append("barcode", reviewForm.dataset.barcode || "");
   body.append("source", reviewForm.dataset.barcode ? "barcode" : "manual");
   if (pendingAddDatePhoto) {
     body.append("date_photo", pendingAddDatePhoto, "use-by.jpg");
   }
+  if (ocrResult?.raw) body.append("ocr_raw", ocrResult.raw);
+  if (ocrResult?.date && $("#f-expiry").value === ocrResult.date) body.append("ocr_date", ocrResult.date);
   try {
     const res = await fetch("api/items", { method: "POST", body });
     if (!res.ok) {
@@ -1138,6 +1243,7 @@ function itemRowHtml(item) {
   const photoLink = item.has_date_photo
     ? `<div class="item-meta"><button type="button" class="link-btn" data-photo-url="api/items/${item.id}/date-photo?v=${encodeURIComponent(item.updated_at || "")}" data-photo-caption="${escapeAttr(photoCaption)}">View use-by photo</button></div>`
     : "";
+  const confidence = item.date_extraction_pending ? "" : confidenceHtml(item);
   const productImg = item.display_image_url
     ? `<img class="product-thumb" src="${escapeAttr(item.display_image_url)}" data-photo-url="${escapeAttr(item.display_image_url)}" alt="" loading="lazy">`
     : "";
@@ -1148,6 +1254,7 @@ function itemRowHtml(item) {
         <div class="item-name">${escapeHtml(item.name)}</div>
         <div class="item-meta">${escapeHtml(meta)}</div>
         <div class="item-meta">${dateLine}</div>
+        ${confidence}
         ${photoLink}
         <div class="item-actions">
           <button class="ghost btn-edit" type="button">Edit</button>
@@ -1169,6 +1276,7 @@ function editFormHtml(item) {
     : item.date_extraction_raw
     ? `Last read from photo: "${item.date_extraction_raw}"`
     : "";
+  const confidence = item.date_extraction_pending ? "" : confidenceHtml(item, item.id);
   return `
     <label>Product name</label>
     <input type="text" class="e-name" value="${escapeAttr(item.name)}">
@@ -1201,6 +1309,7 @@ function editFormHtml(item) {
       <button type="button" class="ghost e-rescan-date" style="width:auto;flex:1">📅 Rescan use-by date</button>
     </div>
     <div class="muted e-date-status ${statusText ? "" : "hidden"}">${escapeHtml(statusText)}</div>
+    <div class="e-date-confidence">${confidence}</div>
 
     <label>Use-by date</label>
     <input type="date" class="e-expiry" value="${escapeAttr(item.expiry_date || "")}">
@@ -1211,6 +1320,33 @@ function editFormHtml(item) {
       <button type="button" class="primary e-save">Save</button>
     </div>`;
 }
+
+function confidenceHtml(item, id = item.id) {
+  const confidence = item.date_confidence;
+  if (!confidence) return "";
+  if (confidence === "confirmed") return '<div class="date-confidence confirmed">✓ Both readers agree</div>';
+  if (confidence === "check") return '<div class="date-confidence check">Check this date against the photo</div>';
+  if (confidence === "unread") return '<div class="date-confidence unread">Couldn\'t read the date. Use Edit to rescan.</div>';
+  if (confidence === "conflict") return `<div class="date-confidence conflict">Readings differ:<div class="date-candidates">${(item.date_candidates || []).map((candidate) =>
+    `<button type="button" class="link-btn date-candidate" data-item-id="${id}" data-date="${escapeAttr(candidate)}">${escapeHtml(formatDisplayDate(candidate))}</button>`
+  ).join("")}</div></div>`;
+  return "";
+}
+
+async function chooseDateCandidate(itemId, selectedDate) {
+  const item = pantryCache.find((entry) => entry.id === itemId);
+  if (!item) return;
+  const body = new FormData();
+  for (const field of ["name", "brand", "quantity", "category", "notes"]) body.append(field, item[field] || "");
+  body.append("expiry_date", selectedDate);
+  const response = await fetch(`api/items/${itemId}`, { method: "POST", body });
+  if (response.ok) { await loadPantry(); }
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest(".date-candidate");
+  if (button) chooseDateCandidate(Number(button.dataset.itemId), button.dataset.date);
+});
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -1271,7 +1407,11 @@ function watchEditFormExtraction(id, editEl) {
 
     const cachedIndex = pantryCache.findIndex((i) => i.id === id);
     if (cachedIndex !== -1) pantryCache[cachedIndex] = item;
-    if (item.date_extraction_pending) return;
+    if (item.date_extraction_pending) {
+      const confidenceEl = editEl.querySelector(".e-date-confidence");
+      if (confidenceEl) confidenceEl.innerHTML = "";
+      return;
+    }
 
     clearInterval(timer);
     delete editEl.dataset.watching;
@@ -1284,6 +1424,10 @@ function watchEditFormExtraction(id, editEl) {
       const text = item.date_extraction_raw ? `Last read from photo: "${item.date_extraction_raw}"` : "";
       statusEl.textContent = text;
       statusEl.classList.toggle("hidden", !text);
+    }
+    const confidenceEl = editEl.querySelector(".e-date-confidence");
+    if (confidenceEl) {
+      confidenceEl.innerHTML = confidenceHtml(item, id);
     }
 
     const thumb = editEl.querySelector(".e-date-thumb");

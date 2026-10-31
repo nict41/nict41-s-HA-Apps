@@ -1,3 +1,5 @@
+import json
+import json
 from datetime import date, timedelta
 
 import db
@@ -216,3 +218,49 @@ def test_init_db_clears_stale_notify_service_override():
     db.set_state("setting:notify_service", "notify.mobile_app_stale")
     db.init_db()
     assert db.get_state("setting:notify_service") is None
+
+
+def test_reconcile_readings_all_four_outcomes():
+    assert db.reconcile_readings("2027-01-01", "2027-01-01") == ("2027-01-01", "confirmed", [])
+    assert db.reconcile_readings("2027-01-01", None) == ("2027-01-01", "check", [])
+    assert db.reconcile_readings("2027-01-01", "2027-01-02") == (None, "conflict", ["2027-01-01", "2027-01-02"])
+    assert db.reconcile_readings(None, None) == (None, "unread", [])
+
+
+def test_conflict_clears_machine_date_and_keeps_candidates():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2027-01-01")
+    db.start_date_extraction(item_id, "2027-01-02", "02 Jan 27")
+    db.finish_date_extraction(item_id, "2027-01-01", "01 Jan 27")
+    item = db.get_item(item_id)
+    assert item["expiry_date"] is None
+    assert item["date_confidence"] == "conflict"
+    assert json.loads(item["date_candidates"]) == ["2027-01-02", "2027-01-01"]
+
+
+def test_typed_date_is_preserved_without_confidence():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2028-02-03")
+    db.start_date_extraction(item_id, "2027-01-01", "01 Jan 27")
+    db.finish_date_extraction(item_id, "2027-01-02", "02 Jan 27", only_if_blank=True)
+    item = db.get_item(item_id)
+    assert item["expiry_date"] == "2028-02-03"
+    assert item["date_confidence"] is None
+
+
+def test_rescan_replaces_existing_date_and_start_resets_confidence():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2027-01-01")
+    db.update_item(item_id, date_confidence="confirmed", date_candidates='["2027-01-01"]')
+    db.start_date_extraction(item_id, "2027-02-01", "01 Feb 27")
+    started = db.get_item(item_id)
+    assert started["date_confidence"] is None
+    assert started["date_candidates"] is None
+    db.finish_date_extraction(item_id, "2027-02-01", "01 Feb 27")
+    assert db.get_item(item_id)["expiry_date"] == "2027-02-01"
+
+
+def test_unread_result_keeps_existing_date():
+    item_id = db.add_item(barcode=None, name="Soup", expiry_date="2027-01-01")
+    db.start_date_extraction(item_id)
+    db.finish_date_extraction(item_id, None, "UNKNOWN")
+    item = db.get_item(item_id)
+    assert item["expiry_date"] == "2027-01-01"
+    assert item["date_confidence"] == "unread"

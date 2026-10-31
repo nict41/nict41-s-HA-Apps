@@ -2,6 +2,7 @@ import json
 from io import BytesIO
 
 from PIL import Image
+import pytest
 
 import vision
 
@@ -141,3 +142,43 @@ def test_network_error_degrades_to_no_date(monkeypatch):
     result = vision.extract_use_by_date(_jpeg_bytes())
     assert result["date"] is None
     assert "failed" in result["raw"]
+
+
+@pytest.mark.parametrize(
+    ("transcript", "expected"),
+    [
+        ("01 03 27", "2027-03-01"),
+        ("010327", "2027-03-01"),
+        ("0103 27", "2027-03-01"),
+        ("26 12 26", "2026-12-26"),
+        ("261226", "2026-12-26"),
+        ("BB:28/09/2027\n6271 EV 05:09", "2027-09-28"),
+        ("BEST BEFORE\n26 12 26\nGBC 211 204D\n04:40 6941", "2026-12-26"),
+        ("Use By:\n02 Nov 14:26 F5 T6 BBX Y", "2026-11-02"),
+        ("L 08 28 JAN 27 02:48", "2027-01-28"),
+        ("L 08 28 JAN 27 02:48\nDATE: 27", "2027-01-28"),
+        ("09:03:2026\n50.09.2027:12\ne 70g-2.5 OZ (6x11,7g)", None),
+        ("04:40 6941", None),
+        ("GBC 211 204D", None),
+        ("L8 20317\nKeep refrigerated", None),
+        ("Use By:\n03 10V\nL8 20317", None),
+        ("BEST BEFORE", None),
+        ("08.03.2026\n30.03.2025:12", None),
+        ("BB 28/09/2027\n30/09/2027", "2027-09-30"),
+        ("DATE: UNKNOWN", None),
+        ("6 MARSHMALLOWS", None),
+        ("10 mayonnaise", None),
+    ],
+)
+def test_parse_transcript(monkeypatch, transcript, expected):
+    _freeze_today(monkeypatch, 2026, 10, 31)
+    assert vision.parse_transcript(transcript) == expected
+
+
+def test_prompt_is_selected_for_glm_ocr(monkeypatch):
+    monkeypatch.setenv("VISION_MODEL", "glm-ocr:latest")
+    assert vision._prompt_for(vision.settings.vision_model()) == "Text Recognition:"
+
+
+def test_prompt_for_other_models_requests_printed_lines():
+    assert "write out every line" in vision._prompt_for("qwen2.5vl:3b")

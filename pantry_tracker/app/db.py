@@ -19,6 +19,12 @@ DB_PATH = DATA_DIR / "pantry.db"
 STATUS_ACTIVE = "active"
 STATUS_CONSUMED = "consumed"
 
+# How far a use-by date read from a photo can be trusted.
+CONFIDENCE_CONFIRMED = "confirmed"  # both readers found this date
+CONFIDENCE_CHECK = "check"  # only one reader found a date
+CONFIDENCE_CONFLICT = "conflict"  # the readers disagree, see date_candidates
+CONFIDENCE_UNREAD = "unread"  # neither reader found a date
+
 # The public, stable vocabulary for "how urgent is this item" - used for the
 # dashboard's grouping, the Home Assistant sensor state, and the
 # notification decision. `unknown` covers an item with no expiry date at
@@ -78,13 +84,21 @@ def init_db() -> None:
                 last_notified_bucket TEXT,
                 has_date_photo INTEGER NOT NULL DEFAULT 0,
                 date_extraction_pending INTEGER NOT NULL DEFAULT 0,
-                date_extraction_raw TEXT
+                date_extraction_raw TEXT,
+                date_ocr_date TEXT,
+                date_ocr_raw TEXT,
+                date_confidence TEXT,
+                date_candidates TEXT
             )
             """
         )
         _ensure_column(conn, "items", "has_date_photo", "has_date_photo INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "items", "date_extraction_pending", "date_extraction_pending INTEGER NOT NULL DEFAULT 0")
         _ensure_column(conn, "items", "date_extraction_raw", "date_extraction_raw TEXT")
+        _ensure_column(conn, "items", "date_ocr_date", "date_ocr_date TEXT")
+        _ensure_column(conn, "items", "date_ocr_raw", "date_ocr_raw TEXT")
+        _ensure_column(conn, "items", "date_confidence", "date_confidence TEXT")
+        _ensure_column(conn, "items", "date_candidates", "date_candidates TEXT")
         conn.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
         # notify_service moved to add-on-configuration-only (settings.py) -
         # a value saved here from an older version would otherwise go on
@@ -269,33 +283,60 @@ def apply_barcode_image(barcode: str, image_url: str) -> None:
         )
 
 
-def start_date_extraction(item_id: int) -> None:
+def start_date_extraction(item_id: int, ocr_date: str | None = None, ocr_raw: str | None = None) -> None:
     """Marks an item as having a use-by date photo queued for background
     extraction. Called the moment the photo is saved, before the vision
-    model has even been asked - see main.py's _extract_and_update."""
-    update_item(item_id, has_date_photo=1, date_extraction_pending=1)
+    model has even been asked - see main.py's _extract_and_update.
+    `ocr_date`/`ocr_raw` are what the browser's on-device OCR made of the
+    same photo, if it got an answer in time."""
+    update_item(
+        item_id,
+        has_date_photo=1,
+        date_extraction_pending=1,
+        date_ocr_date=ocr_date,
+        date_ocr_raw=ocr_raw,
+        date_confidence=None,
+        date_candidates=None,
+    )
 
 
-def finish_date_extraction(item_id: int, expiry_date: str | None, raw: str, *, only_if_blank: bool = False) -> None:
-    """Called once background extraction completes. Only touches
-    expiry_date when a date was actually found - a failed or "no date
-    visible" read leaves whatever the item already had alone.
+def reconcile_readings(ocr_date: str | None, vision_date: str | None) -> tuple[str | None, str, list[str]]:
+    """Combines the two independent date readings into (date, confidence,
+    candidates). A disagreement gives no date at all: one of the two is
+    wrong and a person can settle it from the photo, whereas a wrong date
+    that's merely flagged would still drive the expiry notifications."""
+    if ocr_date and vision_date:
+        if ocr_date == vision_date:
+            return ocr_date, CONFIDENCE_CONFIRMED, []
+        return None, CONFIDENCE_CONFLICT, [ocr_date, vision_date]
+    if ocr_date or vision_date:
+        return ocr_date or vision_date, CONFIDENCE_CHECK, []
+    return None, CONFIDENCE_UNREAD, []
+
+
+def finish_date_extraction(item_id: int, vision_date: str | None, raw: str, *, only_if_blank: bool = False) -> None:
+    """Called once background extraction completes, to settle the date from
+    the on-device reading (if any) and the vision model's. A read that found
+    nothing at all leaves whatever date the item already had alone.
 
     `only_if_blank` (used when adding a brand new item with a photo
-    attached) skips writing the found date if the item already has one -
-    otherwise a date typed in by hand before tapping "Add to pantry" could
-    get silently clobbered once the background read finishes, with no
-    form left open to notice or correct it. Rescanning an existing item
-    leaves this False, since overwriting whatever date was already there
-    (right or wrong) is the whole point of a rescan.
+    attached) leaves a date typed in by hand before tapping "Add to pantry"
+    alone - otherwise it could get silently clobbered once the background
+    read finishes, with no form left open to notice or correct it. A date
+    the on-device OCR filled in isn't typed, so it still gets checked.
+    Rescanning an existing item leaves this False, since overwriting
+    whatever date was already there (right or wrong) is the whole point of
+    a rescan.
     """
     fields = {"date_extraction_pending": 0, "date_extraction_raw": raw}
-    if expiry_date:
-        if only_if_blank:
-            current = get_item(item_id)
-            if current and not current.get("expiry_date"):
-                fields["expiry_date"] = expiry_date
-        else:
+    current = get_item(item_id) or {}
+    ocr_date = current.get("date_ocr_date")
+    typed_date = only_if_blank and current.get("expiry_date") and current.get("expiry_date") != ocr_date
+    if not typed_date:
+        expiry_date, confidence, candidates = reconcile_readings(ocr_date, vision_date)
+        fields["date_confidence"] = confidence
+        fields["date_candidates"] = json.dumps(candidates) if candidates else None
+        if expiry_date or confidence == CONFIDENCE_CONFLICT:
             fields["expiry_date"] = expiry_date
     update_item(item_id, **fields)
 

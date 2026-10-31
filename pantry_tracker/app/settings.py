@@ -98,4 +98,4 @@ def vision_api_key() -> str:
 
 
 def vision_model() -> str:
-    return os.environ.get("VISION_MODEL", "").strip() or "qwen2.5vl:3b"
+    return os.environ.get("VISION_MODEL", "").strip() or "glm-ocr:latest"

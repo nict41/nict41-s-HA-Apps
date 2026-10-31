@@ -4,9 +4,11 @@ full workflow.
 """
 
 import json
+import mimetypes
+import re
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from apscheduler.jobstores.base import JobLookupError
@@ -14,6 +16,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import BackgroundTasks, FastAPI, Form, UploadFile, File, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import barcode
@@ -30,6 +33,12 @@ _IMAGE_BACKFILL_STATE_KEY = "image_backfill_done"
 _BACKFILL_LOOKUP_DELAY_SECONDS = 1
 
 APP_DIR = Path(__file__).resolve().parent
+# The browser won't compile WebAssembly served as anything else, and this
+# varies by what the system's mime database happens to know.
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("text/javascript", ".mjs")
+
+_MAX_OCR_RAW_LENGTH = 2000
 
 db.init_db()
 
@@ -140,7 +149,21 @@ def _reschedule_check_job() -> None:
         pass
 
 
+class _StaticFiles(StaticFiles):
+    """The OCR runtime and models (fetched into static/ocr by the Dockerfile,
+    so absent under the test client) are around 30 MB and pinned, and
+    ocr-worker.js names their version when requesting them - a phone should
+    only ever download them once."""
+
+    def file_response(self, full_path, stat_result, scope, status_code=200):
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        if Path(full_path).parent.name == "ocr":
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 app = FastAPI(title="Pantry Tracker", lifespan=lifespan)
+app.mount("/static", _StaticFiles(directory=APP_DIR / "static", check_dir=False), name="static")
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
 
 
@@ -165,7 +188,19 @@ def _item_view(item: dict) -> dict:
         "display_image_url": _display_image_url(item.get("barcode"), item.get("image_url")),
         "has_date_photo": bool(item.get("has_date_photo")),
         "date_extraction_pending": bool(item.get("date_extraction_pending")),
+        "date_candidates": json.loads(item.get("date_candidates") or "[]"),
     }
+
+
+def _valid_ocr_date(value: str) -> str | None:
+    """Comes from the browser, so isn't trusted to be a real date."""
+    value = value.strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -251,6 +286,13 @@ async def get_single_item(item_id: int):
     return _item_view(item)
 
 
+@app.post("/api/parse-date")
+async def parse_date(text: str = Form("")):
+    """Turns what the browser's on-device OCR read into a date, so there's
+    only one date parser to keep right."""
+    return {"date": vision.parse_transcript(text)}
+
+
 @app.post("/api/items")
 async def add_item(
     background_tasks: BackgroundTasks,
@@ -264,6 +306,8 @@ async def add_item(
     image_url: str = Form(""),
     source: str = Form("manual"),
     date_photo: UploadFile | None = File(None),
+    ocr_date: str = Form(""),
+    ocr_raw: str = Form(""),
 ):
     name = name.strip()
     if not name:
@@ -300,14 +344,20 @@ async def add_item(
     if date_photo is not None:
         image_bytes = await date_photo.read()
         db.save_date_photo(item_id, image_bytes)
-        db.start_date_extraction(item_id)
+        db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None)
         background_tasks.add_task(_extract_and_update, item_id, only_if_blank=True)
     await run_in_threadpool(_sync_now)
     return _item_view(db.get_item(item_id))
 
 
 @app.post("/api/items/{item_id}/date-photo")
-async def upload_date_photo(item_id: int, background_tasks: BackgroundTasks, photo: UploadFile = File(...)):
+async def upload_date_photo(
+    item_id: int,
+    background_tasks: BackgroundTasks,
+    photo: UploadFile = File(...),
+    ocr_date: str = Form(""),
+    ocr_raw: str = Form(""),
+):
     """Attaches (or replaces) a use-by date photo on an existing item - used
     by the Pantry tab's "Rescan use-by date". Saves the photo and returns
     immediately; extraction itself runs in the background exactly like a
@@ -317,7 +367,7 @@ async def upload_date_photo(item_id: int, background_tasks: BackgroundTasks, pho
         return JSONResponse({"error": "Item not found."}, status_code=404)
     image_bytes = await photo.read()
     db.save_date_photo(item_id, image_bytes)
-    db.start_date_extraction(item_id)
+    db.start_date_extraction(item_id, _valid_ocr_date(ocr_date), ocr_raw[:_MAX_OCR_RAW_LENGTH] or None)
     background_tasks.add_task(_extract_and_update, item_id)
     return _item_view(db.get_item(item_id))
 
@@ -352,14 +402,20 @@ async def edit_item(
     brand = brand.strip()
     quantity = quantity.strip()
     category = category.strip()
+    expiry_date = expiry_date.strip() or None
+    # Saving a different date is the person settling any doubt about it.
+    confidence = {}
+    if expiry_date != existing["expiry_date"]:
+        confidence = {"date_confidence": None, "date_candidates": None}
     db.update_item(
         item_id,
         name=name,
         brand=brand,
         quantity=quantity,
         category=category,
-        expiry_date=expiry_date.strip() or None,
+        expiry_date=expiry_date,
         notes=notes.strip(),
+        **confidence,
     )
     # Same reasoning as add_item: a correction made here (e.g. fixing a
     # garbled Open Food Facts name after the fact, from the Pantry tab

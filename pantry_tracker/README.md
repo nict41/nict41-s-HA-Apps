@@ -31,11 +31,16 @@ from a phone-first ingress panel.
    captures automatically once held steady for a moment (a shutter button
    is also there as a manual override). The photo is cropped to just the
    framed area and sent to a vision-capable model you run yourself (e.g.
-   [Open WebUI](https://openwebui.com)/Ollama hosting `qwen2.5vl`), which
+   [Open WebUI](https://openwebui.com)/Ollama hosting `glm-ocr`), which
    reads the printed date back for you - the date is read **in the
    background**, so capturing it never stops you moving straight on to
    scan the next item, and the photo itself is kept so you can open it
-   later and compare it against the date that was read from it.
+   later and compare it against the date that was read from it. A second
+   reader runs on the phone itself; its text is interpreted by the app and
+   compared with the vision model's result. The first use downloads about
+   30 MB of OCR files to the browser, then the browser cache keeps them for
+   later scans. The use-by photo still goes to your configured vision
+   endpoint for its independent reading.
 3. Review and **add it to your pantry**. Everything is editable before
    saving, and a barcode that isn't found (or isn't scannable) just falls
    back to manual entry - nothing blocks you from tracking an item.
@@ -72,7 +77,7 @@ later change made here, across an app update or otherwise.
 | `check_interval_hours` | `12` | How often to re-check every item and send any due notifications. |
 | `vision_api_base` | _(blank)_ | Base URL of an OpenAI-compatible `/chat/completions` endpoint hosting a vision model (Open WebUI, Ollama, etc.), e.g. `http://192.168.1.50:8080/api`. Blank disables photo date extraction. |
 | `vision_api_key` | _(blank)_ | Optional bearer token for the endpoint above. |
-| `vision_model` | `qwen2.5vl:3b` | The vision model name to request. |
+| `vision_model` | `glm-ocr:latest` | The vision model name to request. |
 
 Finding the exact `notify_service` name: **Developer Tools → Actions**,
 search for "notify", and use the dotted id shown there (e.g.
@@ -133,6 +138,10 @@ limitation.
   status lines showing whether the vision model and Home Assistant sync
   are configured, and a data **Export** as JSON.
 
+### Date reading confidence
+
+Each photo read is checked by on-device OCR and the configured vision model. **✓ Both readers agree** means both produced the same date. **Check this date against the photo** means only one reader found a date. **Readings differ** shows both candidate dates; choose the one printed on the package. **Couldn't read the date** means neither reader found a date; use Edit to rescan or enter it by hand. The parser accepts dates such as `01/03/2027`, `01 03 27`, `010327`, and `28 JAN 27`; it also handles times and surrounding packaging text while ignoring unrelated batch codes.
+
 ## Home Assistant entities
 
 With no extra setup beyond installing the add-on, your pantry is also
@@ -182,10 +191,7 @@ re-open it later to compare against the date that was read from it, and
 removed automatically if the item itself is deleted. Product photos you
 take are stored per barcode in `/data/product_photos/` and kept even after
 an item is deleted, so the next scan of that product still has one.
-Nothing is sent
-anywhere except: a barcode digit string to Open Food Facts (to look up the
-product), and a use-by-date photo to the vision model endpoint you
-configure yourself.
+The on-device OCR runs in the phone browser. Its recognized text is sent to this app for date interpretation. A barcode digit string goes to Open Food Facts, and the use-by-date photo goes to the vision model endpoint you configure yourself.
 
 ## Installation
 

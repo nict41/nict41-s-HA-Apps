@@ -35,7 +35,7 @@ def _isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CHECK_INTERVAL_HOURS", "12")
     monkeypatch.setenv("VISION_API_BASE", "")
     monkeypatch.setenv("VISION_API_KEY", "")
-    monkeypatch.setenv("VISION_MODEL", "qwen2.5vl:3b")
+    monkeypatch.setenv("VISION_MODEL", "glm-ocr:latest")
 
     import db
 

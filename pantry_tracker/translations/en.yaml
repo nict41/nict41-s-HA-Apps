@@ -28,4 +28,4 @@ configuration:
     description: Optional API key/bearer token for the vision model endpoint above.
   vision_model:
     name: Vision model name
-    description: The model to use for reading use-by dates from photos, e.g. qwen2.5vl:3b.
+    description: The model to use for reading use-by dates from photos, e.g. glm-ocr:latest.
