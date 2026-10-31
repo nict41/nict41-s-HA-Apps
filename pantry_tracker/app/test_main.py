@@ -434,3 +434,5 @@ def test_static_mount_tolerates_missing_ocr_directory_and_sets_immutable_header(
     response = client.get("/static/ocr/sample.wasm")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    (tmp_path / "worker.js").write_text("// worker")
+    assert client.get("/static/worker.js").headers["cache-control"] == "no-cache"
