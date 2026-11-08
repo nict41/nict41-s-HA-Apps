@@ -103,6 +103,25 @@ function renderRotation() {
     li.append(cb, label, up, down);
     ul.appendChild(li);
   });
+  // Screens left out of the rotation stay listed, unticked, so they can be put back
+  Object.keys((state.data.screens) || {}).filter((n) => !rot.includes(n)).forEach((name) => {
+    const li = document.createElement("li");
+    li.className = "rot-item off" + (name === state.selectedScreen ? " selected" : "");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = false; cb.title = "include in rotation";
+    cb.addEventListener("change", () => {
+      if (cb.checked && !state.data.rotation.includes(name)) {
+        state.data.rotation = (state.data.rotation || []).concat([name]);
+        markDirty(); renderRotation();
+      }
+    });
+    const label = document.createElement("span");
+    label.textContent = name + " (not in rotation)";
+    label.className = "rot-name";
+    label.addEventListener("click", () => selectScreen(name));
+    li.append(cb, label);
+    ul.appendChild(li);
+  });
   const clockOn = rot.includes("clock");
   $("clockEnabled").checked = clockOn;
   const clock = state.data.clock || {};
