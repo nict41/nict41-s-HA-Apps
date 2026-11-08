@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Editor: tube previews were cut off (border drawn over the picture; not scaled on phones).
+
 ## 0.2.1
 
 - Editor: the preview and clickable tubes didn't appear (the page read the preview image as JSON, using up its body).
