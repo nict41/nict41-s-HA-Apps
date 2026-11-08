@@ -93,8 +93,10 @@ def _fit_font(draw: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int,
 
 def _draw_centered(draw: ImageDraw.ImageDraw, cx: int, cy: int, text: str,
                    font, fill) -> None:
-    w, h = _text_size(draw, text, font)
-    draw.text((cx - w // 2, cy - h // 2), text, font=font, fill=fill)
+    # Centre the ink, not the text origin: fonts leave space above the glyphs (bbox top), which
+    # at large sizes pushes text down and off the tube
+    x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=font)
+    draw.text((cx - (x0 + x1) / 2, cy - (y0 + y1) / 2), text, font=font, fill=fill)
 
 
 def _draw_error(img: Image.Image, msg: str = "!") -> Image.Image:
@@ -230,6 +232,10 @@ def draw_big_number(w: dict, ctx: RenderContext, bg) -> Image.Image:
         _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 - 34, value, font, color)
         ufont = _fit_font(draw, unit, TUBE_W - 12, 40, start=36, bold=True)
         _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 + 46, unit, ufont, color)
+    elif not unit and not label:
+        # Just a value (e.g. one digit of a time): as big as the tube allows
+        font = _fit_font(draw, value, TUBE_W - 6, TUBE_H - 24, start=240, bold=True)
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2, value, font, color)
     else:
         main = value + unit
         font = _fit_font(draw, main, TUBE_W - 12, TUBE_H - 70, start=110, bold=True)
