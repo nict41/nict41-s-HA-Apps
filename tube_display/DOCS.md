@@ -17,8 +17,9 @@ not accept panels.
 | `default_refresh` | `30` | Seconds between re-renders of the shown screen when it doesn't set its own `refresh`. |
 | `log_level` | `info` | `debug` \| `info` \| `warning` \| `error`. |
 
-The screens file lives at `/config/screens.yaml` (the add-on's config folder is
-mapped there). A commented example is written on first start if the file is
+The screens file lives in your Home Assistant config folder at
+`tube_display/screens.yaml` (File editor, Samba or VS Code), set by the
+`screens_file` option. A commented example is written on first start if the file is
 missing, and the file is **re-read automatically when it changes** — no
 restart needed. A screen with an error is skipped (the error is logged and
 shown in `GET /api/status` under `config_errors`); the other screens keep
@@ -65,8 +66,8 @@ every refresh.
 | Widget | Fields |
 |---|---|
 | `text` | `text` (multi-line with `\n`), `size: auto` fits the tube (or a number), `align: left\|center\|right`, `weight: bold`, `color` |
-| `big_number` | `value`, `unit`, `label`, `color` — auto-sized to fit |
-| `ring` | `value`, `max`, `label`, `unit`, `color` — circular gauge 0..max, value in the middle, label below |
+| `big_number` | `value`, `unit`, `label`, `color`, `unit_newline` — auto-sized to fit; `unit_newline: true` puts the unit on its own line so the value can be bigger |
+| `ring` | `value`, `max`, `label`, `unit`, `color` — circular gauge 0..max, value in the middle, label below; `unit_newline: true` puts the unit under the value |
 | `bar` | `value`, `max`, `label`, `unit`, `color` — vertical bar gauge |
 | `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` |
 | `image` | `source`: `builtin:claude` (procedural orange starburst), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit: cover\|contain` |

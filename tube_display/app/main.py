@@ -29,6 +29,16 @@ _LOG = logging.getLogger("tube_display")
 
 def ensure_screens_file(path: str) -> None:
     """Write the commented example screens.yaml on first start if missing."""
+    old = "/config/screens.yaml"  # where 0.1.0 kept it, in the app's own config folder
+    if not os.path.exists(path) and path != old and os.path.exists(old):
+        try:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(old, encoding="utf-8") as src, open(path, "w", encoding="utf-8") as dst:
+                dst.write(src.read())
+            _LOG.info("Copied %s to %s - edit the new one from now on.", old, path)
+            return
+        except OSError as err:
+            _LOG.error("Could not copy %s to %s: %s", old, path, err)
     if not os.path.exists(path):
         try:
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- screens.yaml now lives in the Home Assistant config folder (`/homeassistant/tube_display/screens.yaml`, File editor: `tube_display/screens.yaml`), set by the new `screens_file` option. An existing one is copied there on first start.
+- Fix: template values showed as `b'…'`, rings had no colour and `\n` didn't break lines (HA's text reply was not decoded).
+- `unit_newline: true` on `big_number` and `ring` puts the unit on its own line.
+
 ## 0.1.0
 
 - Initial release. Renders Home Assistant information into pictures and pushes

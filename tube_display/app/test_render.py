@@ -178,3 +178,18 @@ def test_parse_color():
     assert render.parse_color("#fff") == (255, 255, 255)
     assert render.parse_color("not a color") == (255, 255, 255)
     assert render.parse_color(None, (1, 2, 3)) == (1, 2, 3)
+
+
+
+def test_template_bytes_reply_is_decoded():
+    import asyncio
+    from ha import HaClient
+
+    class Fake(HaClient):
+        def __init__(self):
+            pass
+
+        async def _request(self, method, path, **kwargs):
+            return b"42\nunder"
+
+    assert asyncio.run(Fake().render_template("x")) == "42\nunder"
