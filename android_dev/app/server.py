@@ -22,12 +22,12 @@ import jobs
 import keystore
 import setup
 import process
-from config import ANDROID_HOME, GRADLE, HOSTNAME, JOB_TIMEOUT, PROJECTS, TOKEN, TOKEN_VALID
-from paths import project_file, project_path
+from config import ANDROID_HOME, GRADLE, HOSTNAME, JOB_TIMEOUT, PIO_CORE, PIO_JOB_TIMEOUT, PIO_ROOTS, PROJECTS, TOKEN, TOKEN_VALID
+from paths import pio_project_path, project_file, project_path
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("android_dev")
-INSTRUCTIONS = """Android builds and real-phone control. No emulator: this host has no KVM.
+INSTRUCTIONS = f"""Android builds and real-phone control. No emulator: this host has no KVM.
 Projects are in /share/android_dev/projects/<name>. If your own container mounts /share, edit them there directly.
 New project: write settings.gradle.kts and the build files, then call gradle_wrapper, then gradle_run.
 Known good: AGP 9.5.0 with its built-in Kotlin, compileSdk 36, Gradle 9.8.2, JDK 21.
@@ -36,8 +36,10 @@ Phone: pair once with adb_pair (the pairing port and code), then adb_connect (a 
 Then install_apk, launch, logcat, screenshot, ui_dump, tap, swipe, input_text, key_event. adb_shell runs on the phone.
 input_text is ASCII only, and a literal %s types a space.
 Release signing: keystore_create once, then pass signing_keystore to gradle_run and read the ANDROID_SIGNING_* variables in signingConfigs. Keystores cannot be overwritten or exported.
-Call status first if anything looks unset. Full guide: DOCS.md in nict41/nict41-s-HA-Apps/android_dev."""
-server = MCPServer("android-dev", version="0.1.1", instructions=INSTRUCTIONS)
+Call status first if anything looks unset. Full guide: DOCS.md in nict41/nict41-s-HA-Apps/android_dev.
+ESP32/PlatformIO: pio_run builds a project under an allowed root; poll job_status, then pio_artifacts.
+Allowed ESP roots: {', '.join(str(root) for root in PIO_ROOTS)}."""
+server = MCPServer("android-dev", version="0.2.0", instructions=INSTRUCTIONS)
 
 
 def tool(description):
@@ -136,6 +138,18 @@ async def gradle_run(project: str, tasks: list[str], args: list[str] = [], signi
     return text_result(jobs.start_job(project, ["sh", "./gradlew", *tasks, *args], env, JOB_TIMEOUT))
 
 
+@tool("Run a PlatformIO build asynchronously (one job at a time; poll job_status).")
+async def pio_run(path: str, environment: str | None = None, targets: list[str] = []) -> list:
+    project = pio_project_path(path)
+    if environment is not None and not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", environment): raise ValueError("Invalid PlatformIO environment")
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", target) for target in targets): raise ValueError("Invalid PlatformIO target")
+    command = ["nice", "-n", "10", "pio", "run", "-d", str(project)]
+    if environment: command += ["-e", environment]
+    for target in targets: command += ["-t", target]
+    env = {"PLATFORMIO_CORE_DIR": str(PIO_CORE), "CI": "1", "PLATFORMIO_SETTING_ENABLE_TELEMETRY": "no"}
+    return text_result(jobs.start_job(project.name, command, env, PIO_JOB_TIMEOUT, cwd=project))
+
+
 @tool("Get build job state and a bounded tail of its log.")
 async def job_status(job_id: str, tail_lines: int = 100) -> list:
     return text_result(jobs.status(job_id, tail_lines))
@@ -155,6 +169,18 @@ async def list_artifacts(project: str) -> list:
         # One test run writes hundreds of report assets; only the entry pages are artifacts.
         if p.is_file() and (p.suffix in (".apk", ".aab") or p.name == "index.html"):
             stat = p.stat(); items.append({"path": str(p), "size": stat.st_size, "mtime": stat.st_mtime})
+    items.sort(key=lambda item: item["mtime"], reverse=True)
+    return text_result({"artifacts": items[:500], "truncated": len(items) > 500})
+
+
+@tool("List PlatformIO firmware artifacts for a build environment, newest first.")
+async def pio_artifacts(path: str, environment: str) -> list:
+    project = pio_project_path(path)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", environment): raise ValueError("Invalid PlatformIO environment")
+    names = {"firmware.bin", "firmware.elf", "littlefs.bin", "partitions.bin", "bootloader.bin"}
+    candidates = [p for p in (project / ".pio" / "build" / environment).glob("*") if p.is_file() and p.name in names]
+    candidates += [p for p in (project / "releases").glob("*.bin") if p.is_file()]
+    items = [{"path": str(p), "size": p.stat().st_size, "mtime": p.stat().st_mtime} for p in candidates]
     items.sort(key=lambda item: item["mtime"], reverse=True)
     return text_result({"artifacts": items[:500], "truncated": len(items) > 500})
 

@@ -28,6 +28,10 @@ This HA host has no `/dev/kvm`, so Android emulators are not supported. Use a re
 
 Write the project under `/share/android_dev/projects/<name>`, run `gradle_wrapper` once, then start a build with `gradle_run`. It returns a job id straight away, so poll `job_status` and then use `list_artifacts`. Only one job runs at a time. Install with `install_apk`, then use `launch`, `logcat`, `screenshot` and `ui_dump`. `input_text` is ASCII only, and a literal `%s` types a space. AGP 9.5.0, compileSdk 36 and Gradle 9.8.2 are known to work on JDK 21.
 
+## ESP32 builds
+
+PlatformIO builds ESP32 firmware for project directories under `/share/android_dev/projects` and `/share/elekstube-repo` by default. Override the allowed roots with the colon-separated `PIO_PROJECT_ROOTS` environment variable. A directory must contain `platformio.ini`. Start a build with `pio_run` and poll `job_status`, then list firmware with `pio_artifacts`. Gradle and PlatformIO builds share one job slot. The first build downloads the toolchains, about 1 GB, into `/data/platformio`; later builds reuse them.
+
 ## Projects, artifacts and signing
 
 Projects live in `/share/android_dev/projects`; screenshots are written to `/share/android_dev/screenshots`. SDK files live in `/data/android-sdk`, Gradle downloads in `/data/gradle`, the pinned Gradle executable in `/data/tools/gradle-9.8.2`, adb keys in `/data/adb`, build logs in `/data/jobs`, and signing materials in `/data/keystores`.
