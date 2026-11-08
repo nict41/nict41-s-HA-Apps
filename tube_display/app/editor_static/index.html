@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tube Display</title>
+<link rel="stylesheet" href="editor.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Tube Display</span>
+  <button id="saveBtn" class="btn primary" disabled>Save</button>
+  <button id="yamlToggle" class="btn">Edit YAML</button>
+  <span id="status" class="status"></span>
+  <button id="reloadBtn" class="btn hidden">Reload</button>
+</header>
+
+<main id="editorView">
+  <aside class="sidebar">
+    <section class="card">
+      <h2>Rotation</h2>
+      <ul id="rotationList" class="rotation-list"></ul>
+      <div class="clock-row">
+        <label><input type="checkbox" id="clockEnabled"> clock</label>
+        <input type="number" id="clockDuration" min="1" step="1" title="clock duration (s)">
+        <span class="unit">s</span>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Screens <button id="addScreen" class="btn small">Add</button></h2>
+      <ul id="screenList" class="screen-list"></ul>
+    </section>
+  </aside>
+
+  <section class="main">
+    <div class="card screen-settings">
+      <h2 id="screenTitle">Screen</h2>
+      <div class="row">
+        <label>duration <input type="number" id="scrDuration" min="1" step="1" placeholder="default"></label>
+        <label>refresh <input type="number" id="scrRefresh" min="1" step="1" placeholder="default"></label>
+        <label>background <input type="color" id="scrBackground" value="#000000"></label>
+        <label class="wide">when (template, optional) <input type="text" id="scrWhen" placeholder="{{ is_state('...','on') }}"></label>
+      </div>
+      <div class="row">
+        <button id="renameScreen" class="btn small">Rename</button>
+        <button id="deleteScreen" class="btn small danger">Delete</button>
+      </div>
+    </div>
+
+    <div class="card preview-card">
+      <div class="preview-head">
+        <h2>Preview</h2>
+        <button id="refreshPreview" class="btn small">Refresh</button>
+      </div>
+      <div id="tubes" class="tubes"></div>
+    </div>
+
+    <div class="card tube-editor hidden" id="tubeEditor">
+      <h2 id="tubeTitle">Tube</h2>
+      <div class="row">
+        <label>type
+          <select id="tType"></select>
+        </label>
+        <button id="copyTube" class="btn small">Copy</button>
+        <button id="pasteTube" class="btn small">Paste</button>
+        <button id="tubeLeft" class="btn small">&#8592;</button>
+        <button id="tubeRight" class="btn small">&#8594;</button>
+      </div>
+      <div id="tubeFields"></div>
+    </div>
+  </section>
+</main>
+
+<main id="yamlView" class="hidden">
+  <div class="card yaml-card">
+    <div class="row">
+      <button id="yamlSave" class="btn primary">Save YAML</button>
+      <button id="yamlBack" class="btn">Back to editor</button>
+      <span id="yamlStatus" class="status"></span>
+    </div>
+    <textarea id="yamlText" spellcheck="false"></textarea>
+    <ul id="yamlErrors" class="errors"></ul>
+  </div>
+</main>
+
+<script src="editor.js"></script>
+</body>
+</html>

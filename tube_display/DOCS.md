@@ -74,6 +74,36 @@ every refresh.
 | `sparkline` | `entity`, `hours` (HA history API), optional `unit`, `color` — line graph with the latest value on top |
 | `blank` | empty tube |
 
+## Screen editor (ingress panel)
+
+The add-on registers an ingress panel **Tube Display** (`mdi:television-guide`)
+in the Home Assistant sidebar. It is served by a second HTTP site on
+`0.0.0.0:8099` (not published in `ports:`) that only accepts requests coming
+from the ingress proxy (`172.30.32.2`); anything else gets `403`. Ingress
+itself requires the HA login. The page uses only relative URLs, so it works
+under the `X-Ingress-Path` prefix HA serves it at.
+
+The editor edits the same screens file as the File editor — saves are written
+atomically (temp file + rename) and the running rotation picks them up through
+the existing file watcher. Saves go through a round-trip YAML load
+(`ruamel.yaml`), so comments and layout survive; multi-line templates are
+written as literal blocks (`|-`). If the file changed on disk since the page
+loaded it, the save is refused with `409` and the page offers a Reload.
+
+Editor API on the ingress site (all paths relative to the ingress prefix):
+
+| Endpoint | Description |
+|---|---|
+| `GET api/config` | `{"yaml", "data", "mtime", "errors"}` — the file text, its parsed form, mtime and validation errors. |
+| `POST api/validate` | Body `{"data": {...}}` → `{"errors": [...]}` (same validation as the loader). |
+| `POST api/preview` | Body `{"screen": {...}, "tube": optional int}` → PNG of the 810x240 strip (or one 135x240 tube), rendered with the real pipeline and live HA states. Does not touch the clock or the file. |
+| `POST api/template` | Body `{"template": "..."}` → `{"result": "..."}` or `{"error": "..."}` (live HA template render). |
+| `GET api/entities?q=<text>` | Up to 50 matching `[{"entity_id","name","state","unit"}]` from the Supervisor core API `GET /states` (cached ~10 s). |
+| `POST api/save` | Body `{"data": {...}, "mtime": <from api/config>}` — 409 if the file changed on disk, 400 with errors if invalid; otherwise round-trip update and atomic write. Returns the new mtime. |
+| `POST api/save_yaml` | Body `{"yaml": "...", "mtime": ...}` — raw-YAML tab; must parse and validate, then written as is. |
+
+The 8098 API above is unchanged and has no write routes.
+
 ## Pushing to the clock
 
 - `POST http://<clock>/panel?tube=N` with raw RGB565 big-endian body
