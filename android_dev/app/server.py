@@ -37,9 +37,10 @@ Then install_apk, launch, logcat, screenshot, ui_dump, tap, swipe, input_text, k
 input_text is ASCII only, and a literal %s types a space.
 Release signing: keystore_create once, then pass signing_keystore to gradle_run and read the ANDROID_SIGNING_* variables in signingConfigs. Keystores cannot be overwritten or exported.
 Call status first if anything looks unset. Full guide: DOCS.md in nict41/nict41-s-HA-Apps/android_dev.
-ESP32/PlatformIO: pio_run builds a project under an allowed root; poll job_status, then pio_artifacts.
-Allowed ESP roots: {', '.join(str(root) for root in PIO_ROOTS)}."""
-server = MCPServer("android-dev", version="0.2.0", instructions=INSTRUCTIONS)
+ESP32 firmware (PlatformIO 6.2.0): pio_run(path, environment, targets) takes the project's ABSOLUTE path (it must contain platformio.ini) under an allowed root: {', '.join(str(root) for root in PIO_ROOTS)}.
+It only starts a job (shared slot with Gradle): poll job_status with a large tail_lines and search the log for "error:" and "warning:", then pio_artifacts(path, environment) for firmware.bin, littlefs.bin, etc.
+Builds run with CI=1; the first build downloads ~1 GB of toolchains. No USB here: upload/monitor targets can't work, flash the .bin another way (over Wi-Fi or from a computer)."""
+server = MCPServer("android-dev", version="0.2.1", instructions=INSTRUCTIONS)
 
 
 def tool(description):
