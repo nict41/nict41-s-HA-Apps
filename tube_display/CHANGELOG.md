@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- Button-only mode: turn off **Cycle automatically** (editor top bar, or the Tube Display Rotation switch in Home Assistant) and screens only change when you press the clock's button; the clock entry is skipped then. The setting is remembered across restarts.
+
 ## 0.3.1
 
 - Editor: tube previews really fit the tube now (a `background` shorthand reset the picture's scaling).

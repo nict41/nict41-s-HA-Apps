@@ -409,3 +409,14 @@ def test_image_upload_rejects_non_pictures(tmp_path):
         form.add_field("file", _png_bytes(), filename="x.svg", content_type="image/svg+xml")
         assert (await client.post("/api/images", data=form)).status == 400
     _with_client(tmp_path, check)
+
+
+def test_rotation_toggle(tmp_path):
+    async def check(client, screens_file):
+        ctl = client.app["controller"]
+        ctl.rotation_enabled = True
+        ctl.set_rotation_enabled = lambda on: setattr(ctl, "rotation_enabled", on)
+        assert (await (await client.get("/api/rotation")).json()) == {"enabled": True}
+        resp = await client.post("/api/rotation", json={"enabled": False})
+        assert (await resp.json()) == {"enabled": False} and ctl.rotation_enabled is False
+    _with_client(tmp_path, check)

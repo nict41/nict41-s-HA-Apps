@@ -195,6 +195,8 @@ python3 -m pytest -q
 
 With clock firmware 2.2.0-nt3 or later, pressing the clock's button while panels show moves on to the next screen in the rotation (it also ends a screen pinned from Home Assistant). Use the Display select to go back to the clock's own time.
 
+**Button-only mode:** untick *Cycle automatically* in the editor (or turn off the *Tube Display Rotation* switch). The current screen stays up (its values keep refreshing) and each press of the clock's button shows the next screen in the rotation, skipping the `clock` entry. Remembered across restarts.
+
 ## Your own pictures
 
 In the screen editor, pick an `image` tube and use **+ Upload** under *picture*. Pictures (.png, .jpg, .gif, .webp, .bmp, up to 10 MB) are saved in `tube_display/images/` next to `screens.yaml` (you can also copy files there with File editor or Samba) and used as `source: file:<name>`. Transparent parts show the screen's background colour; `fit: cover` fills the tube, `fit: contain` shows the whole picture. A tube is 135x240, so tall pictures fit best.

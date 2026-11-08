@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import os
 import time
 from typing import Awaitable, Callable
@@ -48,7 +49,8 @@ class Controller:
         self._config: ScreensConfig | None = None
         self._mtime: float | None = None
         self.current: str | None = None          # entry shown now ("clock" or a screen name)
-        self.rotation_enabled = True
+        self.rotation_enabled = self._load_rotation_enabled()
+        self._advance = False                     # button pressed while rotation is off
         self._pin: tuple[str, float | None] | None = None   # (entry, expiry; None = forever)
         self._rotation_index = -1
         self._interrupted = False
@@ -127,15 +129,52 @@ class Controller:
         self._interrupted = True
 
     def next_screen(self) -> None:
-        """The clock's button: move on to the next rotation entry now (ends a pinned screen too)."""
+        """The clock's button: move on to the next rotation entry now (ends a pinned screen too).
+        With rotation off this is the only way screens change."""
         self._pin = None
+        if not self.rotation_enabled:
+            self._advance = True
         self._interrupted = True
         _LOG.info("Button pressed - next screen")
 
     def set_rotation_enabled(self, enabled: bool) -> None:
         self.rotation_enabled = enabled
         self._interrupted = True
-        _LOG.info("Rotation %s", "enabled" if enabled else "paused")
+        self._save_rotation_enabled()
+        self._publish_state()       # keeps Home Assistant's Rotation switch in step
+        _LOG.info("Rotation %s", "enabled" if enabled else "off - screens change by button press")
+
+    # Rotation on/off survives restarts: kept in the app's /data folder
+    STATE_FILE = "/data/tube_display_state.json"
+
+    def _load_rotation_enabled(self) -> bool:
+        try:
+            with open(self.STATE_FILE, encoding="utf-8") as f:
+                return bool(json.load(f).get("rotation", True))
+        except (OSError, ValueError, AttributeError):
+            return True
+
+    def _save_rotation_enabled(self) -> None:
+        try:
+            with open(self.STATE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"rotation": self.rotation_enabled}, f)
+        except OSError:
+            pass    # no /data (tests, local runs): just not remembered
+
+    async def _manual_step(self) -> None:
+        """Rotation off + button: show the next screen in the rotation and stay there. The clock
+        entry is skipped, since the button only reaches the app while panels show."""
+        cfg = self._config
+        if cfg is None or not cfg.rotation:
+            return
+        for _ in range(len(cfg.rotation)):
+            self._rotation_index = (self._rotation_index + 1) % len(cfg.rotation)
+            entry = cfg.rotation[self._rotation_index]
+            screen = cfg.screens.get(entry) if entry != CLOCK_ENTRY else None
+            if screen is None or not await render_mod.screen_when_true(screen, self._ctx):
+                continue
+            await self._activate_screen(screen)
+            return
 
     def status(self) -> dict:
         cfg = self._config
@@ -223,8 +262,13 @@ class Controller:
             _LOG.debug("Refreshed screen '%s', sent tubes %s", self.current, sent)
 
     def _publish_state(self) -> None:
-        if self._mqtt is not None:
-            asyncio.ensure_future(self._mqtt.publish_state(self._mqtt_state()))
+        if self._mqtt is None:
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return      # called outside the app's event loop (tests): nothing to publish on
+        asyncio.ensure_future(self._mqtt.publish_state(self._mqtt_state()))
 
     def _mqtt_state(self) -> dict:
         cfg = self._config
@@ -318,9 +362,14 @@ class Controller:
                             await self._show_screen(screen, duration)
                     continue
                 if not self.rotation_enabled:
-                    # Paused: stay on the current screen, but keep its values up to date
+                    # Off: stay on the current screen, keeping its values up to date, until the
+                    # clock's button asks for the next one
                     screen = (self._config.screens.get(self.current)
                               if self._config and self.current not in (None, CLOCK_ENTRY) else None)
+                    if self._advance or (screen is None and self.current is None):
+                        self._advance = False
+                        await self._manual_step()
+                        continue
                     if screen is None:
                         await self._sleep(1.0)
                         continue
