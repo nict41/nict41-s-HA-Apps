@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- Docs: the clock firmware is now called HA Tubes (github.com/nict41/HA-Tubes), with a web installer.
+
 ## 0.4.4
 
 - Editor: the colour picker started at white when no colour was set, so picking white for an icon (which defaults to orange) saved nothing. It now starts at the tube's real default colour.

@@ -2,8 +2,8 @@
 
 Renders Home Assistant information into pictures and pushes them to an IPSTube
 clock (six 135x240 colour IPS displays in a row, ESP32, custom firmware) that
-runs the **panels firmware** — the firmware that accepts pushed pictures on
-`POST http://<clock>/panel?tube=N`. The stock time/date/weather firmware does
+runs **[HA Tubes](https://github.com/nict41/HA-Tubes)** — the clock firmware that accepts pushed pictures on
+`POST http://<clock>/panel?tube=N` (install it with the [web installer](https://nict41.github.io/HA-Tubes/)). The stock time/date/weather firmware does
 not accept panels.
 
 ## Options
