@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- Editor: screens taken out of the rotation stay in the Rotation list (unticked) so they can be ticked back in.
+
 ## 0.4.1
 
 - Editor: a tube with a mistake (e.g. an icon without `mdi:`) no longer blanks the preview; it shows a red "!" and the error, and all tubes stay clickable so it can be fixed.

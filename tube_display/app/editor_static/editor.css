@@ -149,3 +149,5 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .auto-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; white-space: nowrap; }
 
 .tube-img.broken { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+
+.rot-item.off .rot-name { color: var(--muted); font-style: italic; }
