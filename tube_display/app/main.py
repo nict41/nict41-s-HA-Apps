@@ -83,6 +83,9 @@ async def run() -> None:
         async def on_rotation(on: bool) -> None:
             controller.set_rotation_enabled(on)
 
+        async def on_button() -> None:
+            controller.next_screen()
+
         controller = Controller(settings, session, ha)
         pusher = ClockPusher(
             session, settings.clock_base_url,
@@ -95,6 +98,7 @@ async def run() -> None:
                 settings.mqtt, settings.clock_mqtt_id,
                 on_clock_state, on_select, on_rotation,
                 get_state=controller._mqtt_state,
+                on_button=on_button,
             )
             pusher._publish_display = mqtt.publish_display
             controller.set_mqtt(mqtt)

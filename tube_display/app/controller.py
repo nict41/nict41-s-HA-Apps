@@ -125,6 +125,12 @@ class Controller:
         self._pin = None
         self._interrupted = True
 
+    def next_screen(self) -> None:
+        """The clock's button: move on to the next rotation entry now (ends a pinned screen too)."""
+        self._pin = None
+        self._interrupted = True
+        _LOG.info("Button pressed - next screen")
+
     def set_rotation_enabled(self, enabled: bool) -> None:
         self.rotation_enabled = enabled
         self._interrupted = True
@@ -245,7 +251,8 @@ class Controller:
             now = self._now()
             if now >= end or self._interrupted:
                 break
-            wait = min(next_refresh, end) - now
+            # In short steps so a button press or a pin takes effect within a quarter second
+            wait = min(next_refresh, end, now + 0.25) - now
             if wait > 0:
                 await self._sleep(wait)
             if self._interrupted:

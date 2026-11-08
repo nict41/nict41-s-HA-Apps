@@ -44,13 +44,15 @@ class MqttBridge:
                  on_clock_state: Callable[[dict], Awaitable[None]],
                  on_select: Callable[[str], Awaitable[None]],
                  on_rotation: Callable[[bool], Awaitable[None]],
-                 get_state: Callable[[], dict]) -> None:
+                 get_state: Callable[[], dict],
+                 on_button: Callable[[], Awaitable[None]] | None = None) -> None:
         self._cfg = mqtt_cfg
         self._clock_id = clock_mqtt_id
         self._on_clock_state = on_clock_state
         self._on_select = on_select
         self._on_rotation = on_rotation
         self._get_state = get_state
+        self._on_button = on_button
         self._client: aiomqtt.Client | None = None
         self._task: asyncio.Task | None = None
         self._stop = False
@@ -62,6 +64,11 @@ class MqttBridge:
     @property
     def clock_state_topic(self) -> str:
         return f"clock/{self._clock_id}/volatile/state"
+
+    @property
+    def clock_button_topic(self) -> str:
+        """The clock's button, pressed while panels show (firmware 2.2.0-nt3+)."""
+        return f"clock/{self._clock_id}/button"
 
     @property
     def clock_display_command_topic(self) -> str:
@@ -88,6 +95,7 @@ class MqttBridge:
                     await client.subscribe(self.clock_state_topic)
                     await client.subscribe(SCREEN_SELECT_COMMAND)
                     await client.subscribe(ROTATION_SWITCH_COMMAND)
+                    await client.subscribe(self.clock_button_topic)
                     _LOG.info("MQTT connected - watching %s", self.clock_state_topic)
                     async for message in client.messages:
                         await self._handle(message)
@@ -108,6 +116,9 @@ class MqttBridge:
                     await self._on_clock_state(state)
             elif topic == SCREEN_SELECT_COMMAND:
                 await self._on_select(payload.strip())
+            elif topic == self.clock_button_topic:
+                if payload.strip() == "next" and self._on_button is not None:
+                    await self._on_button()
             elif topic == ROTATION_SWITCH_COMMAND:
                 await self._on_rotation(payload.strip().lower() in ("on", "true", "1"))
         except Exception as err:
