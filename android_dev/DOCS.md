@@ -28,9 +28,56 @@ This HA host has no `/dev/kvm`, so Android emulators are not supported. Use a re
 
 Write the project under `/share/android_dev/projects/<name>`, run `gradle_wrapper` once, then start a build with `gradle_run`. It returns a job id straight away, so poll `job_status` and then use `list_artifacts`. Only one job runs at a time. Install with `install_apk`, then use `launch`, `logcat`, `screenshot` and `ui_dump`. `input_text` is ASCII only, and a literal `%s` types a space. AGP 9.5.0, compileSdk 36 and Gradle 9.8.2 are known to work on JDK 21.
 
-## ESP32 builds
+## ESP32 builds (PlatformIO)
 
-PlatformIO builds ESP32 firmware for project directories under `/share/android_dev/projects` and `/share/elekstube-repo` by default. Override the allowed roots with the colon-separated `PIO_PROJECT_ROOTS` environment variable. A directory must contain `platformio.ini`. Start a build with `pio_run` and poll `job_status`, then list firmware with `pio_artifacts`. Gradle and PlatformIO builds share one job slot. The first build downloads the toolchains, about 1 GB, into `/data/platformio`; later builds reuse them.
+The app also compiles ESP32 firmware with PlatformIO 6.2.0. Use it from any container that can't run the
+xtensa toolchain itself, such as the Alpine-based Claude Code app.
+
+### Where projects can live
+
+`pio_run` and `pio_artifacts` take the project's **absolute path**, not a project name like the Gradle
+tools. The path must contain `platformio.ini` and be inside an allowed root:
+
+- `/share/android_dev/projects` (any project under it)
+- `/share/elekstube-repo` (the IPSTube clock firmware, fork `nict41/EleksTubeIPS`)
+
+Symlinks and `..` are resolved first, so they can't reach anywhere else. To allow more roots, set the
+colon-separated `PIO_PROJECT_ROOTS` environment variable for the app.
+
+### Workflow
+
+1. Edit the source directly under `/share/...` from your own container.
+2. `pio_run(path="/share/elekstube-repo", environment="ipstube")` starts the build and returns a
+   `job_id` straight away. Leave out `environment` to build every environment in `platformio.ini`,
+   which is much slower. Pass PlatformIO targets with `targets`, for example `["buildfs"]` for the
+   filesystem image or a project's own custom targets such as `["release"]`.
+3. Poll `job_status(job_id, tail_lines=...)` until `state` leaves `running`. The log tail is where
+   compiler errors and warnings appear; ask for more lines (for example 400) and search for
+   `error:` and `warning:`. `job_cancel` stops a build.
+4. `pio_artifacts(path, environment)` lists `firmware.bin`, `firmware.elf`, `partitions.bin`,
+   `bootloader.bin`, `littlefs.bin` from `.pio/build/<environment>/`, plus any `releases/*.bin`,
+   newest first.
+
+### What the build environment does
+
+- `CI=1` is set. Projects can behave differently under it: the EleksTube firmware then builds its web
+  pages with `npm ci --ignore-scripts` and fails the build if that fails, instead of falling back to
+  old pages.
+- Node.js and npm are installed for projects that build web assets.
+- `PLATFORMIO_CORE_DIR=/data/platformio` holds the platforms, toolchains and libraries. The first build
+  of a platform downloads about 1 GB there; later builds reuse it. It's excluded from backups.
+- Telemetry is off.
+- Builds run as root inside this app, so `.pio/` (and `web/node_modules/` for EleksTube) in the project
+  are created by root. Both are in the projects' `.gitignore`.
+- Gradle and PlatformIO share **one job slot**: a second `pio_run` or `gradle_run` returns an error
+  while a job is running. The timeout is the `gradle_job_timeout_minutes` option.
+
+### Limits
+
+- **No flashing or serial monitor.** The app has no USB access to the device, so the `upload` and
+  `monitor` targets don't work. Flash the built files another way: over Wi-Fi if the firmware supports
+  it, or from a computer with USB (esptool or a web flasher).
+- Only `amd64`, like the rest of the app.
 
 ## Projects, artifacts and signing
 

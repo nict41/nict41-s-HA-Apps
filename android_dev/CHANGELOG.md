@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.1
+- Documented ESP32 builds in full for other agents: absolute paths, targets, reading errors and warnings, CI=1, artifacts, and that flashing needs another route.
+
 ## 0.2.0
 - ESP32 firmware builds with PlatformIO: pio_run, pio_artifacts.
 
