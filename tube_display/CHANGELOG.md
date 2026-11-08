@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- Editor: the colour picker started at white when no colour was set, so picking white for an icon (which defaults to orange) saved nothing. It now starts at the tube's real default colour.
+- Icon tubes without text show the icon centred (and a little bigger) instead of high up.
+
 ## 0.4.3
 
 - Editor: entity search results were squashed to slivers (list rows shrank to fit); they keep their height, wrap long names and the list scrolls. Inputs no longer push cards wider than a phone screen.

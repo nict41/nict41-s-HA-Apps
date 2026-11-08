@@ -210,3 +210,12 @@ def test_file_image_source_with_transparency(tmp_path):
         assert False, "path outside the images folder must fail"
     except ValueError:
         pass
+
+
+def test_icon_without_text_is_centred():
+    import asyncio
+    import render
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    img = render.draw_icon({"type": "icon", "icon": "mdi:no-such-icon", "color": "#FFFFFF"}, ctx, (0, 0, 0))
+    ys = [y for y in range(render.TUBE_H) for x in range(render.TUBE_W) if img.getpixel((x, y)) != (0, 0, 0)]
+    assert abs((min(ys) + max(ys)) / 2 - render.TUBE_H / 2) <= 2

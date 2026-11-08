@@ -716,7 +716,11 @@ function colorEditor(w, f) {
     if (mode === "fixed") {
       const input = document.createElement("input");
       input.type = "color";
-      input.value = /^#[0-9a-fA-F]{6}$/.test(current) ? current : "#ffffff";
+      // With no colour set, start from what the tube really shows (icons, rings, bars and
+      // sparklines default to Claude orange), so picking white is a real change that gets saved
+      const fallback = ["icon", "ring", "bar", "sparkline"].includes(w.type) ? "#d97757" : "#ffffff";
+      input.value = /^#[0-9a-fA-F]{6}$/.test(current) ? current : fallback;
+      input.addEventListener("input", () => apply(input.value));
       input.addEventListener("change", () => apply(input.value));
       const lab = document.createElement("label");
       lab.className = "field";
