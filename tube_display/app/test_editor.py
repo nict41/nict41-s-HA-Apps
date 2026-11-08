@@ -335,7 +335,7 @@ def test_index_and_static_served(tmp_path):
         assert resp.status == 200
         assert resp.content_type == "text/html"
         html = await resp.text()
-        assert "editor.js" in html and "editor.css" in html
+        assert "editor.js?v=" in html and "editor.css?v=" in html and "__VERSION__" not in html
         # relative URLs only - no absolute /api or /editor references
         assert 'src="/editor.js"' not in html and 'href="/editor.css"' not in html
         resp = await client.get("/editor.js")

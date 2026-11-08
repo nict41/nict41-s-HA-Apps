@@ -74,8 +74,10 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, _index)
 
     async def _index(request: web.Request) -> web.Response:
-        return web.Response(body=(STATIC_DIR / "index.html").read_bytes(),
-                            content_type="text/html")
+        # ?v=<file times> on the CSS/JS links so a phone never mixes an old cached file with a new one
+        stamp = str(int(max((STATIC_DIR / n).stat().st_mtime for n in ("editor.js", "editor.css"))))
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("__VERSION__", stamp)
+        return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
     async def static_file(request: web.Request) -> web.Response:
         name = request.match_info["name"]
@@ -84,7 +86,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             if name not in ("editor.js", "editor.css"):
                 raise web.HTTPNotFound()
             ctype = "text/javascript" if name.endswith(".js") else "text/css"
-            return web.Response(body=(STATIC_DIR / name).read_bytes(), content_type=ctype)
+            return web.Response(body=(STATIC_DIR / name).read_bytes(), content_type=ctype,
+                                headers={"Cache-Control": "no-cache"})
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------

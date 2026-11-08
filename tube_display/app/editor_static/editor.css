@@ -89,7 +89,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   box-sizing: content-box;   /* the border goes around the picture, not over it */
   background-repeat: no-repeat;
   background-size: 600% 100%;
-  image-rendering: pixelated;
   border-radius: 14px;
   border: 3px solid #2c2c2c;
   background: #000;
