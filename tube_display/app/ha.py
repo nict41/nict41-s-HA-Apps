@@ -42,6 +42,9 @@ class HaClient:
     async def render_template(self, template: str) -> str:
         """Render one HA template. Returns the rendered string."""
         result = await self._request("POST", "/template", json={"template": template})
+        # HA answers text/plain, which _request returns as bytes; str(bytes) would give "b'42'"
+        if isinstance(result, (bytes, bytearray)):
+            return result.decode("utf-8", errors="replace")
         return str(result)
 
     async def render_templates(self, templates: list[str]) -> list[str]:

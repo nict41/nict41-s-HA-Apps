@@ -54,7 +54,7 @@ export TUBE_CLOCK_PASSWORD="$(opt clock_password "")"
 export TUBE_DEFAULT_DURATION="$(opt default_duration "15")"
 export TUBE_DEFAULT_REFRESH="$(opt default_refresh "30")"
 export TUBE_LOG_LEVEL="$(opt log_level "info")"
-export TUBE_SCREENS_FILE="${TUBE_SCREENS_FILE:-/config/screens.yaml}"
+export TUBE_SCREENS_FILE="$(opt screens_file "/homeassistant/tube_display/screens.yaml")"
 
 bashio::log.level "${TUBE_LOG_LEVEL}"
 

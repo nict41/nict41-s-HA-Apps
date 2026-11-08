@@ -30,3 +30,8 @@ configuration:
   log_level:
     name: Log level
     description: How much to write to the add-on log.
+  screens_file:
+    name: Screens file
+    description: >-
+      Where the screens are defined. Default /homeassistant/tube_display/screens.yaml,
+      which is tube_display/screens.yaml in File editor.

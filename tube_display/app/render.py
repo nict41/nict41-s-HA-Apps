@@ -221,9 +221,16 @@ def draw_big_number(w: dict, ctx: RenderContext, bg) -> Image.Image:
     unit = str(w.get("unit") or "")
     label = str(w.get("label") or "")
     color = parse_color(w.get("color"), DEFAULT_COLOR)
-    main = value + unit
-    font = _fit_font(draw, main, TUBE_W - 12, TUBE_H - 70, start=110, bold=True)
-    _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 - 14, main, font, color)
+    if unit and w.get("unit_newline"):
+        # The value alone gets the full width; the unit goes on its own line below it
+        font = _fit_font(draw, value, TUBE_W - 8, TUBE_H - 110, start=140, bold=True)
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 - 34, value, font, color)
+        ufont = _fit_font(draw, unit, TUBE_W - 12, 40, start=36, bold=True)
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 + 46, unit, ufont, color)
+    else:
+        main = value + unit
+        font = _fit_font(draw, main, TUBE_W - 12, TUBE_H - 70, start=110, bold=True)
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2 - 14, main, font, color)
     if label:
         lfont = fonts.load_font(18)
         _draw_centered(draw, TUBE_W // 2, TUBE_H - 34, label, lfont, color)
@@ -251,8 +258,14 @@ def draw_ring(w: dict, ctx: RenderContext, bg) -> Image.Image:
                  fill=color, width=width)
     value = str(w.get("value") or "")
     unit = str(w.get("unit") or "")
-    vfont = _fit_font(draw, value + unit, 2 * r - 8, 40, start=34, bold=True)
-    _draw_centered(draw, cx, cy, value + unit, vfont, DEFAULT_COLOR)
+    if unit and w.get("unit_newline"):
+        vfont = _fit_font(draw, value, 2 * r - 22, 44, start=48, bold=True)
+        _draw_centered(draw, cx, cy - 8, value, vfont, DEFAULT_COLOR)
+        ufont = _fit_font(draw, unit, 2 * r - 40, 20, start=20, bold=True)
+        _draw_centered(draw, cx, cy + 24, unit, ufont, DEFAULT_COLOR)
+    else:
+        vfont = _fit_font(draw, value + unit, 2 * r - 8, 40, start=34, bold=True)
+        _draw_centered(draw, cx, cy, value + unit, vfont, DEFAULT_COLOR)
     label = str(w.get("label") or "")
     if label:
         lfont = fonts.load_font(16)
