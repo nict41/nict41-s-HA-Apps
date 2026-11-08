@@ -132,6 +132,15 @@ Self-hosted file sharing platform (a WeTransfer alternative), built on the activ
 
 Telegram bot that transcribes voice notes and audio files locally with Parakeet or Whisper - based on Ascoltino, patched to also handle audio files shared in from other apps.
 
+### [Tube Display](./tube_display)
+
+![Tube Display logo](tube_display/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+Turns an IPSTube / EleksTube-style six-screen clock running [HA Tubes](https://github.com/nict41/HA-Tubes) firmware into a Home Assistant display: renders screens from your states (rings, big numbers, icons, pictures, cameras), rotates them or steps through them with the clock's button, and has a visual screen editor in the sidebar.
+
 ### [WordPress](./wordpress)
 
 ![WordPress logo](wordpress/logo.png)

@@ -162,3 +162,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .entity-picker input[type="text"] { flex: 1 1 160px; min-width: 0; }
 .entity-picker .entity-list { flex: 1 1 100%; }
 .value-source, .card { min-width: 0; max-width: 100%; }
+
+/* Long templates wrap inside the card instead of widening the page */
+textarea { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.value-source textarea, .field textarea { width: 100%; }
+.image-tile .builtin-thumb { font-size: 44px; line-height: 86px; color: #d97757; }
