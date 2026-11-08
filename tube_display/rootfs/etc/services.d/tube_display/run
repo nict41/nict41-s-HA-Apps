@@ -1,0 +1,81 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Tube Display
+#
+# Reads the add-on options, resolves the MQTT broker the Supervisor injected
+# as a service, then hands over to the Python app (renderer + pusher + API).
+# ==============================================================================
+
+# ---------------------------------------------------------------------------
+# Options are read ONCE, from one place, and checked before anything uses
+# them. /data/options.json is a plain local file written by the Supervisor;
+# the Supervisor API is only a fallback. A failed read must not silently
+# turn into defaults - the add-on refuses to start instead.
+# ---------------------------------------------------------------------------
+
+OPTIONS_JSON=""
+if [ -s /data/options.json ]; then
+    OPTIONS_JSON="$(cat /data/options.json)"
+fi
+
+if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "${OPTIONS_JSON}"; then
+    bashio::log.warning "/data/options.json missing or unreadable - asking the Supervisor."
+    OPTIONS_JSON="$(bashio::app.config 2>/dev/null)" || OPTIONS_JSON=""
+fi
+
+# `clock_host` is in the schema, so a configuration object that lacks it did
+# not come from Supervisor intact, however well-formed the JSON looks.
+if ! jq -e 'type == "object" and has("clock_host")' >/dev/null 2>&1 <<< "${OPTIONS_JSON}"; then
+    bashio::log.fatal "Could not read this add-on's options."
+    bashio::log.fatal "Neither /data/options.json nor the Supervisor returned a usable"
+    bashio::log.fatal "configuration. Refusing to start rather than run with defaults."
+    bashio::exit.nok "Add-on options could not be read"
+fi
+
+# One option out of the snapshot, rendered the way the Python side expects:
+# booleans as true/false, everything else as a plain string. `has()` (not
+# `//`) so a stored false is not mistaken for "absent".
+opt() {
+    local key="${1}"
+    local fallback="${2-}"
+    jq -r --arg key "${key}" --arg fallback "${fallback}" '
+        if has($key) and (.[$key] != null) then
+            .[$key] | tostring
+        else
+            $fallback
+        end
+    ' <<< "${OPTIONS_JSON}"
+}
+
+export TUBE_CLOCK_HOST="$(opt clock_host "")"
+export TUBE_CLOCK_MQTT_ID="$(opt clock_mqtt_id "")"
+export TUBE_CLOCK_USER="$(opt clock_user "")"
+export TUBE_CLOCK_PASSWORD="$(opt clock_password "")"
+export TUBE_DEFAULT_DURATION="$(opt default_duration "15")"
+export TUBE_DEFAULT_REFRESH="$(opt default_refresh "30")"
+export TUBE_LOG_LEVEL="$(opt log_level "info")"
+export TUBE_SCREENS_FILE="${TUBE_SCREENS_FILE:-/config/screens.yaml}"
+
+bashio::log.level "${TUBE_LOG_LEVEL}"
+
+# ---------------------------------------------------------------------------
+# MQTT: the broker credentials come from the Supervisor-injected service, so
+# no password is ever hardcoded. mqtt:need means the add-on only starts once a
+# broker is present.
+# ---------------------------------------------------------------------------
+
+if bashio::services.available "mqtt"; then
+    export TUBE_MQTT_HOST="$(bashio::services mqtt 'host')"
+    export TUBE_MQTT_PORT="$(bashio::services mqtt 'port')"
+    export TUBE_MQTT_USER="$(bashio::services mqtt 'username')"
+    export TUBE_MQTT_PASS="$(bashio::services mqtt 'password')"
+    bashio::log.info "MQTT broker at ${TUBE_MQTT_HOST}:${TUBE_MQTT_PORT} - clock state and HA discovery will be published."
+else
+    bashio::log.error "No MQTT service available - the clock state cannot be watched and no HA entities are published."
+    bashio::exit.nok "MQTT service required (services: mqtt:need)"
+fi
+
+bashio::log.info "Starting Tube Display (clock ${TUBE_CLOCK_HOST}, screens ${TUBE_SCREENS_FILE})..."
+
+cd /app || bashio::exit.nok "Could not change to /app directory"
+exec python3 main.py

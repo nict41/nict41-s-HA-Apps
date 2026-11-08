@@ -1,0 +1,32 @@
+configuration:
+  clock_host:
+    name: Clock host or IP
+    description: >-
+      Address of the IPSTube clock on the network, e.g. 192.168.8.211
+      (no http:// prefix, no port unless it is not 80).
+  clock_mqtt_id:
+    name: Clock MQTT id
+    description: >-
+      The <id> in the clock's MQTT topics (clock/<id>/...), shown on the
+      clock's web page.
+  clock_user:
+    name: Clock web login user
+    description: >-
+      Optional. Username for the clock's HTTP digest auth, if a web login
+      is set on the clock.
+  clock_password:
+    name: Clock web login password
+    description: Optional. Password for the clock's HTTP digest auth.
+  default_duration:
+    name: Default screen duration
+    description: >-
+      Seconds a screen stays in the rotation when it does not set its own
+      duration.
+  default_refresh:
+    name: Default refresh interval
+    description: >-
+      Seconds between re-renders of the current screen when it does not set
+      its own refresh.
+  log_level:
+    name: Log level
+    description: How much to write to the add-on log.

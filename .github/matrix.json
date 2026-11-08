@@ -23,7 +23,9 @@
     { "app": "ascoltino", "arch": "amd64", "platform": "linux/amd64" },
     { "app": "pantry_tracker", "arch": "aarch64", "platform": "linux/arm64" },
     { "app": "pantry_tracker", "arch": "amd64", "platform": "linux/amd64" },
-    { "app": "android_dev", "arch": "amd64", "platform": "linux/amd64" }
+    { "app": "android_dev", "arch": "amd64", "platform": "linux/amd64" },
+    { "app": "tube_display", "arch": "aarch64", "platform": "linux/arm64" },
+    { "app": "tube_display", "arch": "amd64", "platform": "linux/amd64" }
   ],
   "test": [
     "print_timelapse",
@@ -33,6 +35,7 @@
     "camera_share",
     "elegoo_slicer",
     "pantry_tracker",
-    "android_dev"
+    "android_dev",
+    "tube_display"
   ]
 }
