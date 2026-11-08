@@ -10,12 +10,13 @@ not accept panels.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `clock_host` | `192.168.8.211` | Clock host or IP (no `http://` prefix). |
-| `clock_mqtt_id` | `209374ipstube` | The `<id>` in the clock's MQTT topics (`clock/<id>/...`), shown on the clock's web page. |
+| `clock_host` | (example IP) | Your clock's host name or IP address (no `http://` prefix). |
+| `clock_mqtt_id` | (example id) | The `<id>` in the clock's MQTT topics (`clock/<id>/...`), shown as **MQTT ID** on the clock's Info page. |
 | `clock_user` / `clock_password` | empty | Optional HTTP digest auth credentials if the clock has a web login. |
 | `default_duration` | `15` | Seconds a screen stays in the rotation when it doesn't set its own `duration`. |
 | `default_refresh` | `30` | Seconds between re-renders of the shown screen when it doesn't set its own `refresh`. |
 | `log_level` | `info` | `debug` \| `info` \| `warning` \| `error`. |
+| `screens_file` | `/homeassistant/tube_display/screens.yaml` | Where the screens are kept (`tube_display/screens.yaml` in File editor). Uploaded pictures go in an `images` folder next to it. |
 
 The screens file lives in your Home Assistant config folder at
 `tube_display/screens.yaml` (File editor, Samba or VS Code), set by the
@@ -66,15 +67,43 @@ every refresh.
 | Widget | Fields |
 |---|---|
 | `text` | `text` (multi-line with `\n`), `size: auto` fits the tube (or a number), `align: left\|center\|right`, `weight: bold`, `color` |
-| `big_number` | `value`, `unit`, `label`, `color`, `unit_newline` — auto-sized to fit; `unit_newline: true` puts the unit on its own line so the value can be bigger |
+| `big_number` | `value`, `unit`, `label`, `color`, `unit_newline` — auto-sized to fit; `unit_newline: true` puts the unit on its own line so the value can be bigger. With no `unit` and no `label` the value fills the whole tube (e.g. one digit of a time per tube: `value: "{{ now().strftime('%H:%M')[0] }}"`) |
 | `ring` | `value`, `max`, `label`, `unit`, `color` — circular gauge 0..max, value in the middle, label below; `unit_newline: true` puts the unit under the value |
 | `bar` | `value`, `max`, `label`, `unit`, `color` — vertical bar gauge |
-| `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` |
-| `image` | `source`: `builtin:claude` (procedural orange starburst), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit: cover\|contain` |
+| `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` (default Claude orange). Without `text` the icon is centred and a little bigger |
+| `image` | `source`: `builtin:claude` (procedural orange starburst), `file:<name>` (a picture you uploaded, see [Your own pictures](#your-own-pictures)), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit: cover\|contain` |
 | `sparkline` | `entity`, `hours` (HA history API), optional `unit`, `color` — line graph with the latest value on top |
 | `blank` | empty tube |
 
 ## Screen editor (ingress panel)
+
+Open **Tube Display** in the Home Assistant sidebar (turn on *Show in sidebar*
+on the app's Info tab if it isn't there).
+
+* **Rotation** (left, or top on a phone): the order screens are shown in, with
+  ↑/↓ to move them and a tick box to include each one. Screens left out stay
+  listed, greyed, so you can tick them back in. The special **clock** entry
+  shows the clock's own time for its duration.
+* **Cycle automatically** (top bar): untick it for button-only mode, see
+  [The clock's button](#the-clocks-button).
+* **Screens:** add, rename or delete; a screen's duration, refresh, background
+  and optional `when` template.
+* **Preview:** the screen's six tubes rendered with live values. Tap one to edit
+  it. A tube with a mistake shows a red **!** and the error at the top, and
+  stays editable.
+* **Tube editor:** the widget type and its fields. Values and text come from an
+  **entity** (search box, decimals), **fixed** text or a **template** with its
+  live result. Colours are **fixed** (colour picker), **thresholds** (an entity
+  plus "below N → colour" rows) or a **template**. Icon names autocomplete from
+  Material Design Icons. Image tubes have a picture library with upload.
+  **Copy**/**Paste** and **←**/**→** copy or move a tube.
+* **Save** writes `screens.yaml`; the clock picks it up within a refresh.
+  **Edit YAML** shows the whole file for anything the form can't do.
+
+Templates the form didn't create (for example multi-line Jinja) open in
+template mode and are left exactly as written unless you change them.
+
+### How it works
 
 The add-on registers an ingress panel **Tube Display** (`mdi:television-guide`)
 in the Home Assistant sidebar. It is served by a second HTTP site on
@@ -101,6 +130,10 @@ Editor API on the ingress site (all paths relative to the ingress prefix):
 | `GET api/entities?q=<text>` | Up to 50 matching `[{"entity_id","name","state","unit"}]` from the Supervisor core API `GET /states` (cached ~10 s). |
 | `POST api/save` | Body `{"data": {...}, "mtime": <from api/config>}` — 409 if the file changed on disk, 400 with errors if invalid; otherwise round-trip update and atomic write. Returns the new mtime. |
 | `POST api/save_yaml` | Body `{"yaml": "...", "mtime": ...}` — raw-YAML tab; must parse and validate, then written as is. |
+| `GET api/icons?q=<text>` | Up to 60 `mdi:` icon names containing the text, those starting with it first. |
+| `GET api/images` / `POST api/images` | List the picture library / upload one (multipart field `file`; .png .jpg .gif .webp .bmp, ≤10 MB, checked with Pillow, saved under a safe ASCII name, never overwriting). |
+| `GET api/images/<name>` / `DELETE api/images/<name>` | One picture / delete it. |
+| `GET api/rotation` / `POST api/rotation` | `{"enabled": bool}` — read or set *Cycle automatically*. |
 
 The 8098 API above is unchanged and has no write routes.
 
@@ -120,7 +153,10 @@ The 8098 API above is unchanged and has no write routes.
   `503` / connection errors → retry with backoff capped at ~10 s. Tubes are
   sent one at a time; the loop never crashes on clock errors.
 - `GET http://<clock>/panel` returns `{"tubes": [...], "needed": [...],
-  "width": 135, "height": 240}` and is used for status.
+  "width": 135, "height": 240, "firmware": "<version>"}` and is used for status.
+- **Updating the clock's firmware:** stop this app first (and start it again
+  afterwards). Pictures sent while the clock is receiving a firmware update can
+  make the update fail.
 
 ## HTTP API (port 8098)
 
@@ -193,7 +229,7 @@ python3 -m pytest -q
 
 ## The clock's button
 
-With clock firmware 2.2.0-nt3 or later, pressing the clock's button while panels show moves on to the next screen in the rotation (it also ends a screen pinned from Home Assistant). Use the Display select to go back to the clock's own time.
+With HA Tubes 2.3.0 or later on the clock, pressing the clock's button while panels show publishes `clock/<id>/button` = `next`, and the app moves on to the next screen in the rotation (it also ends a screen pinned from Home Assistant). To go back to the clock's own time, set the **Tube Display Screen** select to **Clock**.
 
 **Button-only mode:** untick *Cycle automatically* in the editor (or turn off the *Tube Display Rotation* switch). The current screen stays up (its values keep refreshing) and each press of the clock's button shows the next screen in the rotation, skipping the `clock` entry. Remembered across restarts.
 

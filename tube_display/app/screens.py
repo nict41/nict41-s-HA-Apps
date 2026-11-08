@@ -197,6 +197,7 @@ def example_screens_yaml() -> str:
     """The commented example written to /config/screens.yaml on first start."""
     return """\
 # Tube Display screens. Re-read automatically when this file changes.
+# Easiest to edit with the Tube Display panel in the Home Assistant sidebar.
 #
 # rotation lists the screens to cycle through, in order. The special entry
 # "clock" hands the tubes back to the clock's own time display for the
@@ -235,7 +236,7 @@ screens:
 #   ring       circular gauge 0..max, value in the middle, label below, color
 #   bar        vertical bar gauge 0..max, value + label
 #   icon       mdi:<name> icon with optional text below, color
-#   image      source: builtin:claude | http(s)://... | camera:<entity_id> |
+#   image      source: builtin:claude | file:<uploaded picture> | http(s)://... | camera:<entity_id> |
 #              entity_picture:<entity_id>, fit: cover|contain
 #   sparkline  entity + hours, line graph from the HA history API, latest value shown
 #   blank      empty tube
