@@ -36,7 +36,10 @@ const $ = (id) => document.getElementById(id);
 async function api(path, opts) {
   const res = await fetch(path, opts);
   let body = null;
-  try { body = await res.json(); } catch (e) { /* png etc. */ }
+  // Only read JSON replies: reading a PNG here would use up the body the preview needs
+  if ((res.headers.get("content-type") || "").includes("json")) {
+    try { body = await res.json(); } catch (e) { /* not valid JSON */ }
+  }
   return { status: res.status, body, res };
 }
 
@@ -249,7 +252,8 @@ async function refreshPreview() {
     body: JSON.stringify({ screen: s }),
   });
   if (status !== 200) { box.innerHTML = '<span class="status error">preview failed</span>'; return; }
-  const blob = await res.blob();
+  let blob;
+  try { blob = await res.blob(); } catch (e) { box.innerHTML = '<span class="status error">preview failed</span>'; return; }
   state.previewUrl = URL.createObjectURL(blob);
   box.innerHTML = "";
   for (let i = 0; i < 6; i++) {
