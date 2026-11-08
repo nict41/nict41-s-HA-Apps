@@ -457,7 +457,11 @@ function imageSourceField(w, f) {
   async function drawGrid() {
     const { body } = await api("api/images");
     grid.innerHTML = "";
-    grid.appendChild(tile("Claude logo", "builtin:claude", null, false));
+    const claude = tile("Claude logo", "builtin:claude", null, false);
+    const glyph = document.createElement("div");
+    glyph.className = "builtin-thumb"; glyph.textContent = "\u2733";   // stands in for the starburst
+    claude.insertBefore(glyph, claude.firstChild);
+    grid.appendChild(claude);
     ((body && body.images) || []).forEach((n) =>
       grid.appendChild(tile(n, "file:" + n, "api/images/" + encodeURIComponent(n), true)));
     const up = document.createElement("label");
@@ -768,7 +772,10 @@ function colorEditor(w, f) {
       body.appendChild(lab);
       body.appendChild(list);
       body.appendChild(odiv);
-      rebuild();
+      // Opening a tube that already uses thresholds must not rewrite its template (the colour
+      // pickers lower-case the colours, which would mark the screen changed); switching to the
+      // thresholds tab does write one
+      if (!(opening && m)) rebuild();
     } else {
       const ta = document.createElement("textarea");
       ta.rows = 2; ta.value = current;
@@ -781,7 +788,9 @@ function colorEditor(w, f) {
     }
   }
 
+  let opening = true;
   setMode(mode);
+  opening = false;
   wrap.append(labelEl(f + " source"), tabs, body);
   return wrap;
 }

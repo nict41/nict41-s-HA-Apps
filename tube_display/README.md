@@ -9,6 +9,8 @@ between "screens" you design in a visual editor in the Home Assistant sidebar
 The clock must run **[HA Tubes](https://github.com/nict41/HA-Tubes)**, the **panels firmware** (the firmware that accepts pushed
 pictures on `POST /panel`); the stock time/date/weather firmware does not.
 
+![The screen editor](docs/editor-desktop.webp)
+
 ## How it works
 
 1. You design screens in the **Tube Display** sidebar panel: a live six-tube

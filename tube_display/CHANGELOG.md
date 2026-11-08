@@ -2,6 +2,9 @@
 
 ## 0.4.6
 
+- Editor: opening a tube with colour thresholds marked the screen changed and rewrote its colours in lower case; it now only rewrites them when you edit the thresholds.
+- Editor: long templates wrap inside the card on phones; the Claude logo has a thumbnail in the picture library.
+- Docs: screenshots of the editor.
 - Docs: how to use the screen editor, the screens_file option, file: pictures, full-tube numbers, centred icons, the editor's icon/picture/rotation API, the clock's button with HA Tubes 2.3.0, and stopping the app during clock firmware updates. README describes the editor, button and HA Tubes requirement.
 
 ## 0.4.5

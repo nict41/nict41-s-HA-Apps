@@ -80,6 +80,8 @@ every refresh.
 Open **Tube Display** in the Home Assistant sidebar (turn on *Show in sidebar*
 on the app's Info tab if it isn't there).
 
+![The screen editor](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-desktop.webp)
+
 * **Rotation** (left, or top on a phone): the order screens are shown in, with
   ↑/↓ to move them and a tick box to include each one. Screens left out stay
   listed, greyed, so you can tick them back in. The special **clock** entry
@@ -102,6 +104,8 @@ on the app's Info tab if it isn't there).
 
 Templates the form didn't create (for example multi-line Jinja) open in
 template mode and are left exactly as written unless you change them.
+
+<img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-entity.webp" alt="Entity search and colour thresholds on a phone" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-template.webp" alt="A template value with its live result" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-picture.webp" alt="The picture library" width="300">
 
 ### How it works
 
