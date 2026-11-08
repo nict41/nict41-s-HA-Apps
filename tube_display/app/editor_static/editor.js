@@ -257,10 +257,11 @@ async function refreshPreview() {
   state.previewUrl = URL.createObjectURL(blob);
   box.innerHTML = "";
   for (let i = 0; i < 6; i++) {
-    const img = document.createElement("img");
+    // One tube = one sixth of the 810x240 strip, scaled to whatever size the CSS gives the tube
+    const img = document.createElement("div");
     img.className = "tube-img" + (i === state.selectedTube ? " selected" : "");
-    img.src = state.previewUrl;
-    img.style.objectPosition = (-i * 135) + "px 0";
+    img.style.backgroundImage = "url(" + state.previewUrl + ")";
+    img.style.backgroundPosition = (i * 20) + "% 0";
     img.title = "tube " + i;
     img.addEventListener("click", () => { state.selectedTube = i; renderTubeEditor(); markSelectedTube(); });
     box.appendChild(img);
