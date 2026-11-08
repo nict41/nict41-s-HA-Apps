@@ -5,7 +5,7 @@ IPSTube clock — six 135x240 colour IPS displays in a row on an ESP32 — so th
 clock can show dashboards, gauges, camera snapshots and more, rotating
 between "screens" you define in YAML.
 
-The clock must run the **panels firmware** (the firmware that accepts pushed
+The clock must run **[HA Tubes](https://github.com/nict41/HA-Tubes)**, the **panels firmware** (the firmware that accepts pushed
 pictures on `POST /panel`); the stock time/date/weather firmware does not.
 
 ## How it works
