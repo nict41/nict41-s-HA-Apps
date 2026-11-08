@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Editor: entity search results were squashed to slivers (list rows shrank to fit); they keep their height, wrap long names and the list scrolls. Inputs no longer push cards wider than a phone screen.
+- `big_number` with only a value (no label/unit) fills the tube, e.g. one digit of a time per tube.
+- Text is centred by its visible ink, so large text is no longer pushed down and clipped.
+
 ## 0.4.2
 
 - Editor: screens taken out of the rotation stay in the Rotation list (unticked) so they can be ticked back in.
