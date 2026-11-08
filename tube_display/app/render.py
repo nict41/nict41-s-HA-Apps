@@ -309,16 +309,16 @@ def draw_icon(w: dict, ctx: RenderContext, bg) -> Image.Image:
     color = parse_color(w.get("color"), CLAUDE_ORANGE)
     icon = str(w.get("icon") or "")
     name = icon[4:] if icon.startswith("mdi:") else icon
+    text = str(w.get("text") or "")
+    # With text below, the icon sits in the upper part; on its own it is centred and a bit bigger
+    cy = 88 if text else TUBE_H // 2
     cp = fonts.mdi_codepoint(name)
-    mdi_font = fonts.load_mdi_font(96)
+    mdi_font = fonts.load_mdi_font(96 if text else 120)
     if cp is not None and mdi_font is not None:
-        glyph = chr(cp)
-        gw, gh = _text_size(draw, glyph, mdi_font)
-        draw.text(((TUBE_W - gw) // 2, 40), glyph, font=mdi_font, fill=color)
+        _draw_centered(draw, TUBE_W // 2, cy, chr(cp), mdi_font, color)
     else:
         # no MDI font (e.g. tests): draw a placeholder box
-        draw.rectangle([TUBE_W // 2 - 40, 40, TUBE_W // 2 + 40, 120], outline=color, width=6)
-    text = str(w.get("text") or "")
+        draw.rectangle([TUBE_W // 2 - 40, cy - 40, TUBE_W // 2 + 40, cy + 40], outline=color, width=6)
     if text:
         tfont = _fit_font(draw, text, TUBE_W - 12, 60, start=24)
         _draw_centered(draw, TUBE_W // 2, 170, text, tfont, DEFAULT_COLOR)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.4
+
+- Icon tubes without text show the icon centred (and a little bigger) instead of high up.
+
 ## 0.4.3
 
 - Editor: entity search results were squashed to slivers (list rows shrank to fit); they keep their height, wrap long names and the list scrolls. Inputs no longer push cards wider than a phone screen.
