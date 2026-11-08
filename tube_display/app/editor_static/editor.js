@@ -246,22 +246,32 @@ async function refreshPreview() {
   const box = $("tubes");
   if (!s) { box.innerHTML = ""; return; }
   if (state.previewUrl) { URL.revokeObjectURL(state.previewUrl); state.previewUrl = null; }
-  const { status, res } = await api("api/preview", {
+  const { status, res, body } = await api("api/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ screen: s }),
   });
-  if (status !== 200) { box.innerHTML = '<span class="status error">preview failed</span>'; return; }
-  let blob;
-  try { blob = await res.blob(); } catch (e) { box.innerHTML = '<span class="status error">preview failed</span>'; return; }
-  state.previewUrl = URL.createObjectURL(blob);
+  let blob = null;
+  if (status === 200) {
+    try { blob = await res.blob(); } catch (e) { blob = null; }
+  }
+  // Even when the preview can't be drawn, keep six clickable tubes so a bad tube can be fixed
+  const errs = status === 200 ? (res.headers.get("X-Preview-Errors") || "")
+                              : ((body && (body.errors || []).join(" | ")) || (body && body.error) || "preview failed");
+  if (errs) setStatus(errs, "error");
+  state.previewUrl = blob ? URL.createObjectURL(blob) : null;
   box.innerHTML = "";
   for (let i = 0; i < 6; i++) {
     // One tube = one sixth of the 810x240 strip, scaled to whatever size the CSS gives the tube
     const img = document.createElement("div");
     img.className = "tube-img" + (i === state.selectedTube ? " selected" : "");
-    img.style.backgroundImage = "url(" + state.previewUrl + ")";
-    img.style.backgroundPosition = (i * 20) + "% 0";
+    if (state.previewUrl) {
+      img.style.backgroundImage = "url(" + state.previewUrl + ")";
+      img.style.backgroundPosition = (i * 20) + "% 0";
+    } else {
+      img.classList.add("broken");
+      img.textContent = "tap to edit";
+    }
     img.title = "tube " + i;
     img.addEventListener("click", () => { state.selectedTube = i; renderTubeEditor(); markSelectedTube(); });
     box.appendChild(img);
@@ -327,6 +337,8 @@ function fieldRow(w, f) {
     row.appendChild(selectField(w, f, ["cover", "contain"]));
   } else if (f === "size") {
     row.appendChild(selectField(w, f, ["auto", "8", "12", "16", "20", "24", "32", "48", "64", "96", "120"]));
+  } else if (f === "icon") {
+    row.appendChild(iconField(w, f));
   } else if (f === "source") {
     row.appendChild(imageSourceField(w, f));
   } else if (f === "max" || f === "hours") {
@@ -341,6 +353,41 @@ function labelEl(text) {
   const l = document.createElement("span");
   l.className = "field-label"; l.textContent = text;
   return l;
+}
+
+// ---- icon: text box with Material Design Icons suggestions as you type ------------------
+let iconListSeq = 0;
+function iconField(w, f) {
+  const wrap = document.createElement("label");
+  wrap.className = "field";
+  const listId = "iconList" + (++iconListSeq);
+  const input = document.createElement("input");
+  input.type = "text"; input.setAttribute("list", listId);
+  input.placeholder = "mdi:train"; input.autocomplete = "off";
+  input.value = w[f] != null ? String(w[f]) : "";
+  const list = document.createElement("datalist");
+  list.id = listId;
+  const glyphHint = document.createElement("span");
+  glyphHint.className = "status";
+  let timer = null;
+  async function suggest() {
+    const { body } = await api("api/icons?q=" + encodeURIComponent(input.value));
+    list.innerHTML = "";
+    ((body && body.icons) || []).forEach((n) => {
+      const o = document.createElement("option"); o.value = n; list.appendChild(o);
+    });
+  }
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(suggest, 200); });
+  input.addEventListener("focus", suggest);
+  input.addEventListener("change", () => {
+    let v = input.value.trim().toLowerCase();
+    if (v && !v.startsWith("mdi:")) v = "mdi:" + v;   // "train" -> "mdi:train"
+    input.value = v;
+    if (v) w[f] = v; else delete w[f];
+    markDirty(); schedulePreview();
+  });
+  wrap.append(labelEl(f), input, list, glyphHint);
+  return wrap;
 }
 
 // ---- image source: picture library (file:<name>), Claude logo, or anything typed in ----------

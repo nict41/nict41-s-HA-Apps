@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Editor: a tube with a mistake (e.g. an icon without `mdi:`) no longer blanks the preview; it shows a red "!" and the error, and all tubes stay clickable so it can be fixed.
+- Editor: icon names autocomplete from the Material Design Icons set as you type; `train` becomes `mdi:train`.
+
 ## 0.4.0
 
 - Button-only mode: turn off **Cycle automatically** (editor top bar, or the Tube Display Rotation switch in Home Assistant) and screens only change when you press the clock's button; the clock entry is skipped then. The setting is remembered across restarts.

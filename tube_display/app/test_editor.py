@@ -420,3 +420,23 @@ def test_rotation_toggle(tmp_path):
         resp = await client.post("/api/rotation", json={"enabled": False})
         assert (await resp.json()) == {"enabled": False} and ctl.rotation_enabled is False
     _with_client(tmp_path, check)
+
+
+def test_preview_with_bad_tube_still_draws(tmp_path):
+    async def check(client, screens_file):
+        screen = {"tubes": [{"type": "icon", "icon": "train"}] + [{"type": "text", "text": "x"}] * 5}
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert resp.status == 200
+        assert resp.content_type == "image/png"
+        assert "icon" in resp.headers.get("X-Preview-Errors", "")
+    _with_client(tmp_path, check)
+
+
+def test_icon_search(tmp_path, monkeypatch):
+    import fonts
+    monkeypatch.setattr(fonts, "_codepoints", lambda: {"train": 1, "train-car": 2, "subway-variant": 3, "bus": 4})
+    async def check(client, screens_file):
+        body = await (await client.get("/api/icons?q=mdi:tra")).json()
+        assert body["icons"][:2] == ["mdi:train", "mdi:train-car"]
+        assert "mdi:bus" not in body["icons"]
+    _with_client(tmp_path, check)

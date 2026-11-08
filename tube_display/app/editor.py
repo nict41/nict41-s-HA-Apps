@@ -167,6 +167,18 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             # kept as-is; templates render later, at render time).
             errors: list[str] = []
             screen = _parse_screen("__preview__", raw, errors)
+            if screen is None and isinstance(raw.get("tubes"), list):
+                # A tube that's still being typed in shouldn't blank the whole preview: draw a
+                # red "!" in its place and say why in a header, so the rest stays editable
+                from screens import _check_widget
+                tubes = []
+                for i, w in enumerate(raw["tubes"]):
+                    werr: list[str] = []
+                    ok = _check_widget(werr, "__preview__", i, w)
+                    tubes.append(w if ok and not werr else {"type": "text", "text": "!", "color": "#F44336"})
+                fixed = dict(raw, tubes=tubes)
+                retry: list[str] = []
+                screen = _parse_screen("__preview__", fixed, retry)
             if screen is None:
                 return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
             strip = await render_mod.render_screen(screen, app["controller"]._ctx)
@@ -175,7 +187,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 strip = strip.crop((tube * TUBE_W, 0, (tube + 1) * TUBE_W, strip.height))
             buf = io.BytesIO()
             strip.save(buf, format="PNG")
-            return web.Response(body=buf.getvalue(), content_type="image/png")
+            return web.Response(body=buf.getvalue(), content_type="image/png", headers={"X-Preview-Errors": " | ".join(errors)[:900].encode("ascii", "replace").decode()} if errors else None)
         return await ingress_only(request, handler)
 
     async def api_template(request: web.Request) -> web.Response:
@@ -481,6 +493,25 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     app.router.add_get("/api/rotation", api_rotation)
     app.router.add_post("/api/rotation", api_rotation)
+    async def api_icons(request: web.Request) -> web.Response:
+        """GET ?q=<text>: up to 60 Material Design Icon names ("mdi:...") containing the text,
+        names starting with it first."""
+        async def handler(req: web.Request) -> web.Response:
+            import fonts
+            q = req.query.get("q", "").strip().lower()
+            if q.startswith("mdi:"):
+                q = q[4:]
+            names = list(fonts._codepoints().keys())
+            if q:
+                starts = sorted(n for n in names if n.startswith(q))
+                contains = sorted(n for n in names if q in n and not n.startswith(q))
+                names = starts + contains
+            else:
+                names = sorted(names)
+            return web.json_response({"icons": ["mdi:" + n for n in names[:60]]})
+        return await ingress_only(request, handler)
+
+    app.router.add_get("/api/icons", api_icons)
     app.router.add_get("/api/images", api_images)
     app.router.add_post("/api/images", api_image_upload)
     app.router.add_get("/api/images/{name}", api_image_get)
