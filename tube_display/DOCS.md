@@ -160,3 +160,7 @@ cd tube_display/app
 pip install --break-system-packages -r requirements-dev.txt   # if needed
 python3 -m pytest -q
 ```
+
+## The clock's button
+
+With clock firmware 2.2.0-nt3 or later, pressing the clock's button while panels show moves on to the next screen in the rotation (it also ends a screen pinned from Home Assistant). Use the Display select to go back to the clock's own time.
