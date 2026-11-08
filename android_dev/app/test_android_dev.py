@@ -157,6 +157,85 @@ def test_project_traversal_and_symlink_escape(tmp_path, monkeypatch):
     with pytest.raises(ValueError): paths.project_file(str(root / "escaped.apk"))
 
 
+def test_pio_project_path_checks_roots_symlinks_and_platformio_ini(tmp_path, monkeypatch):
+    root = tmp_path / "esp"; root.mkdir()
+    (root / "platformio.ini").write_text("[env:ipstube]\n")
+    project = root / "tube"; project.mkdir(); (project / "platformio.ini").write_text("[env:ipstube]\n")
+    outside = tmp_path / "outside"; outside.mkdir(); (outside / "platformio.ini").write_text("")
+    empty = root / "empty"; empty.mkdir()
+    monkeypatch.setattr(paths, "PIO_ROOTS", [root])
+    assert paths.pio_project_path(str(project)) == project.resolve()
+    assert paths.pio_project_path(str(root)) == root.resolve()
+    with pytest.raises(ValueError): paths.pio_project_path(str(outside))
+    with pytest.raises(ValueError): paths.pio_project_path(str(root / ".." / "outside"))
+    (root / "link").symlink_to(outside)
+    with pytest.raises(ValueError): paths.pio_project_path(str(root / "link"))
+    with pytest.raises(ValueError): paths.pio_project_path(str(empty))
+    with pytest.raises(ValueError): paths.pio_project_path(str(root / "missing"))
+
+
+def test_pio_run_validates_names_and_builds_command(tmp_path, monkeypatch):
+    root = tmp_path / "esp"; project = root / "tube"; project.mkdir(parents=True)
+    (project / "platformio.ini").write_text("[env:ipstube]\n")
+    monkeypatch.setattr(paths, "PIO_ROOTS", [root])
+    captured = {}
+    def fake_start(project_name, command, env=None, timeout=None, cwd=None):
+        captured.update(project=project_name, command=command, env=env, timeout=timeout, cwd=cwd)
+        return {"job_id": "abc123def456", "state": "queued"}
+    monkeypatch.setattr(jobs, "start_job", fake_start)
+    for environment, targets in (("bad env", []), ("ipstube", ["bad target"]), ("ipstube", ["../bad"])):
+        with pytest.raises(server.ToolError, match="Invalid PlatformIO"):
+            asyncio.run(server.pio_run(str(project), environment, targets))
+    assert not captured
+    result = json.loads(asyncio.run(server.pio_run(str(project), "ipstube", ["buildfs", "upload"]))[0].text)
+    assert result == {"job_id": "abc123def456", "state": "queued"}
+    assert captured["command"] == ["nice", "-n", "10", "pio", "run", "-d", str(project.resolve()),
+                                   "-e", "ipstube", "-t", "buildfs", "-t", "upload"]
+    assert captured["env"] == {"PLATFORMIO_CORE_DIR": str(server.PIO_CORE), "CI": "1",
+                               "PLATFORMIO_SETTING_ENABLE_TELEMETRY": "no"}
+    assert captured["timeout"] == server.PIO_JOB_TIMEOUT
+    assert captured["cwd"] == project.resolve()
+
+
+def test_pio_artifacts_lists_build_and_release_files_newest_first(tmp_path, monkeypatch):
+    root = tmp_path / "esp"; project = root / "tube"
+    build = project / ".pio" / "build" / "ipstube"; build.mkdir(parents=True)
+    releases = project / "releases"; releases.mkdir()
+    (project / "platformio.ini").write_text("[env:ipstube]\n")
+    for name in ("firmware.bin", "firmware.elf", "littlefs.bin", "partitions.bin", "bootloader.bin", "notes.txt"):
+        (build / name).write_bytes(name.encode())
+    (releases / "tube-1.bin").write_bytes(b"release")
+    (releases / "ignore.elf").write_bytes(b"ignore")
+    candidates = [path for path in build.iterdir() if path.is_file()] + [path for path in releases.iterdir() if path.is_file()]
+    for path in candidates: os.utime(path, (1000, 1000))
+    for index, path in enumerate((build / "firmware.bin", build / "firmware.elf", releases / "tube-1.bin")):
+        os.utime(path, (1001 + index, 1001 + index))
+    monkeypatch.setattr(paths, "PIO_ROOTS", [root])
+    listed = json.loads(asyncio.run(server.pio_artifacts(str(project), "ipstube"))[0].text)["artifacts"]
+    assert [Path(item["path"]).name for item in listed][:2] == ["tube-1.bin", "firmware.elf"]
+    assert {Path(item["path"]).name for item in listed} == {
+        "firmware.bin", "firmware.elf", "littlefs.bin", "partitions.bin", "bootloader.bin", "tube-1.bin"}
+    with pytest.raises(server.ToolError, match="Invalid PlatformIO environment"):
+        asyncio.run(server.pio_artifacts(str(project), "../ipstube"))
+
+
+def test_start_job_with_cwd_is_still_single_flight(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, "DATA", tmp_path)
+    monkeypatch.setattr(jobs, "JOBS", tmp_path / "jobs"); jobs.JOBS.mkdir()
+    cwd = tmp_path / "esp"; cwd.mkdir()
+    monkeypatch.setattr(jobs, "project_path", lambda _name: pytest.fail("project_path called with cwd"))
+    monkeypatch.setattr(jobs, "gradle_properties", lambda: None)
+    jobs.CURRENT = None
+    first = jobs.start_job("esp", [sys.executable, "-c", "import time; time.sleep(10)"], timeout=5, cwd=cwd)
+    assert first["job_id"]
+    assert "already running" in jobs.start_job("esp", ["/bin/true"], cwd=cwd)["error"]
+    jobs.cancel(first["job_id"])
+    for _ in range(60):
+        if jobs.status(first["job_id"])["state"] == "cancelled": break
+        time.sleep(.05)
+    assert jobs.status(first["job_id"])["state"] == "cancelled"
+
+
 def test_job_single_flight_cancel_timeout_and_redaction(tmp_path, monkeypatch):
     monkeypatch.setattr(jobs, "DATA", tmp_path)
     monkeypatch.setattr(jobs, "JOBS", tmp_path / "jobs"); jobs.JOBS.mkdir()

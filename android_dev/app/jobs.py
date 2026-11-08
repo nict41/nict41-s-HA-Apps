@@ -52,7 +52,8 @@ def _run_job(job_id, command, cwd, env, timeout, record):
     started = time.time()
     try:
         with log_path.open("wb") as out:
-            proc = subprocess.Popen(["nice", "-n", "10", *command], cwd=cwd, env=env,
+            argv = command if command[:1] == ["nice"] else ["nice", "-n", "10", *command]
+            proc = subprocess.Popen(argv, cwd=cwd, env=env,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     start_new_session=True)
             record.update(process=proc, pid=proc.pid, state="running")
@@ -136,9 +137,9 @@ def _run_job(job_id, command, cwd, env, timeout, record):
             for old in logs[20:]: old.unlink(missing_ok=True)
 
 
-def start_job(project, command, env=None, timeout=None):
+def start_job(project, command, env=None, timeout=None, cwd=None):
     global CURRENT
-    path = project_path(project)
+    path = project_path(project) if cwd is None else cwd
     gradle_properties()
     with LOCK:
         if CURRENT and CURRENT.get("state") in ("queued", "running"):

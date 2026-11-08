@@ -7,6 +7,8 @@ DATA = Path(os.getenv("DATA_ROOT", "/data"))
 ANDROID_HOME = Path(os.getenv("ANDROID_HOME", str(DATA / "android-sdk")))
 GRADLE_HOME = Path(os.getenv("GRADLE_USER_HOME", str(DATA / "gradle")))
 GRADLE = DATA / "tools" / "gradle-9.8.2" / "bin" / "gradle"
+PIO_CORE = Path(os.getenv("PLATFORMIO_CORE_DIR", str(DATA / "platformio")))
+PIO_ROOTS = [Path(root) for root in os.getenv("PIO_PROJECT_ROOTS", "/share/android_dev/projects:/share/elekstube-repo").split(":") if root]
 SCREENSHOTS = Path(os.getenv("SCREENSHOTS_ROOT", "/share/android_dev/screenshots"))
 # Popped so it is not inherited by Gradle builds, which run project code.
 TOKEN = os.environ.pop("MCP_TOKEN", "")
@@ -15,4 +17,5 @@ LICENSE_ACCEPTED = os.getenv("ACCEPT_ANDROID_SDK_LICENSE", "false").lower() == "
 HEAP_GB = int(os.getenv("GRADLE_MAX_HEAP_GB", "6"))
 WORKERS = int(os.getenv("GRADLE_MAX_WORKERS", "3"))
 JOB_TIMEOUT = int(os.getenv("GRADLE_JOB_TIMEOUT_MINUTES", "60")) * 60
+PIO_JOB_TIMEOUT = JOB_TIMEOUT
 HOSTNAME = os.getenv("HOSTNAME") or socket.gethostname()

@@ -1,5 +1,5 @@
 name: "Android Dev"
-version: "0.1.1"
+version: "0.2.0"
 slug: "android_dev"
 description: "Android development tools and wireless device control for Claude Code"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/android_dev"
@@ -19,6 +19,7 @@ backup_exclude:
   - "**/android-sdk/**"
   - "**/gradle/**"
   - "**/tools/**"
+  - "**/platformio/**"
 options:
   accept_android_sdk_license: false
   mcp_token: ""
