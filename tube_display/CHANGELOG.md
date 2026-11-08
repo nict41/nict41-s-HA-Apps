@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Editor: tube previews really fit the tube now (a `background` shorthand reset the picture's scaling).
+
 ## 0.3.0
 
 - Picture library: upload pictures in the editor (image tube → + Upload), pick them from thumbnails, delete them. Stored in `tube_display/images/` next to screens.yaml and used as `source: file:<name>`. Transparent parts show the screen background.
