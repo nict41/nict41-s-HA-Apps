@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import logging
 import math
 import random
@@ -37,6 +38,8 @@ class RenderContext:
         self.renderer = renderer
         self.session = session
         self.ha = ha
+        # Folder of uploaded pictures for "file:<name>" sources (set by the controller)
+        self.images_dir: str | None = None
         # widget key -> last error message, so an error is logged once per change
         self.last_errors: dict[str, str] = {}
 
@@ -355,6 +358,11 @@ async def _fetch_image(source: str, ctx: RenderContext) -> Image.Image:
         if data is None:
             raise ValueError("entity has no entity_picture")
         return Image.open(io.BytesIO(data)).convert("RGB")
+    if source.startswith("file:"):
+        path = image_path(ctx.images_dir, source[len("file:"):])
+        with Image.open(path) as img:
+            img.seek(0)     # first frame of an animated GIF
+            return img.convert("RGBA")
     if source.startswith("http://") or source.startswith("https://"):
         if ctx.session is None:
             raise ValueError("no HTTP session for URL source")
@@ -364,6 +372,38 @@ async def _fetch_image(source: str, ctx: RenderContext) -> Image.Image:
             data = await resp.read()
         return Image.open(io.BytesIO(data)).convert("RGB")
     raise ValueError(f"unknown image source {source!r}")
+
+
+IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
+
+
+def _on_background(src: Image.Image, bg) -> Image.Image:
+    """Transparent parts of an uploaded picture show the screen's background."""
+    if src.mode != "RGBA":
+        return src
+    base = Image.new("RGBA", src.size, tuple(bg) + (255,))
+    return Image.alpha_composite(base, src).convert("RGB")
+
+
+def safe_image_name(name: str) -> str | None:
+    """The name if it is a plain picture file name in the images folder, else None."""
+    if (not name or name != os.path.basename(name) or name.startswith(".")
+            or not name.lower().endswith(IMAGE_EXTS)
+            or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._- " for c in name)):
+        return None
+    return name
+
+
+def image_path(images_dir: str | None, name: str) -> str:
+    if not images_dir:
+        raise ValueError("no images folder")
+    safe = safe_image_name(name)
+    if safe is None:
+        raise ValueError(f"bad image name {name!r}")
+    path = os.path.join(images_dir, safe)
+    if not os.path.isfile(path):
+        raise ValueError(f"image {name!r} not found in {images_dir}")
+    return path
 
 
 def aiohttp_timeout():
@@ -394,7 +434,7 @@ async def draw_image(w: dict, ctx: RenderContext, bg) -> Image.Image:
         base = Image.new("RGB", (TUBE_W, TUBE_H), bg)
         base.paste(draw_builtin_claude(bg), (0, 0))
         return base
-    return _fit_image(src, TUBE_W, TUBE_H, fit)
+    return _fit_image(_on_background(src, bg), TUBE_W, TUBE_H, fit)
 
 
 async def draw_sparkline(w: dict, ctx: RenderContext, bg) -> Image.Image:
@@ -473,7 +513,7 @@ async def render_screen(screen: Screen, ctx: RenderContext) -> Image.Image:
             return strip
         try:
             src = await _fetch_image(str(source), ctx)
-            strip = _fit_image(src, STRIP_W, STRIP_H, str(w.get("fit", "cover")))
+            strip = _fit_image(_on_background(src, bg), STRIP_W, STRIP_H, str(w.get("fit", "cover")))
         except Exception as err:
             ctx.note_error(f"{screen.name}:strip", str(err))
             strip = Image.new("RGB", (STRIP_W, STRIP_H), bg)

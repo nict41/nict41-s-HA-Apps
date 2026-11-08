@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0
+
+- Picture library: upload pictures in the editor (image tube → + Upload), pick them from thumbnails, delete them. Stored in `tube_display/images/` next to screens.yaml and used as `source: file:<name>`. Transparent parts show the screen background.
+
+- Editor: phones kept an old cached stylesheet with the new page, so previews were stretched and cut off; the page now always loads matching files. Smooth preview scaling.
+
 ## 0.2.2
 
 - Editor: tube previews were cut off (border drawn over the picture; not scaled on phones).

@@ -29,6 +29,7 @@ from pathlib import Path
 import yaml
 from aiohttp import web
 
+from render import IMAGE_EXTS, safe_image_name
 from screens import ScreensError, parse_screens
 
 _LOG = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def _peer(request: web.Request) -> str:
 def create_app(controller, ha, screens_file: str, test_allow_local: bool = False) -> web.Application:
     """The editor app. `controller` renders previews, `ha` renders templates and
     lists entities, `screens_file` is the YAML file being edited."""
-    app = web.Application()
+    app = web.Application(client_max_size=12 * 1024 * 1024)
     app["controller"] = controller
     app["ha"] = ha
     app["screens_file"] = screens_file
@@ -73,8 +74,10 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, _index)
 
     async def _index(request: web.Request) -> web.Response:
-        return web.Response(body=(STATIC_DIR / "index.html").read_bytes(),
-                            content_type="text/html")
+        # ?v=<file times> on the CSS/JS links so a phone never mixes an old cached file with a new one
+        stamp = str(int(max((STATIC_DIR / n).stat().st_mtime for n in ("editor.js", "editor.css"))))
+        html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("__VERSION__", stamp)
+        return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
     async def static_file(request: web.Request) -> web.Response:
         name = request.match_info["name"]
@@ -83,7 +86,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             if name not in ("editor.js", "editor.css"):
                 raise web.HTTPNotFound()
             ctype = "text/javascript" if name.endswith(".js") else "text/css"
-            return web.Response(body=(STATIC_DIR / name).read_bytes(), content_type=ctype)
+            return web.Response(body=(STATIC_DIR / name).read_bytes(), content_type=ctype,
+                                headers={"Cache-Control": "no-cache"})
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------
@@ -389,6 +393,85 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return web.json_response({"ok": True, "mtime": mtime})
         return await ingress_only(request, handler)
 
+    # ------------------------------------------------------------------
+    # picture library: <screens file folder>/images, used as source "file:<name>"
+    # ------------------------------------------------------------------
+    images_dir = os.path.join(os.path.dirname(screens_file) or ".", "images")
+    max_image_bytes = 10 * 1024 * 1024
+
+    async def api_images(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            names = []
+            if os.path.isdir(images_dir):
+                names = sorted(n for n in os.listdir(images_dir) if safe_image_name(n))
+            return web.json_response({"images": names})
+        return await ingress_only(request, handler)
+
+    async def api_image_get(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = safe_image_name(req.match_info["name"])
+            path = os.path.join(images_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            return web.FileResponse(path)
+        return await ingress_only(request, handler)
+
+    async def api_image_delete(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = safe_image_name(req.match_info["name"])
+            path = os.path.join(images_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            os.remove(path)
+            return web.json_response({"ok": True})
+        return await ingress_only(request, handler)
+
+    async def api_image_upload(request: web.Request) -> web.Response:
+        """multipart field "file": a picture, checked with Pillow, saved under a safe name."""
+        async def handler(req: web.Request) -> web.Response:
+            from PIL import Image
+            reader = await req.multipart()
+            part = await reader.next()
+            while part is not None and part.name != "file":
+                part = await reader.next()
+            if part is None or not part.filename:
+                return web.json_response({"error": "no file"}, status=400)
+            from urllib.parse import unquote
+            base, ext = os.path.splitext(os.path.basename(unquote(part.filename)))
+            ext = ext.lower()
+            if ext not in IMAGE_EXTS:
+                return web.json_response({"error": "use a .png, .jpg, .gif, .webp or .bmp picture"}, status=400)
+            clean = "".join(c if (c.isascii() and c.isalnum()) or c in "-_" else "_" for c in base).strip("_") or "image"
+            data = bytearray()
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > max_image_bytes:
+                    return web.json_response({"error": "picture is over 10 MB"}, status=400)
+            try:
+                with Image.open(io.BytesIO(bytes(data))) as img:
+                    img.verify()
+            except Exception:
+                return web.json_response({"error": "not a picture Pillow can read"}, status=400)
+            os.makedirs(images_dir, exist_ok=True)
+            name = clean + ext
+            n = 2
+            while os.path.exists(os.path.join(images_dir, name)):
+                name = f"{clean}-{n}{ext}"
+                n += 1
+            tmp = os.path.join(images_dir, "." + name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, os.path.join(images_dir, name))
+            return web.json_response({"ok": True, "name": name, "source": "file:" + name})
+        return await ingress_only(request, handler)
+
+    app.router.add_get("/api/images", api_images)
+    app.router.add_post("/api/images", api_image_upload)
+    app.router.add_get("/api/images/{name}", api_image_get)
+    app.router.add_delete("/api/images/{name}", api_image_delete)
     app.router.add_get("/", index)
     app.router.add_get("/{name}", static_file)
     app.router.add_get("/api/config", api_config)
