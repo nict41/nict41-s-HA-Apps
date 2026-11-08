@@ -327,6 +327,8 @@ function fieldRow(w, f) {
     row.appendChild(selectField(w, f, ["cover", "contain"]));
   } else if (f === "size") {
     row.appendChild(selectField(w, f, ["auto", "8", "12", "16", "20", "24", "32", "48", "64", "96", "120"]));
+  } else if (f === "source") {
+    row.appendChild(imageSourceField(w, f));
   } else if (f === "max" || f === "hours") {
     row.appendChild(numberField(w, f));
   } else {
@@ -339,6 +341,84 @@ function labelEl(text) {
   const l = document.createElement("span");
   l.className = "field-label"; l.textContent = text;
   return l;
+}
+
+// ---- image source: picture library (file:<name>), Claude logo, or anything typed in ----------
+function imageSourceField(w, f) {
+  const wrap = document.createElement("div");
+  wrap.className = "field wide";
+  const grid = document.createElement("div");
+  grid.className = "image-grid";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "file:name.png, builtin:claude, camera:camera.x, https://...";
+  input.value = w[f] != null ? String(w[f]) : "";
+  const msg = document.createElement("span");
+  msg.className = "status";
+
+  function choose(src) {
+    w[f] = src; input.value = src;
+    markDirty(); schedulePreview(); drawGrid();
+  }
+
+  function tile(label, src, thumbUrl, deletable) {
+    const t = document.createElement("div");
+    t.className = "image-tile" + (w[f] === src ? " selected" : "");
+    t.title = src;
+    if (thumbUrl) {
+      const im = document.createElement("img");
+      im.src = thumbUrl; im.alt = label;
+      t.appendChild(im);
+    }
+    const cap = document.createElement("span");
+    cap.textContent = label;
+    t.appendChild(cap);
+    t.addEventListener("click", () => choose(src));
+    if (deletable) {
+      const del = document.createElement("button");
+      del.className = "image-del"; del.textContent = "×"; del.title = "Delete picture";
+      del.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        if (!confirm("Delete " + label + "? Tubes that use it will show an error.")) return;
+        await fetch("api/images/" + encodeURIComponent(label), { method: "DELETE" });
+        drawGrid();
+      });
+      t.appendChild(del);
+    }
+    return t;
+  }
+
+  async function drawGrid() {
+    const { body } = await api("api/images");
+    grid.innerHTML = "";
+    grid.appendChild(tile("Claude logo", "builtin:claude", null, false));
+    ((body && body.images) || []).forEach((n) =>
+      grid.appendChild(tile(n, "file:" + n, "api/images/" + encodeURIComponent(n), true)));
+    const up = document.createElement("label");
+    up.className = "image-tile upload";
+    up.textContent = "+ Upload";
+    const file = document.createElement("input");
+    file.type = "file"; file.accept = "image/*"; file.hidden = true;
+    file.addEventListener("change", async () => {
+      if (!file.files.length) return;
+      const fd = new FormData();
+      fd.append("file", file.files[0]);
+      msg.textContent = "uploading...";
+      const { status, body: b } = await api("api/images", { method: "POST", body: fd });
+      if (status === 200 && b && b.source) { msg.textContent = ""; choose(b.source); }
+      else msg.textContent = (b && b.error) || "upload failed";
+    });
+    up.appendChild(file);
+    grid.appendChild(up);
+  }
+
+  input.addEventListener("change", () => {
+    if (input.value) w[f] = input.value; else delete w[f];
+    markDirty(); schedulePreview(); drawGrid();
+  });
+  wrap.append(labelEl("picture"), grid, input, msg);
+  drawGrid();
+  return wrap;
 }
 
 function textField(w, f) {

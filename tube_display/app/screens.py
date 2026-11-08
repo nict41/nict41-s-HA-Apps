@@ -68,7 +68,7 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
     if wtype == "image":
         src = w.get("source")
         if not isinstance(src, str) or not src:
-            errors.append(f"{where}: image widget needs a 'source' (builtin:..., http(s)://..., camera:..., entity_picture:...)")
+            errors.append(f"{where}: image widget needs a 'source' (builtin:..., file:<uploaded picture>, http(s)://..., camera:..., entity_picture:...)")
             return False
         fit = w.get("fit", "cover")
         if fit not in FITS:

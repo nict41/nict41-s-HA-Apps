@@ -366,3 +366,46 @@ def test_save_keeps_untouched_tubes_as_written(tmp_path):
         squash = lambda t: " ".join(t.split())
         assert squash(text) == squash(before).replace("duration: 10", "duration: 12", 1)
     _with_client(tmp_path, check)
+
+
+def _png_bytes(color=(255, 0, 0, 255), size=(20, 30)):
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGBA", size, color).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_image_upload_list_get_delete(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", _png_bytes(), filename="My Logo!.png", content_type="image/png")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 200, await resp.text()
+        body = await resp.json()
+        assert body["name"] == "My_Logo.png" and body["source"] == "file:My_Logo.png"
+        images_dir = os.path.join(os.path.dirname(screens_file), "images")
+        assert os.path.isfile(os.path.join(images_dir, "My_Logo.png"))
+        # same name again gets a new one rather than overwriting
+        form = aiohttp.FormData()
+        form.add_field("file", _png_bytes(), filename="My Logo!.png", content_type="image/png")
+        assert (await (await client.post("/api/images", data=form)).json())["name"] == "My_Logo-2.png"
+        names = (await (await client.get("/api/images")).json())["images"]
+        assert names == ["My_Logo-2.png", "My_Logo.png"]
+        assert (await client.get("/api/images/My_Logo.png")).status == 200
+        assert (await client.get("/api/images/..%2Fscreens.yaml")).status == 404
+        assert (await client.delete("/api/images/My_Logo.png")).status == 200
+        assert not os.path.exists(os.path.join(images_dir, "My_Logo.png"))
+    _with_client(tmp_path, check)
+
+
+def test_image_upload_rejects_non_pictures(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", b"not a png", filename="x.png", content_type="image/png")
+        assert (await client.post("/api/images", data=form)).status == 400
+        form = aiohttp.FormData()
+        form.add_field("file", _png_bytes(), filename="x.svg", content_type="image/svg+xml")
+        assert (await client.post("/api/images", data=form)).status == 400
+    _with_client(tmp_path, check)

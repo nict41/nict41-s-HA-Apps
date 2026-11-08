@@ -193,3 +193,20 @@ def test_template_bytes_reply_is_decoded():
             return b"42\nunder"
 
     assert asyncio.run(Fake().render_template("x")) == "42\nunder"
+
+
+def test_file_image_source_with_transparency(tmp_path):
+    import asyncio
+    import render
+    from PIL import Image
+    Image.new("RGBA", (10, 10), (0, 0, 0, 0)).save(tmp_path / "clear.png")
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    img = asyncio.run(render.draw_image({"type": "image", "source": "file:clear.png"}, ctx, (0, 0, 255)))
+    assert img.size == (render.TUBE_W, render.TUBE_H)
+    assert img.getpixel((60, 100)) == (0, 0, 255)   # transparent -> screen background
+    try:
+        asyncio.run(render.draw_image({"type": "image", "source": "file:../x.png"}, ctx, (0, 0, 0)))
+        assert False, "path outside the images folder must fail"
+    except ValueError:
+        pass

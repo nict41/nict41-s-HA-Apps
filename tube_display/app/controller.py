@@ -43,6 +43,7 @@ class Controller:
         self._sleep = sleep
         self._renderer = renderer or (ha.render_template if ha else None)
         self._ctx = render_mod.RenderContext(self._renderer, session=session, ha=ha)
+        self._ctx.images_dir = os.path.join(os.path.dirname(settings.screens_file) or ".", "images")
 
         self._config: ScreensConfig | None = None
         self._mtime: float | None = None

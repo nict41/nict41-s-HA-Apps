@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- Picture library: upload pictures in the editor (image tube → + Upload), pick them from thumbnails, delete them. Stored in `tube_display/images/` next to screens.yaml and used as `source: file:<name>`. Transparent parts show the screen background.
+
 ## 0.2.2
 
 - Editor: tube previews were cut off (border drawn over the picture; not scaled on phones).
