@@ -821,3 +821,20 @@ $("yamlSave").addEventListener("click", async () => {
 
 bindScreenSettings();
 load();
+
+// ---------------------------------------------------------------- automatic cycling on/off
+(async function initAutoRotate() {
+  const cb = $("autoRotate");
+  const { body } = await api("api/rotation");
+  if (body) cb.checked = !!body.enabled;
+  cb.addEventListener("change", async () => {
+    const { status, body: b } = await api("api/rotation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: cb.checked }),
+    });
+    if (status !== 200 || !b) { cb.checked = !cb.checked; setStatus("couldn't change cycling", "error"); return; }
+    cb.checked = !!b.enabled;
+    setStatus(b.enabled ? "cycling automatically" : "button only: press the clock's button for the next screen");
+  });
+})();

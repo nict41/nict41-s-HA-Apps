@@ -468,6 +468,19 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return web.json_response({"ok": True, "name": name, "source": "file:" + name})
         return await ingress_only(request, handler)
 
+    async def api_rotation(request: web.Request) -> web.Response:
+        """GET: {"enabled": bool}. POST {"enabled": bool}: on = cycle automatically, off = the
+        clock's button changes screens."""
+        async def handler(req: web.Request) -> web.Response:
+            ctl = app["controller"]
+            if req.method == "POST":
+                body = await req.json()
+                ctl.set_rotation_enabled(bool(body.get("enabled")))
+            return web.json_response({"enabled": bool(ctl.rotation_enabled)})
+        return await ingress_only(request, handler)
+
+    app.router.add_get("/api/rotation", api_rotation)
+    app.router.add_post("/api/rotation", api_rotation)
     app.router.add_get("/api/images", api_images)
     app.router.add_post("/api/images", api_image_upload)
     app.router.add_get("/api/images/{name}", api_image_get)

@@ -238,3 +238,22 @@ def test_status_shape(tmp_path):
     assert status["screens"] == ["a", "b"]
     assert status["clock_host"] == "clock.test"
     assert "clock_state" in status
+
+
+def test_rotation_off_button_steps_screens_and_skips_clock(tmp_path, monkeypatch):
+    from controller import Controller
+    monkeypatch.setattr(Controller, "STATE_FILE", str(tmp_path / "state.json"))
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    controller.load_config(force=True)
+    controller.set_rotation_enabled(False)
+    shown = []
+    for _ in range(4):
+        controller.next_screen()
+        assert controller._advance is True
+        controller._advance = False
+        asyncio.run(controller._manual_step())
+        shown.append(controller.current)
+    assert shown[0] == "a" and set(shown) <= {"a", "b"}   # the clock entry is never chosen
+    # remembered across a restart
+    controller2, *_ = _make_controller(tmp_path, _base_screens())
+    assert controller2.rotation_enabled is False

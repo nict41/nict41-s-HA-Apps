@@ -145,3 +145,5 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   position: absolute; top: 2px; right: 2px; border: 0; border-radius: 50%; width: 18px; height: 18px;
   background: #0008; color: #fff; cursor: pointer; line-height: 18px; padding: 0;
 }
+
+.auto-toggle { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 13px; white-space: nowrap; }
