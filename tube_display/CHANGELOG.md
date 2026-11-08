@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- Visual screen editor in Home Assistant (ingress panel "Tube Display", served on a second port 8099 that only accepts the ingress proxy): edit rotation, screens and all six tubes with a live rendered preview, entity picker, colour thresholds, YAML tab with atomic comment-preserving saves (ruamel round-trip), conflict detection when the file changed on disk, and live template rendering. The 8098 API is unchanged.
+
 ## 0.1.2
 
 - The clock's button moves on to the next screen while panels show (needs clock firmware 2.2.0-nt3 or later, which publishes `clock/<id>/button` = `next`).

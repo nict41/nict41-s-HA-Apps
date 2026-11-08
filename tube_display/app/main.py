@@ -17,6 +17,7 @@ import aiohttp
 from aiohttp import web
 
 import api as api_mod
+import editor as editor_mod
 import mqtt_bridge
 from clock import ClockPusher
 from controller import Controller
@@ -111,6 +112,15 @@ async def run() -> None:
         await site.start()
         _LOG.info("HTTP API listening on 0.0.0.0:%d", API_PORT)
 
+        # The screen editor for the HA ingress panel: a second site on 8099
+        # (not published in ports:), only reachable from the ingress proxy.
+        editor_app = editor_mod.create_app(controller, ha, settings.screens_file)
+        editor_runner = web.AppRunner(editor_app)
+        await editor_runner.setup()
+        editor_site = web.TCPSite(editor_runner, "0.0.0.0", editor_mod.INGRESS_PORT)
+        await editor_site.start()
+        _LOG.info("Screen editor (ingress) listening on 0.0.0.0:%d", editor_mod.INGRESS_PORT)
+
         rotation_task = asyncio.ensure_future(controller.run())
         try:
             await rotation_task
@@ -121,6 +131,7 @@ async def run() -> None:
             if mqtt is not None:
                 await mqtt.stop()
             await runner.cleanup()
+            await editor_runner.cleanup()
 
 
 def main() -> int:
