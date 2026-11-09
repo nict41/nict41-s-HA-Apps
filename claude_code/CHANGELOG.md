@@ -4,6 +4,21 @@ Versions are upstream's version with a `-N` suffix for this copy's changes.
 For changes up to 1.2.84, see
 [upstream's changelog](https://github.com/sproft/hass-claude/blob/main/claudecode/CHANGELOG.md).
 
+## 1.2.84-3
+
+- Restarting the app no longer strands Remote Control sessions. The
+  server was killed outright when the app stopped, so its sessions stayed
+  held by a worker that no longer existed, and messages sent to them went
+  unanswered for about five minutes after the restart. The app now stops
+  the server with SIGTERM and waits for it (up to 45 seconds; the app's
+  stop timeout is now 60), so it hands its sessions back and they
+  reconnect as soon as it starts again.
+- New options `remote_control_hostname_override` (default on) and
+  `remote_control_hostname`. The hostname override can be turned off, and
+  the hostname it reports can differ from the session name prefix.
+  Empty `remote_control_hostname` keeps the previous behaviour: the
+  device name is used.
+
 ## 1.2.84-2
 
 - The hostname override now stays in the Remote Control server. Sessions

@@ -85,10 +85,23 @@ configuration:
   remote_control_device_name:
     name: Device Name
     description: >-
-      The name this box registers under in your Claude account, and the prefix
-      for its session names. Leave empty to use the container hostname the
-      Supervisor assigns (for example beb500c8-claude-code). Takes effect on
-      the next app restart.
+      The name this box registers under in your Claude account (unless
+      Hostname below is set), and the prefix for its session names. Leave
+      empty to use the container hostname the Supervisor assigns (for
+      example beb500c8-claude-code). Takes effect on the next app restart.
+  remote_control_hostname_override:
+    name: Override Hostname
+    description: >-
+      Make the Remote Control server report a chosen hostname, which is the
+      name the device shows under in the Claude app. Only that server process
+      sees it; sessions and everything else in the container keep the real
+      hostname. Off: the device shows as the container hostname. Takes effect
+      on the next app restart.
+  remote_control_hostname:
+    name: Hostname
+    description: >-
+      The hostname reported when Override Hostname is on. Leave empty to use
+      the Device Name. Takes effect on the next app restart.
   remote_control_spawn:
     name: New Session Location
     description: >-
