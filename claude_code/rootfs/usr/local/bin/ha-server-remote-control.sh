@@ -6,6 +6,7 @@
 #   ha-server-remote-control.sh start <workdir>   called at boot; returns at once
 #   ha-server-remote-control.sh run <workdir>     the restart loop (inside tmux)
 #   ha-server-remote-control.sh args              print the CLI arguments (tests)
+#   ha-server-remote-control.sh wait-update       wait for a boot update (tests)
 #
 # The server draws a live status screen, so it runs in a detached tmux
 # session named "remote-control" rather than writing to the app log. Attach
@@ -18,6 +19,7 @@ OPTIONS_FILE=${HA_SERVER_OPTIONS:-/data/options.json}
 CREDENTIALS_FILE=${HA_SERVER_CREDENTIALS:-/root/.claude/.credentials.json}
 PRELOAD_LIB=${HA_SERVER_PRELOAD:-/usr/local/lib/ha-server/hostname_override.so}
 LOG_FILE=${HA_SERVER_RC_LOG:-/tmp/ha-server-remote-control.log}
+UPDATE_MARKER=${HA_SERVER_UPDATE_MARKER:-/tmp/claude-update.running}
 TMUX_SESSION=remote-control
 
 opt() {
@@ -66,6 +68,26 @@ build_args() {
     fi
 }
 
+# The boot script updates Claude Code in the background and holds
+# $UPDATE_MARKER while npm rewrites the CLI. A session spawned in that
+# window fails with EACCES on the half-written binary, so the server is not
+# started until the update ends (bounded by the update timeout).
+wait_for_update() {
+    local limit waited=0
+    [ -e "${UPDATE_MARKER}" ] || return 0
+    limit=$(opt '.claude_update_timeout // 300')
+    case "${limit}" in '' | *[!0-9]*) limit=300 ;; esac
+    limit=$((limit + 30))
+    log "[INFO] Remote Control server waiting for the Claude Code update to finish"
+    while [ -e "${UPDATE_MARKER}" ] && [ "${waited}" -lt "${limit}" ]; do
+        sleep 2
+        waited=$((waited + 2))
+    done
+    if [ -e "${UPDATE_MARKER}" ]; then
+        log "[WARN] Claude Code update still running after ${waited}s; starting the Remote Control server anyway"
+    fi
+}
+
 run_loop() {
     local workdir=$1 name started ran backoff=10
     cd "${workdir}" || exit 1
@@ -79,6 +101,7 @@ run_loop() {
             continue
         fi
 
+        wait_for_update
         log "[INFO] Remote Control server starting in ${workdir} as '${name:-$(hostname)}' (claude ${ARGS[*]})"
         started=$(date +%s)
         if [ -n "${name}" ] && [ -r "${PRELOAD_LIB}" ]; then
@@ -124,6 +147,9 @@ case "${1:-}" in
     args)
         build_args
         printf '%s\n' "${ARGS[@]}"
+        ;;
+    wait-update)
+        wait_for_update
         ;;
     *)
         echo "usage: $0 start|run <workdir> | args" >&2

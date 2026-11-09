@@ -18,6 +18,7 @@ APP = Path(__file__).resolve().parent.parent
 BIN = APP / "rootfs" / "usr" / "local" / "bin"
 IMPORT = BIN / "ha-server-import-data.sh"
 REMOTE = BIN / "ha-server-remote-control.sh"
+PRELOAD_SRC = APP / "rootfs" / "usr" / "src" / "ha-server" / "hostname_override.c"
 
 needs_jq = pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
 
@@ -203,3 +204,119 @@ def test_dockerfile_ships_every_added_script():
     for script in (IMPORT, REMOTE):
         assert re.search(rf"COPY rootfs/usr/local/bin/{script.name} ", text)
         assert os.access(script, os.X_OK)
+
+
+def test_startup_marks_the_background_update():
+    script = startup_script()
+    touch = script.index("touch /tmp/claude-update.running")
+    fork = script.index("npm install -g @anthropic-ai/claude-code@latest")
+    rm = script.index("rm -f /tmp/claude-update.running")
+    rc = script.index("ha-server-remote-control.sh start")
+    # The marker exists before the subshell is forked and before the server
+    # starts, and the subshell removes it whichever way npm ends.
+    assert touch < fork < rm < rc
+
+
+# --- update wait -----------------------------------------------------------
+
+@needs_jq
+def test_wait_update_returns_at_once_without_marker(tmp_path):
+    opts = tmp_path / "options.json"
+    opts.write_text("{}")
+    env = {"HA_SERVER_OPTIONS": str(opts),
+           "HA_SERVER_UPDATE_MARKER": str(tmp_path / "missing"),
+           "HA_SERVER_RC_LOG": str(tmp_path / "rc.log")}
+    res = run(REMOTE, "wait-update", env=env)
+    assert res.returncode == 0
+    assert res.stdout == ""
+
+
+@needs_jq
+def test_wait_update_waits_for_marker_to_go(tmp_path):
+    opts = tmp_path / "options.json"
+    opts.write_text("{}")
+    marker = tmp_path / "updating"
+    marker.touch()
+    env = dict(os.environ, HA_SERVER_OPTIONS=str(opts),
+               HA_SERVER_UPDATE_MARKER=str(marker),
+               HA_SERVER_RC_LOG=str(tmp_path / "rc.log"))
+    proc = subprocess.Popen(["bash", str(REMOTE), "wait-update"], env=env,
+                            stdout=subprocess.PIPE, text=True)
+    with pytest.raises(subprocess.TimeoutExpired):
+        proc.wait(timeout=3)
+    marker.unlink()
+    out, _ = proc.communicate(timeout=10)
+    assert proc.returncode == 0
+    assert "waiting for the Claude Code update" in out
+    assert "anyway" not in out
+
+
+# --- hostname override -----------------------------------------------------
+
+def _cc():
+    for name in (os.environ.get("CC"), "gcc", "cc", "clang"):
+        if name and shutil.which(name.split()[0]):
+            return name.split()
+    return None
+
+
+@pytest.fixture(scope="module")
+def preload(tmp_path_factory):
+    cc = _cc()
+    if cc is None:
+        pytest.skip("no C compiler")
+    out = tmp_path_factory.mktemp("preload")
+    lib = out / "hostname_override.so"
+    subprocess.run([*cc, "-shared", "-fPIC", "-O2", "-Wall", "-Werror",
+                    "-o", str(lib), str(PRELOAD_SRC)], check=True)
+    other = out / "other.c"
+    other.write_text("int ha_server_test_other;\n")
+    other_lib = out / "libother.so"
+    subprocess.run([*cc, "-shared", "-fPIC", "-o", str(other_lib), str(other)], check=True)
+    return lib, other_lib
+
+
+PROBE = """
+import json, os, socket, subprocess, sys
+child = subprocess.run([sys.executable, "-c",
+    "import json, os, socket; print(json.dumps([socket.gethostname(), os.uname().nodename,"
+    " os.environ.get('LD_PRELOAD'), os.environ.get('HA_SERVER_HOSTNAME')]))"],
+    capture_output=True, text=True, check=True)
+print(json.dumps({"self": [socket.gethostname(), os.uname().nodename,
+                           os.environ.get("LD_PRELOAD"), os.environ.get("HA_SERVER_HOSTNAME")],
+                  "child": json.loads(child.stdout)}))
+"""
+
+
+def _probe(preload_value, name="HA Test"):
+    env = dict(os.environ, LD_PRELOAD=preload_value, HA_SERVER_HOSTNAME=name)
+    res = subprocess.run(["python3", "-I", "-c", PROBE], env=env,
+                         capture_output=True, text=True, timeout=30)
+    assert res.returncode == 0, res.stderr
+    return json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def test_override_applies_to_the_process_but_not_its_children(preload):
+    lib, _ = preload
+    real = subprocess.run(["python3", "-c", "import socket; print(socket.gethostname())"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    out = _probe(str(lib))
+    assert out["self"] == ["HA Test", "HA Test", None, None]
+    assert out["child"] == [real, real, None, None]
+
+
+def test_other_preload_entries_are_kept(preload):
+    lib, other = preload
+    out = _probe(f"{lib} {other}")
+    assert out["self"][0] == "HA Test"
+    assert out["self"][2] == str(other)
+    assert out["child"][2] == str(other)
+
+
+def test_empty_name_leaves_hostname_alone(preload):
+    lib, _ = preload
+    real = subprocess.run(["python3", "-c", "import socket; print(socket.gethostname())"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    out = _probe(str(lib), name="")
+    assert out["self"][0] == real
+    assert out["self"][2] is None

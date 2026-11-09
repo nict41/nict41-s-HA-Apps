@@ -1,6 +1,6 @@
 name: Claude Code (HA Server)
 description: Claude Code in Home Assistant, plus a Remote Control server so this box shows as a device in the Claude app
-version: "1.2.84-1"
+version: "1.2.84-2"
 slug: claude_code
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/claude_code
 arch:
