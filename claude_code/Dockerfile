@@ -310,7 +310,7 @@ CMD ["/bin/bash", "-c", "\
     fi; \
   fi && \
   if [ \"$ENABLE_MCP\" = \"true\" ]; then \
-    if jq '.mcpServers.homeassistant = {\"type\":\"stdio\",\"command\":\"hass-mcp\"} | del(.mcpServers.playwright)' \"$CLAUDE_JSON\" > /tmp/claude.tmp && jq -e . /tmp/claude.tmp >/dev/null 2>&1; then \
+    if jq '.mcpServers.homeassistant = {\"type\":\"stdio\",\"command\":\"hass-mcp\"}' \"$CLAUDE_JSON\" > /tmp/claude.tmp && jq -e . /tmp/claude.tmp >/dev/null 2>&1; then \
       cp /tmp/claude.tmp \"$PERSIST_DIR/.claude.json.tmp\" && mv \"$PERSIST_DIR/.claude.json.tmp\" \"$PERSIST_DIR/.claude.json\"; \
     else \
       echo '[WARN] Failed to register MCP server in .claude.json'; \

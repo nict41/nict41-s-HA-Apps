@@ -4,6 +4,16 @@ Versions are upstream's version with a `-N` suffix for this copy's changes.
 For changes up to 1.2.84, see
 [upstream's changelog](https://github.com/sproft/hass-claude/blob/main/claudecode/CHANGELOG.md).
 
+## 1.2.84-4
+
+- MCP servers you add yourself now survive a restart. The startup command
+  inherited from upstream deleted any MCP server named `playwright` from
+  `.claude.json` on every boot, so a Playwright server you had added (for
+  example one pointing at a Browserless app) vanished each time the app
+  started. The startup command now only registers the `homeassistant`
+  server and leaves the others alone. If you have a stale `playwright`
+  entry you don't want, remove it with `claude mcp remove playwright -s user`.
+
 ## 1.2.84-3
 
 - Restarting the app no longer strands Remote Control sessions. The
