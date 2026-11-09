@@ -1,6 +1,6 @@
 name: Claude Code (HA Server)
 description: Claude Code in Home Assistant, plus a Remote Control server so this box shows as a device in the Claude app
-version: "1.2.84-2"
+version: "1.2.84-3"
 slug: claude_code
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/claude_code
 arch:
@@ -9,6 +9,7 @@ arch:
 startup: application
 boot: auto
 init: true
+timeout: 60
 ingress: true
 ingress_port: 7681
 ingress_stream: true
@@ -49,6 +50,7 @@ options:
   unattended_mode: false
   remote_control_server: true
   remote_control_device_name: "HA Server"
+  remote_control_hostname_override: true
   remote_control_spawn: same-dir
   remote_control_capacity: 8
   remote_control_permission_mode: default
@@ -69,6 +71,8 @@ schema:
   unattended_mode: bool
   remote_control_server: bool
   remote_control_device_name: str?
+  remote_control_hostname_override: bool
+  remote_control_hostname: str?
   remote_control_spawn: list(same-dir|worktree|session)
   remote_control_capacity: int(1,32)
   remote_control_permission_mode: list(default|acceptEdits|plan|auto)

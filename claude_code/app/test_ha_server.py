@@ -172,7 +172,10 @@ def test_start_does_nothing_when_disabled(tmp_path):
 def test_options_schema_and_translations_agree():
     config = yaml.safe_load((APP / "config.yaml").read_text())
     en = yaml.safe_load((APP / "translations" / "en.yaml").read_text())
-    assert set(config["options"]) == set(config["schema"])
+    assert set(config["options"]) <= set(config["schema"])
+    # A schema key without a default must be optional, or the app won't start.
+    for key in set(config["schema"]) - set(config["options"]):
+        assert str(config["schema"][key]).endswith("?"), key
     assert set(config["schema"]) <= set(en["configuration"])
     assert "bypassPermissions" not in config["schema"]["remote_control_permission_mode"]
 
@@ -194,9 +197,44 @@ def test_startup_imports_before_seeding_and_starts_server_before_ttyd():
     imp = script.index("ha-server-import-data.sh")
     seed = script.index("npm-global/.seed-complete")
     rc = script.index("ha-server-remote-control.sh start")
-    ttyd = script.index("exec ttyd")
+    ttyd = script.index("ttyd --port")
     assert imp < seed
     assert rc < ttyd
+
+
+def test_startup_stops_the_server_before_ttyd_on_sigterm():
+    script = startup_script()
+    assert "exec ttyd" not in script
+    trap = script[script.index("trap '"):]
+    trap = trap[:trap.index("' TERM INT")]
+    assert trap.index("ha-server-remote-control.sh stop") < trap.index("kill -TERM $TTYD_PID")
+    config = yaml.safe_load((APP / "config.yaml").read_text())
+    # The Supervisor's stop timeout must outlast the server's shutdown.
+    assert config["timeout"] >= 55
+
+
+def test_startup_trap_runs_stop_then_ends_ttyd(tmp_path):
+    """Run the real tail of the startup command with stand-in programs."""
+    script = startup_script()
+    tail = script[script.index("{ ttyd --port"):]
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    calls = tmp_path / "calls"
+    (fake / "ttyd").write_text("#!/bin/bash\ntrap 'echo ttyd-term >> %s; exit 0' TERM\n"
+                               "while :; do sleep 0.1; done\n" % calls)
+    (fake / "ttyd").chmod(0o755)
+    stub = tmp_path / "stop.sh"
+    stub.write_text("echo \"rc-$1\" >> %s\n" % calls)
+    tail = tail.replace("/usr/local/bin/ha-server-remote-control.sh", str(stub))
+    env = dict(os.environ, PATH=f"{fake}:{os.environ['PATH']}")
+    proc = subprocess.Popen(["bash", "-c", "SHELL_CMD=(true); COLORS=x; FONT_SIZE=14; " + tail],
+                            env=env)
+    import time
+    time.sleep(1)
+    proc.terminate()
+    assert proc.wait(timeout=10) == 0
+    lines = calls.read_text().split()
+    assert lines[:2] == ["rc-stop", "ttyd-term"]
 
 
 def test_dockerfile_ships_every_added_script():
@@ -215,6 +253,118 @@ def test_startup_marks_the_background_update():
     # The marker exists before the subshell is forked and before the server
     # starts, and the subshell removes it whichever way npm ends.
     assert touch < fork < rm < rc
+
+
+# --- hostname option ---------------------------------------------------------
+
+def rc_hostname(tmp_path, options):
+    opts = tmp_path / "options.json"
+    opts.write_text(json.dumps(options))
+    res = run(REMOTE, "hostname", env={"HA_SERVER_OPTIONS": str(opts)})
+    assert res.returncode == 0, res.stderr
+    return res.stdout.strip()
+
+
+@needs_jq
+@pytest.mark.parametrize("options, expected", [
+    ({"remote_control_device_name": "HA Server"}, "HA Server"),
+    ({"remote_control_device_name": "HA Server",
+      "remote_control_hostname_override": True}, "HA Server"),
+    ({"remote_control_device_name": "HA Server",
+      "remote_control_hostname": "home-box"}, "home-box"),
+    ({"remote_control_device_name": "HA Server",
+      "remote_control_hostname": "home-box",
+      "remote_control_hostname_override": False}, ""),
+    ({"remote_control_device_name": ""}, ""),
+    ({}, ""),
+])
+def test_hostname_option(tmp_path, options, expected):
+    assert rc_hostname(tmp_path, options) == expected
+
+
+# --- clean stop ------------------------------------------------------------
+
+def rc_env(tmp_path, options=None, **extra):
+    opts = tmp_path / "options.json"
+    opts.write_text(json.dumps(options or {}))
+    env = dict(os.environ,
+               HA_SERVER_OPTIONS=str(opts),
+               HA_SERVER_RC_LOG=str(tmp_path / "rc.log"),
+               HA_SERVER_RC_PID=str(tmp_path / "rc.pid"),
+               HA_SERVER_RC_STOP=str(tmp_path / "rc.stopping"),
+               HA_SERVER_UPDATE_MARKER=str(tmp_path / "no-update"),
+               HA_SERVER_PRELOAD=str(tmp_path / "no-preload.so"))
+    env.update(extra)
+    return env
+
+
+def wait_for(path, timeout=10):
+    import time
+    end = time.time() + timeout
+    while time.time() < end:
+        if path.exists() and path.read_text().strip():
+            return
+        time.sleep(0.1)
+    raise AssertionError(f"{path} never appeared")
+
+
+@needs_jq
+def test_stop_without_server_is_quiet(tmp_path):
+    env = rc_env(tmp_path)
+    res = subprocess.run(["bash", str(REMOTE), "stop"], env=env,
+                         capture_output=True, text=True, timeout=10)
+    assert res.returncode == 0
+    assert (tmp_path / "rc.stopping").exists()
+
+
+@needs_jq
+def test_stop_signals_the_server_and_the_loop_ends(tmp_path):
+    """The run loop records claude's PID; stop sends it SIGTERM, waits for
+    the clean exit, and the loop does not start it again."""
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    marks = tmp_path / "marks"
+    (fake / "claude").write_text(
+        "#!/bin/bash\n"
+        f"echo \"start $$ $*\" >> {marks}\n"
+        f"trap 'sleep 1; echo clean >> {marks}; exit 0' TERM\n"
+        "while :; do sleep 0.1; done\n")
+    (fake / "claude").chmod(0o755)
+    creds = tmp_path / "creds.json"
+    creds.write_text("{}")
+    env = rc_env(tmp_path, {"remote_control_device_name": "HA Server"},
+                 PATH=f"{fake}:{os.environ['PATH']}",
+                 HA_SERVER_CREDENTIALS=str(creds))
+    loop = subprocess.Popen(["bash", str(REMOTE), "run", str(tmp_path)], env=env,
+                            stdout=subprocess.PIPE, text=True)
+    wait_for(tmp_path / "rc.pid")
+    pid = int((tmp_path / "rc.pid").read_text())
+    res = subprocess.run(["bash", str(REMOTE), "stop"], env=env,
+                         capture_output=True, text=True, timeout=20)
+    assert res.returncode == 0
+    out, _ = loop.communicate(timeout=10)
+    assert loop.returncode == 0
+    lines = marks.read_text().splitlines()
+    # The recorded PID was claude itself, it was started once, and it got
+    # to finish its shutdown.
+    assert lines[0].startswith(f"start {pid} remote-control ")
+    assert lines[1:] == ["clean"]
+    assert "stopped" in out and "restarting" not in out
+    assert not (tmp_path / "rc.pid").exists()
+
+
+@needs_jq
+def test_stop_gives_up_after_the_timeout(tmp_path):
+    proc = subprocess.Popen(["bash", "-c", "trap '' TERM; while :; do sleep 0.1; done"])
+    try:
+        (tmp_path / "rc.pid").write_text(str(proc.pid))
+        env = rc_env(tmp_path, HA_SERVER_RC_STOP_TIMEOUT="2")
+        res = subprocess.run(["bash", str(REMOTE), "stop"], env=env,
+                             capture_output=True, text=True, timeout=20)
+        assert res.returncode == 1
+        assert "still running" in res.stdout
+    finally:
+        proc.kill()
 
 
 # --- update wait -----------------------------------------------------------

@@ -197,7 +197,9 @@ Change these on the app's **Configuration** tab.
 | `confirm_actions` | `homeassistant.restart`, `hassio.supervisor_restart` | Actions allowed only after you approve them |
 | `unattended_mode` | `false` | Skip the per-tool approval prompts for headless use. Confirm-tier guard actions are refused instead of prompted. See below |
 | `remote_control_server` | `true` | Run the Remote Control server, so this box is a device in the Claude app. See [Remote Control server](#remote-control-server) |
-| `remote_control_device_name` | `HA Server` | Name the device registers under. Empty uses the container hostname |
+| `remote_control_device_name` | `HA Server` | Name the device registers under, and the session name prefix. Empty uses the container hostname |
+| `remote_control_hostname_override` | `true` | Make the Remote Control server report a chosen hostname, so the device gets a readable name. Off: the device shows as the container hostname |
+| `remote_control_hostname` | empty | Hostname to report while the override is on. Empty uses `remote_control_device_name` |
 | `remote_control_spawn` | `same-dir` | Where phone-started sessions work: `same-dir`, `worktree` or `session` |
 | `remote_control_capacity` | `8` | Most Remote Control sessions running at once, 1 to 32 |
 | `remote_control_permission_mode` | `default` | Permission mode for phone-started sessions: `default`, `acceptEdits`, `plan` or `auto` |
@@ -238,7 +240,9 @@ With `remote_control_server` on (the default here), the app starts `claude remot
 
 **Watching it.** It runs in a detached tmux session called `remote-control`. From the terminal, `tmux attach -t remote-control` shows its status screen, and pressing space there shows a QR code. `Ctrl+b` then `d` leaves it running. Start, exit and restart lines also appear in the app's **Log** tab.
 
-**The device name.** Claude Code names the device after the machine's hostname. Inside an app, the Supervisor sets that hostname (for example `beb500c8-claude-code`) and an app cannot change it. So this app loads a tiny library into the Remote Control server process only, which makes it report `remote_control_device_name` instead. Nothing else in the container sees a different hostname. Leave the option empty to use the real hostname. The name is also used as the prefix for the session names.
+**The device name.** Claude Code names the device after the machine's hostname. Inside an app, the Supervisor sets that hostname (for example `beb500c8-claude-code`) and an app cannot change it. So, while `remote_control_hostname_override` is on (the default), this app loads a tiny library into the Remote Control server process only, which makes it report `remote_control_hostname` instead, or `remote_control_device_name` when that is empty. Nothing else in the container sees a different hostname, including the sessions the server starts. Turn the override off to register under the real hostname. `remote_control_device_name` is also the prefix for the session names, whichever hostname is reported.
+
+**Restarts keep your sessions.** When the app stops (for an update, a restart or a Home Assistant restart), it first stops the Remote Control server cleanly and waits for it, up to 45 seconds. The server then hands back its sessions and keeps its registration, so when the app starts again your existing chats on this device reconnect, and a message you send while it restarts is answered once it's back. Before 1.2.84-3 the server was killed outright, and its sessions stayed unanswered for about five minutes after the restart.
 
 **Prompts and the guard.** Sessions started from the Claude app have no terminal, but they still get permission prompts: Remote Control sends them to the Claude app, where you approve them like any other. The privileged-action guard is a hook in the shared `settings.json`, so it covers these sessions too. A blocked action is still blocked. A confirm-first action asks on your phone. If nobody answers, it waits and doesn't run. With `unattended_mode` on, confirm-first actions are refused here as everywhere else. `remote_control_permission_mode` deliberately has no `bypassPermissions` choice.
 

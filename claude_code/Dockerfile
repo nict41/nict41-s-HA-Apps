@@ -409,10 +409,15 @@ CMD ["/bin/bash", "-c", "\
   fi && \
   { bash /usr/local/bin/ha-server-remote-control.sh start \"$WORK_DIR\" || echo '[WARN] Remote Control server failed to launch'; } && \
   cd \"$WORK_DIR\" && \
-  exec ttyd --port 7681 --writable --ping-interval 30 --max-clients 5 \
+  { ttyd --port 7681 --writable --ping-interval 30 --max-clients 5 \
     -t fontSize=$FONT_SIZE \
     -t fontFamily=Monaco,Consolas,monospace \
     -t scrollback=20000 \
     -t \"theme=$COLORS\" \
-    \"${SHELL_CMD[@]}\" \
+    \"${SHELL_CMD[@]}\" & } && \
+  TTYD_PID=$! && \
+  trap 'bash /usr/local/bin/ha-server-remote-control.sh stop; kill -TERM $TTYD_PID 2>/dev/null' TERM INT && \
+  while kill -0 $TTYD_PID 2>/dev/null; do wait $TTYD_PID; TTYD_RC=$?; done; \
+  bash /usr/local/bin/ha-server-remote-control.sh stop; \
+  exit ${TTYD_RC:-0} \
 "]
