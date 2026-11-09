@@ -1,0 +1,84 @@
+configuration:
+  enable_mcp:
+    name: Habilitar MCP de Home Assistant
+    description: >-
+      Habilita el servidor MCP de Home Assistant para interacción directa con
+      entidades y servicios desde Claude Code. Permite que Claude consulte
+      estados, llame servicios e interactúe con tu hogar inteligente.
+  terminal_font_size:
+    name: Tamaño de Fuente del Terminal
+    description: >-
+      Tamaño de fuente del terminal web en píxeles (10-24).
+      Ajusta para mejor legibilidad en tu pantalla.
+  terminal_theme:
+    name: Tema del Terminal
+    description: >-
+      Tema de colores del terminal web.
+      Elige 'dark' para fondo oscuro o 'light' para fondo claro.
+  working_directory:
+    name: Directorio de Trabajo
+    description: >-
+      El directorio predeterminado cuando Claude Code inicia.
+      Usa /homeassistant para acceso directo a los archivos de configuración de HA.
+  session_persistence:
+    name: Persistencia de Sesión
+    description: >-
+      Habilita persistencia de sesión via tmux. Cuando está habilitado, tu sesión
+      del terminal sobrevive a actualizaciones del navegador y desconexiones.
+      Recomendado para tareas de larga duración.
+  auto_continue:
+    name: Continuar Claude Automáticamente al Iniciar
+    description: >-
+      Cuando el terminal inicia, ejecuta automáticamente 'claude --continue' para
+      reanudar tu sesión anterior en lugar de abrir una shell. Solo tiene efecto
+      cuando la Persistencia de Sesión está habilitada. Es seguro sin sesión previa
+      (inicia una nueva).
+  claude_update_timeout:
+    name: Tiempo Límite de Actualización (segundos)
+    description: >-
+      Cuánto tiempo puede ejecutarse la actualización de Claude Code en segundo
+      plano antes de detenerse (30-1800). Auméntalo si la conexión es lenta y el
+      registro indica que la actualización expiró. Solo se usa cuando la
+      actualización automática de Claude Code está activada.
+  auto_update_claude:
+    name: Actualización Automática de Claude Code
+    description: >-
+      Verifica e instala automáticamente actualizaciones de Claude Code al iniciar la app.
+      Mantiene Claude Code actualizado sin necesidad de actualizar la versión de la app.
+  guard_privileged_actions:
+    name: Aplicar Barrera de Acciones Privilegiadas
+    description: >-
+      Aplica un límite de seguridad que bloquea o pide confirmación antes de que
+      Claude ejecute acciones destructivas de Home Assistant (detener el núcleo,
+      desactivar el watchdog del Supervisor, reiniciar o apagar el host,
+      actualizaciones del sistema) y exige confirmación humana para un reinicio
+      completo. Lo aplica la app, no solo las instrucciones. Se recomienda activarlo.
+  disallow_actions:
+    name: Acciones Bloqueadas
+    description: >-
+      Acciones de Home Assistant que Claude nunca puede ejecutar por su cuenta,
+      como identificadores dominio.servicio (por ejemplo homeassistant.stop,
+      hassio.host_reboot). Se bloquean por completo mientras la barrera está activa.
+  confirm_actions:
+    name: Acciones con Confirmación
+    description: >-
+      Acciones que requieren confirmación humana explícita antes de ejecutarse,
+      como identificadores dominio.servicio. homeassistant.restart se incluye de
+      forma predeterminada para que un reinicio completo nunca se active sin aprobación.
+  unattended_mode:
+    name: Modo Desatendido
+    description: >-
+      Ejecuta Claude Code sin avisos de permiso por herramienta, para un
+      funcionamiento desatendido. Establece permissions.defaultMode en
+      bypassPermissions y la variable IS_SANDBOX que Claude Code exige antes de
+      permitir eso mientras se ejecuta como root en este contenedor. Mientras
+      esté activo, las acciones de la lista de confirmación se rechazan en vez
+      de preguntar, porque no hay nadie presente para responder; las acciones
+      bloqueadas no cambian. Un defaultMode personalizado se reemplaza con un
+      aviso en el registro y se restaura al desactivar esta opción. Desactivado
+      de forma predeterminada. Deja activada la Barrera de Acciones
+      Privilegiadas mientras esto esté habilitado; es el único límite que queda
+      sin los avisos.
+
+network:
+  7681/tcp: Terminal Web (ttyd)

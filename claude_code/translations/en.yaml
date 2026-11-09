@@ -1,0 +1,112 @@
+configuration:
+  enable_mcp:
+    name: Enable Home Assistant MCP
+    description: >-
+      Enable the Home Assistant MCP server for direct entity and service
+      interaction from Claude Code. Allows Claude to query states, call services,
+      and interact with your smart home.
+  terminal_font_size:
+    name: Terminal Font Size
+    description: >-
+      Font size for the web terminal in pixels (10-24).
+      Adjust for readability on your display.
+  terminal_theme:
+    name: Terminal Theme
+    description: >-
+      Color theme for the web terminal.
+      Choose 'dark' for dark backgrounds or 'light' for light backgrounds.
+  working_directory:
+    name: Working Directory
+    description: >-
+      The default working directory when Claude Code starts.
+      Use /homeassistant for direct access to HA configuration files.
+  session_persistence:
+    name: Session Persistence
+    description: >-
+      Enable tmux session persistence. When enabled, your terminal session
+      survives browser refreshes and disconnects. Recommended for long-running tasks.
+  auto_continue:
+    name: Auto-continue Claude on Start
+    description: >-
+      When the terminal starts, automatically run 'claude --continue' to resume
+      your previous session instead of dropping into a shell. Only takes effect
+      when Session Persistence is enabled. Safe with no prior session (starts fresh).
+  claude_update_timeout:
+    name: Update Timeout (seconds)
+    description: >-
+      How long the background Claude Code update may run before it is stopped
+      (30-1800). Raise it on a slow connection if the log reports the update
+      timing out. Only used when Auto-update Claude Code is enabled.
+  auto_update_claude:
+    name: Auto-update Claude Code
+    description: >-
+      Automatically check for and install Claude Code updates on app startup.
+      Keeps Claude Code current without requiring app version bumps.
+  guard_privileged_actions:
+    name: Enforce Privileged-action Guard
+    description: >-
+      Enforce a safety boundary that blocks or asks before Claude runs
+      destructive Home Assistant actions (stopping Core, disabling the Supervisor
+      watchdog, rebooting or shutting down the host, OS updates) and requires
+      human confirmation for a full restart. Enforced by the app, not just by
+      instructions. Recommended on.
+  disallow_actions:
+    name: Blocked Actions
+    description: >-
+      Home Assistant actions Claude may never run on its own, as domain.service
+      identifiers (for example homeassistant.stop, hassio.host_reboot). These are
+      hard-blocked while the guard is enabled.
+  confirm_actions:
+    name: Confirm-first Actions
+    description: >-
+      Actions that require explicit human confirmation before running, as
+      domain.service identifiers. homeassistant.restart is included by default so
+      a full restart is never triggered without approval.
+  unattended_mode:
+    name: Unattended Mode
+    description: >-
+      Run Claude Code without per-tool permission prompts, for headless
+      operation. Sets permissions.defaultMode to bypassPermissions and the
+      IS_SANDBOX flag Claude Code requires before it will do that while running
+      as root in this container. While this is on, guard actions on the confirm
+      list are refused instead of prompted, since nobody is present to answer;
+      deny-tier actions are unchanged. A custom defaultMode you set yourself is
+      replaced with a logged warning and restored when this is turned off. Off
+      by default. Leave Enforce Privileged-action Guard on while this is
+      enabled; it is the only boundary left once the prompts are gone.
+  remote_control_server:
+    name: Remote Control Server
+    description: >-
+      Run Claude Code's Remote Control server (`claude remote-control`) in the
+      background from the moment the app starts. This box then shows as a
+      device in the Claude mobile app and on claude.ai/code, and you can start
+      new sessions on it from there, several at once, without opening this
+      panel first. Uses the account signed in through the web terminal.
+  remote_control_device_name:
+    name: Device Name
+    description: >-
+      The name this box registers under in your Claude account, and the prefix
+      for its session names. Leave empty to use the container hostname the
+      Supervisor assigns (for example beb500c8-claude-code). Takes effect on
+      the next app restart.
+  remote_control_spawn:
+    name: New Session Location
+    description: >-
+      Where sessions started from the Claude app work. same-dir: all in the
+      working directory, sharing its files. worktree: each in its own git
+      worktree (the working directory must be a git repository). session: one
+      session at a time.
+  remote_control_capacity:
+    name: Maximum Concurrent Sessions
+    description: >-
+      How many Remote Control sessions may run at once (1-32). Each one is a
+      separate Claude Code process using memory on this box.
+  remote_control_permission_mode:
+    name: Remote Session Permission Mode
+    description: >-
+      Permission mode for sessions started from the Claude app. Permission and
+      guard prompts appear in the Claude app. bypassPermissions is
+      deliberately not offered.
+
+network:
+  7681/tcp: Web Terminal (ttyd)
