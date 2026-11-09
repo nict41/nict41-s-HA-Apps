@@ -34,6 +34,15 @@ Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF,
 
 Shares one Home Assistant camera as a read-only public web page on a LAN port, for publishing a 3D printer's camera to friends through a Cloudflare tunnel - one subscription to Home Assistant however many people are watching.
 
+### [Claude Code (HA Server)](./claude_code)
+
+![Claude Code (HA Server) logo](claude_code/logo.png)
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
+The Claude Code app from [sproft/hass-claude](https://github.com/sproft/hass-claude), plus a Remote Control server that starts with the app, so the box shows as a device called HA Server in the Claude mobile app and you can start sessions on it from your phone.
+
 ### [CPU Performance Governor](./cpu_governor)
 
 ![CPU Performance Governor logo](cpu_governor/logo.png)

@@ -1,0 +1,96 @@
+#include <tunables/global>
+
+profile claude_code flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Capabilities needed for terminal and networking
+  # net_admin intentionally omitted: app only needs outbound HTTP,
+  # not network interface, routing, or firewall modification.
+  capability net_raw,
+  capability setgid,
+  capability setuid,
+  capability chown,
+  capability fowner,
+  capability dac_override,
+  capability dac_read_search,
+  capability sys_tty_config,
+
+  # Network access for Claude API and hass-mcp
+  network,
+
+  # PTY/TTY access for terminal
+  /dev/ptmx rw,
+  /dev/pts/* rw,
+  /dev/tty* rw,
+  /dev/null rw,
+  /dev/zero r,
+  /dev/urandom r,
+
+  # System files (read-only)
+  /etc/** r,
+  /usr/** r,
+  /lib/** r,
+  /proc/** r,
+  /sys/** r,
+
+  # Execute permissions for binaries
+  /bin/** ixr,
+  /usr/bin/** ixr,
+  /usr/lib/** ixmr,
+  /usr/local/** ixr,
+  # HA Server: the hostname override is LD_PRELOADed into the Remote
+  # Control server, which needs mmap on top of read.
+  /usr/local/lib/ha-server/*.so mr,
+  /usr/libexec/** ixr,
+
+  # App data
+  /data/** rwk,
+
+  # Home Assistant config - main working directory
+  /homeassistant/ r,
+  /homeassistant/** rwk,
+
+  # Other mapped HA directories
+  /ssl/ r,
+  /ssl/** r,
+  /share/ r,
+  /share/** rwk,
+  /media/ r,
+  /media/** rwk,
+  /backup/ r,
+  /backup/** r,
+  /addon_configs/ r,
+  /addon_configs/** rwk,
+  /config/ r,
+  /config/** rwk,
+
+  # Claude Code and user home
+  /root/ r,
+  /root/** rwk,
+  /tmp/** rwk,
+
+  # Node.js modules
+  /usr/lib/node_modules/** ixmr,
+
+  # npm global prefix (issues #13, #22). The /data/** rwk rule above already
+  # grants read/write/lock; add execute and mmap so the installed `claude`
+  # binary and its Node modules can be run from this writable, persistent
+  # path, and link (`l`) so the first-boot seed and `npm install -g ...@latest`
+  # can recreate the package's internal hard link. Recent Claude Code packages
+  # ship bin/claude.exe as a hard link to the platform binary
+  # (@anthropic-ai/claude-code-linux-x64-musl/claude); without `l`, link(2) is
+  # denied under Protection mode, the seed aborts, and `claude` never lands on
+  # PATH. Self-updates land here instead of the denied /usr/local/lib/node_modules.
+  /data/npm-global/** ixmrl,
+
+  # Image-baked npm prefix (issues #15, #16). The Dockerfile installs the
+  # bundled `claude` here at build time; the boot script seeds /data/npm-global
+  # from it on first boot, and it stays on PATH as a fallback. Without read it
+  # cannot be copied to /data (cp fails with "Permission denied" and seeding is
+  # skipped); without execute the fallback /opt/npm-global/bin/claude is killed
+  # with "Permission denied" even though it resolves on PATH.
+  # The directory node itself needs read so `cp -a /opt/npm-global/.` can list
+  # it; unlike /data there is no broader /opt umbrella rule to cover it.
+  /opt/npm-global/ r,
+  /opt/npm-global/** ixmr,
+}

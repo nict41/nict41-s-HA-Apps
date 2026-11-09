@@ -1,0 +1,83 @@
+configuration:
+  enable_mcp:
+    name: Habilitar MCP do Home Assistant
+    description: >-
+      Habilita o servidor MCP do Home Assistant para interação direta com
+      entidades e serviços pelo Claude Code. Permite que o Claude consulte
+      estados, chame serviços e interaja com sua casa inteligente.
+  terminal_font_size:
+    name: Tamanho da Fonte do Terminal
+    description: >-
+      Tamanho da fonte do terminal web em pixels (10-24).
+      Ajuste para melhor legibilidade no seu monitor.
+  terminal_theme:
+    name: Tema do Terminal
+    description: >-
+      Tema de cores do terminal web.
+      Escolha 'dark' para fundo escuro ou 'light' para fundo claro.
+  working_directory:
+    name: Diretório de Trabalho
+    description: >-
+      O diretório padrão quando o Claude Code inicia.
+      Use /homeassistant para acesso direto aos arquivos de configuração do HA.
+  session_persistence:
+    name: Persistência de Sessão
+    description: >-
+      Habilita persistência de sessão via tmux. Quando habilitado, sua sessão
+      do terminal sobrevive a atualizações do navegador e desconexões.
+      Recomendado para tarefas de longa duração.
+  auto_continue:
+    name: Continuar o Claude Automaticamente ao Iniciar
+    description: >-
+      Quando o terminal inicia, executa automaticamente 'claude --continue' para
+      retomar sua sessão anterior em vez de abrir um shell. Só tem efeito quando a
+      Persistência de Sessão está habilitada. É seguro sem sessão anterior
+      (inicia uma nova).
+  claude_update_timeout:
+    name: Tempo Limite de Atualização (segundos)
+    description: >-
+      Por quanto tempo a atualização do Claude Code em segundo plano pode ser
+      executada antes de ser interrompida (30-1800). Aumente em conexões lentas
+      se o registro indicar que a atualização expirou. Usado apenas quando a
+      atualização automática do Claude Code está ativada.
+  auto_update_claude:
+    name: Atualização Automática do Claude Code
+    description: >-
+      Verifica e instala automaticamente atualizações do Claude Code ao iniciar o app.
+      Mantém o Claude Code atualizado sem precisar atualizar a versão do app.
+  guard_privileged_actions:
+    name: Aplicar Barreira de Ações Privilegiadas
+    description: >-
+      Aplica um limite de segurança que bloqueia ou pede confirmação antes de o
+      Claude executar ações destrutivas do Home Assistant (parar o núcleo,
+      desativar o watchdog do Supervisor, reiniciar ou desligar o host,
+      atualizações do sistema) e exige confirmação humana para uma reinicialização
+      completa. Aplicado pelo app, não apenas pelas instruções. Recomendado manter ativado.
+  disallow_actions:
+    name: Ações Bloqueadas
+    description: >-
+      Ações do Home Assistant que o Claude nunca pode executar sozinho, como
+      identificadores dominio.servico (por exemplo homeassistant.stop,
+      hassio.host_reboot). São totalmente bloqueadas enquanto a barreira está ativa.
+  confirm_actions:
+    name: Ações que Exigem Confirmação
+    description: >-
+      Ações que exigem confirmação humana explícita antes de executar, como
+      identificadores dominio.servico. homeassistant.restart é incluído por padrão
+      para que uma reinicialização completa nunca seja acionada sem aprovação.
+  unattended_mode:
+    name: Modo Não Assistido
+    description: >-
+      Executa o Claude Code sem avisos de permissão por ferramenta, para
+      operação não assistida. Define permissions.defaultMode como
+      bypassPermissions e a variável IS_SANDBOX que o Claude Code exige antes de
+      permitir isso enquanto executa como root neste contêiner. Enquanto estiver
+      ativo, as ações da lista de confirmação são recusadas em vez de
+      perguntadas, porque não há ninguém presente para responder; as ações
+      bloqueadas não mudam. Um defaultMode personalizado é substituído com um
+      aviso no log e restaurado quando esta opção é desativada. Desativado por
+      padrão. Mantenha a Barreira de Ações Privilegiadas ativa enquanto isso
+      estiver habilitado; é o único limite que resta sem os avisos.
+
+network:
+  7681/tcp: Terminal Web (ttyd)

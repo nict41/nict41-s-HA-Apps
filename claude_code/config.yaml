@@ -1,0 +1,77 @@
+name: Claude Code (HA Server)
+description: Claude Code in Home Assistant, plus a Remote Control server so this box shows as a device in the Claude app
+version: "1.2.84-1"
+slug: claude_code
+url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/claude_code
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: true
+ingress: true
+ingress_port: 7681
+ingress_stream: true
+panel_icon: mdi:brain
+panel_title: Claude Code
+homeassistant_api: true
+auth_api: true
+hassio_api: true
+hassio_role: manager
+full_access: false
+map:
+  - homeassistant_config:rw
+  - ssl:ro
+  - share:rw
+  - media:rw
+  - addon_config:rw
+  - backup:ro
+options:
+  enable_mcp: true
+  terminal_font_size: 14
+  terminal_theme: dark
+  working_directory: /homeassistant
+  session_persistence: false
+  auto_continue: false
+  auto_update_claude: false
+  claude_update_timeout: 300
+  guard_privileged_actions: true
+  disallow_actions:
+    - homeassistant.stop
+    - supervisor.core_stop
+    - supervisor.watchdog_disable
+    - hassio.host_reboot
+    - hassio.host_shutdown
+    - hassio.os_update
+  confirm_actions:
+    - homeassistant.restart
+    - hassio.supervisor_restart
+  unattended_mode: false
+  remote_control_server: true
+  remote_control_device_name: "HA Server"
+  remote_control_spawn: same-dir
+  remote_control_capacity: 8
+  remote_control_permission_mode: default
+schema:
+  enable_mcp: bool
+  terminal_font_size: int(10,24)
+  terminal_theme: list(dark|light)
+  working_directory: str
+  session_persistence: bool
+  auto_continue: bool
+  auto_update_claude: bool
+  claude_update_timeout: int(30,1800)
+  guard_privileged_actions: bool
+  disallow_actions:
+    - str
+  confirm_actions:
+    - str
+  unattended_mode: bool
+  remote_control_server: bool
+  remote_control_device_name: str?
+  remote_control_spawn: list(same-dir|worktree|session)
+  remote_control_capacity: int(1,32)
+  remote_control_permission_mode: list(default|acceptEdits|plan|auto)
+environment:
+  TERM: xterm-256color
+  NODE_OPTIONS: "--max-old-space-size=512"
