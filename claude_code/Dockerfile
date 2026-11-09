@@ -380,6 +380,7 @@ CMD ["/bin/bash", "-c", "\
   if [ \"$AUTO_UPDATE\" = \"true\" ]; then \
     UPDATE_LOG=/tmp/claude-update.log; \
     echo \"[INFO] Updating Claude Code in background (timeout ${UPDATE_TIMEOUT}s)...\"; \
+    touch /tmp/claude-update.running; \
     ( echo \"--- $(date -u +%Y-%m-%dT%H:%M:%SZ) starting npm install -g @anthropic-ai/claude-code@latest (timeout ${UPDATE_TIMEOUT}s) ---\" >> \"$UPDATE_LOG\"; \
       if timeout \"$UPDATE_TIMEOUT\" npm install -g @anthropic-ai/claude-code@latest >> \"$UPDATE_LOG\" 2>&1; then \
         echo '[INFO] Claude Code update finished'; \
@@ -387,7 +388,8 @@ CMD ["/bin/bash", "-c", "\
         rc=$?; \
         echo \"[WARN] Claude Code update failed/timed out (exit $rc, see $UPDATE_LOG). Last lines:\"; \
         tail -n 10 \"$UPDATE_LOG\" 2>/dev/null | sed 's/^/  | /'; \
-      fi ) & \
+      fi; \
+      rm -f /tmp/claude-update.running ) & \
   else \
     echo '[INFO] auto_update_claude disabled - skipping update'; \
   fi; \
