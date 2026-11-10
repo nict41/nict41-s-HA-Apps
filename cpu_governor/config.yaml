@@ -1,10 +1,7 @@
 name: "CPU Performance Governor"
 version: "1.0.1"
 slug: "cpu_governor"
-description: >-
-  Sets the host CPU cpufreq scaling governor (default performance) so
-  CPU-bound jobs get full clock speed instead of being held down by the
-  powersave default. Re-applies automatically on every host boot.
+description: "Sets the host CPU's scaling governor (performance by default) and re-applies it on every boot"
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/cpu_governor
 arch:
   - amd64

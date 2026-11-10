@@ -1,4 +1,4 @@
-# Home Assistant App: Pingvin Share
+# Pingvin Share
 
 ![Pingvin Share logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/pingvin_share/logo.png)
 
@@ -45,7 +45,7 @@ Two settings matter once the app is reachable at a real public URL:
   limits) are recorded correctly instead of showing the tunnel's own
   address.
 - **App URL & Secure Cookies** (in the app's own **Admin → Settings →
-  General**, not an add-on option): set **App URL** to your real public
+  General**, not an app option): set **App URL** to your real public
   address (e.g. `https://share.yourdomain.com`) - share links are
   generated from it - and enable **Secure Cookies** since the tunnel
   serves the site over real HTTPS. Both default to plain
@@ -72,7 +72,7 @@ sign-ups.
 
 Everything app-level - the parts an end user would think of as "configuring
 Pingvin Share" - is managed from **Admin → Settings** inside the app itself
-once you've signed in, not from add-on options:
+once you've signed in, not from app options:
 
 - **General**: app name, App URL, secure cookies, session duration, home
   page visibility.

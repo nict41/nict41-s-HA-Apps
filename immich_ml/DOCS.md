@@ -1,4 +1,4 @@
-# Home Assistant App: Immich Machine Learning (OpenVINO)
+# Immich Machine Learning (OpenVINO)
 
 ![Immich Machine Learning logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/immich_ml/logo.png)
 

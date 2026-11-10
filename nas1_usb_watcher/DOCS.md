@@ -1,4 +1,4 @@
-# Home Assistant App: NAS1 USB Link Watcher
+# NAS1 USB Link Watcher
 
 ![NAS1 USB Link Watcher logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/nas1_usb_watcher/logo.png)
 
@@ -25,7 +25,7 @@ Supervisor's NAS backup mount, so each silent drop had been cascading into
 downstream breakage (Immich reimport loops, failed backups) that had to be
 cleaned up after the fact. Recovery today is manual - nudge the connector,
 restart Samba - but there was **no visibility** into when a drop happened or
-how long it lasted. This add-on provides exactly that visibility.
+how long it lasted. This app provides exactly that visibility.
 
 ## What it produces
 
@@ -46,7 +46,7 @@ how long it lasted. This add-on provides exactly that visibility.
 | Attributes | `watcher/nas1_usb/attributes` | `{"last_change":"<UTC ISO8601>"}` (retained) |
 
 These topics and the `unique_id` (`nas1_usb_link`) are **identical to the
-original hand-created watcher's**, so this add-on takes over the *same*
+original hand-created watcher's**, so this app takes over the *same*
 entity rather than creating a duplicate.
 
 ### The automation it feeds
@@ -54,7 +54,7 @@ entity rather than creating a duplicate.
 An existing automation in `automations.yaml` (id `1785000000001`, alias
 **"NAS1 USB Link Change"**) triggers on this entity's state changes and
 notifies `notify.mobile_app_oneplus_10_pro` with the drop / recovery time.
-Because this add-on preserves the entity_id, that automation keeps working
+Because this app preserves the entity_id, that automation keeps working
 unchanged - no edit needed.
 
 ## How it works (and why it's *not* privileged like cpu_governor)
@@ -66,16 +66,16 @@ device is enumerated (**connected**); absent = it dropped off the bus
 
 This is a **read-only** sysfs check, which is a fundamentally lighter ask
 than [`cpu_governor`](../cpu_governor), which needed to *write* to `/sys` -
-something Supervisor add-ons can't do even with `full_access` +
-`privileged:` caps, forcing that add-on into a real `--privileged --pid=host`
+something Supervisor apps can't do even with `full_access` +
+`privileged:` caps, forcing that app into a real `--privileged --pid=host`
 Docker sidecar. Reading whether a sysfs directory exists needs none of that:
-no sidecar, no `--pid=host`, no `docker_api`. This add-on sets only
+no sidecar, no `--pid=host`, no `docker_api`. This app sets only
 `full_access: true`, which is enough to make the host USB subsystem visible
 under `/sys` inside the container. (It deliberately does **not** set
 `host_pid`, which would break the s6-overlay base image's PID-1 init - see
 `cpu_governor`'s notes.)
 
-If the add-on genuinely can't see the USB subsystem at all
+If the app genuinely can't see the USB subsystem at all
 (`/sys/bus/usb/devices` missing or empty), it refuses to start rather than
 publish a permanent false "disconnected" - and the log tells you the plain
 `full_access` approach wasn't sufficient on your host, at which point the
@@ -94,13 +94,13 @@ this install the plain approach is expected to be enough.
 The broker host, port, username and password are injected by Supervisor via
 `services: [mqtt:want]` and read with `bashio::services mqtt ...` - **no
 password is hardcoded** (unlike the original hand-rolled container). You need
-the **Mosquitto broker** add-on installed and the MQTT integration set up;
-if no broker is available when this add-on starts it waits briefly, then
+the **Mosquitto broker** app installed and the MQTT integration set up;
+if no broker is available when this app starts it waits briefly, then
 exits with a clear message so Supervisor surfaces the problem.
 
 ## Verifying end-to-end
 
-1. Start the add-on and watch its log. You should see:
+1. Start the app and watch its log. You should see:
    ```
    Watching NAS1 USB port 2-1 (/sys/bus/usb/devices/2-1) every 5s.
    Published MQTT discovery config to homeassistant/binary_sensor/nas1_usb_link/config.
@@ -117,7 +117,7 @@ exits with a clear message so Supervisor surfaces the problem.
 ### The real test: a full host reboot
 
 The point of `boot: auto` is that this survives a host reboot, not just an
-add-on restart. After it's working, **reboot the HA host**
+app restart. After it's working, **reboot the HA host**
 (**Settings → System → Hardware → power menu → Reboot Host**, or
 `ha host reboot`), wait for it to come back, and confirm:
 
@@ -129,7 +129,7 @@ add-on restart. After it's working, **reboot the HA host**
 See the [repository README](https://github.com/nict41/nict41-s-HA-Apps) to
 add this repository to Home Assistant, then install **NAS1 USB Link
 Watcher** from the app store and leave `boot: auto` on. You'll also need the
-Mosquitto broker add-on for MQTT.
+Mosquitto broker app for MQTT.
 
 ## Notes & caveats
 

@@ -32,7 +32,7 @@ space it can see on the share, but it can't stop you filling the share with
 several archives over time.
 
 Downloads are resumable and restartable: an interrupted transfer keeps its
-`.part` file and picks up where it left off, including after the add-on is
+`.part` file and picks up where it left off, including after the app is
 updated or Home Assistant reboots. A 124 GB download surviving a restart is
 normal rather than a disaster - nothing needs re-fetching but the last few
 seconds.
@@ -119,8 +119,8 @@ changes take effect immediately, without restarting anything.
 ## Download speed and scheduling
 
 The gear icon in the header opens **Settings**. Everything there applies
-immediately, including to transfers already running - unlike the add-on
-options below it, saving which restarts the add-on and interrupts them.
+immediately, including to transfers already running - unlike the app
+options below it, saving which restarts the app and interrupts them.
 
 | Setting | What it does |
 |---|---|
@@ -148,7 +148,7 @@ the rest of the panel.
 Because kiwix-serve writes absolute links into the pages it serves, it is
 started with Home Assistant's ingress path as its URL root
 (`--urlRootLocation`), which is also why the reader only works from the
-sidebar and not over the add-on's optional direct port. Which archives are
+sidebar and not over the app's optional direct port. Which archives are
 served is materialised as a kiwix library XML file that kiwix-serve watches
 (`--monitorLibrary`), so serving and un-serving take effect without a
 restart.
@@ -175,7 +175,7 @@ selection, and recovers on its own once the share is back — check
 Start the same archive again from **Browse & download** and it resumes from
 where it stopped rather than starting over.
 
-**"is not writable by the add-on".** The share is mounted read-only, or the
+**"is not writable by the app".** The share is mounted read-only, or the
 credentials it is mounted with don't have write permission on that folder.
 
 **The reader is empty.** Nothing is selected to serve — use **Serve** on an

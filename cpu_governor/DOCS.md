@@ -1,4 +1,4 @@
-# Home Assistant App: CPU Performance Governor
+# CPU Performance Governor
 
 ![CPU Performance Governor logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/cpu_governor/logo.png)
 
@@ -23,17 +23,17 @@ headroom back, and finishes those jobs measurably faster.
 
 ## The privilege caveat (read this before "improving" the design)
 
-The obvious design - a normal add-on that just writes
+The obvious design - a normal app that just writes
 `/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor` itself - **does not
 work on this HA install**, and it's worth writing down why so it doesn't get
 rediscovered the hard way:
 
-- A regular Supervisor add-on, **even with `full_access: true` and
+- A regular Supervisor app, **even with `full_access: true` and
   `privileged: [SYS_ADMIN, SYS_RAWIO, SYS_RESOURCE, SYS_MODULE]` declared**
-  (this repo's Samba NAS add-on's actual config), still gets
+  (this repo's Samba NAS app's actual config), still gets
   `/sys/devices/system/cpu/...` mounted **read-only**. Writing
   `scaling_governor` from inside it fails with `Read-only file system`.
-- Supervisor's add-on privilege model is **not** a 1:1 mapping to Docker's
+- Supervisor's app privilege model is **not** a 1:1 mapping to Docker's
   real `--privileged` flag. Real `--privileged` also remounts `/sys`
   read-write and drops the capability/AppArmor restrictions; declaring
   `privileged:` capabilities and `full_access: true` in `config.yaml` is
@@ -58,24 +58,24 @@ docker run -d \
 `scaling_governor`, and `--restart unless-stopped` re-applies it on every
 Docker daemon start (i.e. every host boot).
 
-## How this add-on works
+## How this app works
 
-Rather than assume, the add-on **tries both at runtime on the actual host**
+Rather than assume, the app **tries both at runtime on the actual host**
 and reports which path it took in its log:
 
 1. **Strategy A - direct write.** It declares `full_access: true` and
    `privileged: [SYS_ADMIN, SYS_RAWIO, SYS_RESOURCE, SYS_MODULE]`, then
    tries to write `scaling_governor` for every core and read it back. If a
    (future) Supervisor ever grants a writable `/sys`, this succeeds and
-   **no sidecar is used** - the add-on just sets the value and idles. On
+   **no sidecar is used** - the app just sets the value and idles. On
    this install it fails (read-only `/sys`, as above) and it moves on.
 2. **Strategy B - privileged sidecar (the path that actually runs here).**
-   With `docker_api: true` for host Docker API access, the add-on becomes
+   With `docker_api: true` for host Docker API access, the app becomes
    the versioned, documented **owner** of exactly the sidecar container
    shown above. On every start it force-removes any existing
    `cpu-governor-performance` container and recreates it, baking in the
    configured `governor`. The actual privilege escalation still happens one
-   level down, in a container the add-on spawns - which is the only place
+   level down, in a container the app spawns - which is the only place
    Docker's real `--privileged`/`--pid=host` semantics are available.
 
 Either way the result is the same: all cores get the requested governor,
@@ -84,9 +84,9 @@ and it survives reboots.
 ### Idempotency
 
 The sidecar is always `docker rm -f`'d and recreated on start, so
-restarting or reinstalling the add-on never leaves duplicate containers
+restarting or reinstalling the app never leaves duplicate containers
 behind. The sidecar reuses the name `cpu-governor-performance`, so
-installing this add-on **cleanly adopts/replaces** any hand-created
+installing this app **cleanly adopts/replaces** any hand-created
 container of that name - there's never a moment with two of them fighting
 over the governor.
 
@@ -98,7 +98,7 @@ over the governor.
 
 ## Verifying it worked
 
-Watch the add-on's log on start. On this host you'll see the fallback path:
+Watch the app's log on start. On this host you'll see the fallback path:
 
 ```
 Requested CPU scaling governor: performance
@@ -108,11 +108,11 @@ Sidecar 'cpu-governor-performance' started.
 cpu0 scaling_governor now reads: performance (target: performance)
 ```
 
-`/sys` is readable (just not writable) from the add-on, so the
+`/sys` is readable (just not writable) from the app, so the
 `cpu0 scaling_governor now reads: performance` line is a real confirmation
 the governor actually changed on the host.
 
-To confirm from the host directly (SSH / Terminal add-on):
+To confirm from the host directly (SSH / Terminal app):
 
 ```sh
 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor   # every line: performance
@@ -122,22 +122,22 @@ grep MHz /proc/cpuinfo
 
 ### The real test: a full host reboot
 
-The point of this add-on is **persistence across a host reboot**, not just
-an add-on restart. After it's installed and running, actually reboot the HA
+The point of this app is **persistence across a host reboot**, not just
+an app restart. After it's installed and running, actually reboot the HA
 host (**Settings → System → Hardware → power menu → Reboot Host**, or
 `ha host reboot`), wait for it to come back, and re-check
 `scaling_governor`. It should read `performance` again with no manual
-action - restored by this add-on's `boot: auto` (and, as a backup, the
+action - restored by this app's `boot: auto` (and, as a backup, the
 sidecar's own `--restart unless-stopped`).
 
 ## Retiring the original hand-created container
 
 If you previously created the `cpu-governor-performance` container by hand
 (outside Supervisor), you don't need to remove it manually first - this
-add-on force-removes and recreates a container of that same name on its
+app force-removes and recreates a container of that same name on its
 first start, so it takes ownership automatically. Once you've confirmed the
 governor is still `performance` **after a full host reboot** with only this
-add-on managing it, there's nothing left to clean up. (If you'd made a
+app managing it, there's nothing left to clean up. (If you'd made a
 *differently* named hand-run container, remove that one once you're
 satisfied, to avoid two things doing the same job.)
 
@@ -150,21 +150,21 @@ every host boot.
 
 ## Notes & caveats
 
-- **This add-on is intentionally highly privileged** (`full_access`,
+- **This app is intentionally highly privileged** (`full_access`,
   `docker_api`). That's inherent to changing a host-level kernel setting
   from within a container; it's why it lives in a personal repo and not a
   public one.
-- **Do not add `host_pid: true` to this add-on.** It seems like it should
+- **Do not add `host_pid: true` to this app.** It seems like it should
   help the direct-write path, but it doesn't (a writable `/sys` needs real
   `--privileged`, which remounts `/sys` read-write - sharing the host PID
   namespace does nothing for that), and it actively **breaks boot**: this
-  add-on runs on the s6-overlay HA base image, whose init must be PID 1, and
+  app runs on the s6-overlay HA base image, whose init must be PID 1, and
   sharing the host PID namespace makes that impossible. The symptom is the
   container dying immediately with `s6-overlay-suexec: fatal: can only run
   as pid 1`. The `--pid=host` the fix genuinely needs is applied to the
   sidecar container instead, which is a plain Alpine image with no s6.
-- `docker_api: true` gives the add-on access to the **host Docker socket**.
-  The add-on only uses it to manage the single `cpu-governor-performance`
+- `docker_api: true` gives the app access to the **host Docker socket**.
+  The app only uses it to manage the single `cpu-governor-performance`
   sidecar, but be aware that access is broad by nature.
 - The available governors depend on the host's cpufreq **driver**
   (`intel_pstate` on the N100 exposes `performance` and `powersave`; the

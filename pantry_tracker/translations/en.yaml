@@ -26,3 +26,8 @@ configuration:
   vision_model:
     name: Vision model name
     description: The model to use for reading use-by dates from photos, e.g. glm-ocr:latest.
+  notify_hour:
+    name: Daily summary hour
+    description: >-
+      Hour of the day (0-23, in the app's time zone) to send the daily summary
+      notification. Can also be changed later from the app's own Settings tab.

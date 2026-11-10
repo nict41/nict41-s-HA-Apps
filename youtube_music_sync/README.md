@@ -1,4 +1,4 @@
-# Home Assistant App: YouTube Music Sync
+# YouTube Music Sync
 
 ![YouTube Music Sync logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/youtube_music_sync/logo.png)
 
@@ -13,7 +13,7 @@ doesn't gain a second copy of everything.
 Pulling tracks down by hand (with Seal on Android, say) works but doesn't
 scale: every new addition to a playlist is a manual round trip, and nothing
 stops the same song being saved twice under a slightly different name. This
-add-on does the same job on a schedule, writing straight into the music folder
+app does the same job on a schedule, writing straight into the music folder
 on the NAS, and refuses to re-add what's already there.
 
 ## What it does
@@ -87,7 +87,7 @@ Three further safeguards:
 - Attributes on the first and last of those carry the recent download list, a
   breakdown of why things were skipped, and last-cycle counts.
 
-MQTT is optional - without a broker the add-on still mirrors playlists, it just
+MQTT is optional - without a broker the app still mirrors playlists, it just
 has no sensors.
 
 ## First run is a dry run

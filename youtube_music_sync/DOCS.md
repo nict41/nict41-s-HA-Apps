@@ -1,4 +1,4 @@
-# YouTube Music Sync - configuration
+# YouTube Music Sync
 
 ![YouTube Music Sync logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/youtube_music_sync/logo.png)
 
@@ -10,7 +10,7 @@ works and why the defaults are what they are.
 
 ### 1. Point `music_dir` at the right folder
 
-The add-on can only write below `/media` or `/share`, which is where Home
+The app can only write below `/media` or `/share`, which is where Home
 Assistant surfaces network storage:
 
 - A mount added under **Settings > System > Storage** with usage **Media**
@@ -18,7 +18,7 @@ Assistant surfaces network storage:
 - One added with usage **Share** appears as `/share/<mount name>`.
 
 So a NAS share called `nas1` holding a `Music` folder is
-`/media/nas1/Music`. If a path is wrong, the add-on says so in the log and
+`/media/nas1/Music`. If a path is wrong, the app says so in the log and
 downloads nothing rather than writing into the container (where files would be
 lost on the next update).
 
@@ -34,7 +34,7 @@ Public or unlisted playlists. The same track on two of them is downloaded once.
 
 ### 3. Run the first cycle as a dry run
 
-`dry_run` is **true** out of the box. Start the add-on, watch the log, and
+`dry_run` is **true** out of the box. Start the app, watch the log, and
 check the decisions:
 
 ```
@@ -141,7 +141,7 @@ automation:
 ## Troubleshooting
 
 **"music_dir ... is not there."**
-The mount isn't present. Check **Settings > System > Storage**; the add-on sees
+The mount isn't present. Check **Settings > System > Storage**; the app sees
 media mounts as `/media/<name>` and share mounts as `/share/<name>`. Nothing is
 downloaded until the path exists - deliberately, so a dropped NAS doesn't cause
 a re-download of the whole playlist into the container.
@@ -177,7 +177,7 @@ Every start now logs the configuration in force, as an `Options:` line from
 the startup script and a `Library: ... | dry_run: ... | aria2c: ...` line from
 the app, followed by each playlist URL. Compare those against the
 Configuration tab. If they disagree, the options were not read - which the
-add-on now refuses to start on, rather than running with its own defaults.
+app now refuses to start on, rather than running with its own defaults.
 Before 0.1.1 that substitution was silent, and showed up as `use_aria2c`
 turning itself off, playlists going missing, or a cycle quietly doing nothing
 because `dry_run` had reverted to true.
@@ -206,7 +206,7 @@ Downloading 7/60: Augustus Pablo - THE HEAVIEST DUBS
 ```
 
 If the percentage is climbing it is working, however long it takes. If it
-stops climbing, the transfer has stalled rather than the add-on.
+stops climbing, the transfer has stalled rather than the app.
 
 Note that the timeout covers the *whole* job, not just the transfer. A long
 mix spends most of its time in ffmpeg - extracting audio, trimming
@@ -217,7 +217,7 @@ cycle for ever. If a very long track still times out, raise
 `download_timeout_minutes`.
 
 **Starting over**
-Delete the add-on's `/data/state.db` (uninstall/reinstall) to clear the
+Delete the app's `/data/state.db` (uninstall/reinstall) to clear the
 download history and library cache. Files already in the library are untouched
 and will simply be re-recognised on the next scan.
 

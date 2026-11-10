@@ -1,0 +1,9 @@
+---
+configuration:
+  log_level:
+    name: Log level
+    description: >-
+      How much detail the app writes to its log. One of trace, debug, info,
+      warning, error or fatal.
+network:
+  8099/tcp: Glance web interface (optional direct access)

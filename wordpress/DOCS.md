@@ -1,4 +1,4 @@
-# Home Assistant App: WordPress
+# WordPress
 
 ![WordPress logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/wordpress/logo.png)
 

@@ -1,62 +1,23 @@
-# Glance Dashboard for Home Assistant
+# Glance Dashboard
 
-![Glance logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/glance/logo.png)
+![Glance Dashboard logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/glance/logo.png)
 
-A self-hosted dashboard that puts all your feeds in one place, running as a
-Home Assistant app.
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+![Supports armv7 Architecture][armv7-shield]
 
-[Glance](https://github.com/glanceapp/glance) supports RSS feeds, weather,
-bookmarks, calendars, Hacker News, stocks, Twitch, YouTube, Reddit, and many
-more widget types.
+[Glance](https://github.com/glanceapp/glance), a fast, lightweight self-hosted dashboard that puts all your feeds in one place, in the Home Assistant sidebar.
 
-## Configuration
+## Features
 
-On first start the app creates a default `glance.yml` configuration file.
-You can edit this file to customize your dashboard.
+- RSS, weather, bookmarks, calendars, Hacker News, stocks, Twitch, YouTube, Reddit and more
+- Opens in the sidebar through ingress, with no extra ports to expose
+- Configuration lives in `glance/glance.yml` in your Home Assistant config folder, created on first start
 
-### Finding the configuration file
+## Documentation
 
-The configuration file lives in your main HA config folder alongside
-`configuration.yaml`. You can access it through:
+Setup, options and troubleshooting are in the app's **Documentation** tab in Home Assistant, or in [DOCS.md](DOCS.md).
 
-- **File Editor app** — open `glance/glance.yml` from the root of your config
-- **Samba share** — the file is at `config/glance/glance.yml`
-- **SSH** — the file is at `/config/glance/glance.yml`
-
-### Configuration reference
-
-Refer to the upstream Glance documentation for the full list of widgets and
-options:
-
-<https://github.com/glanceapp/glance/blob/main/docs/configuration.md>
-
-### Environment variable substitution
-
-Glance supports `${VAR_NAME}` syntax in its configuration file. The app
-automatically sets `GLANCE_BASE_URL` for ingress support. You can reference
-any other environment variable in your configuration.
-
-## Options
-
-| Option | Default | Description |
-|---|---|---|
-| `log_level` | `info` | App log verbosity. One of `trace`, `debug`, `info`, `warning`, `error`, `fatal`. |
-
-## Ingress
-
-The app supports Home Assistant ingress, which means it appears in your
-sidebar and you can access it without exposing any ports. This is enabled by
-default.
-
-If you prefer direct access, you can map port 8099 to a host port in the
-app's network configuration.
-
-## Updating the dashboard
-
-After editing `glance/glance.yml`, restart the Glance app to apply changes.
-
-## Installation
-
-See the [repository README](https://github.com/nict41/nict41-s-HA-Apps)
-to add this repository to Home Assistant, then install **Glance
-Dashboard** from the app store.
+[aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
+[amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
+[armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg

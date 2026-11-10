@@ -1,10 +1,7 @@
 name: Glance Dashboard
 version: 0.2.5
 slug: glance
-description: >-
-  A self-hosted dashboard that puts all your feeds in one place.
-  Glance is a fast, lightweight dashboard with support for RSS, weather,
-  bookmarks, calendars, stocks, Twitch, YouTube, Reddit, and more.
+description: "Glance, a fast self-hosted dashboard for RSS, weather, calendars, stocks and more, in your sidebar"
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/glance
 arch:
   - amd64

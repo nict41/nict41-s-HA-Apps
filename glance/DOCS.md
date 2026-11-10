@@ -1,4 +1,4 @@
-# Glance Dashboard for Home Assistant
+# Glance Dashboard
 
 ![Glance logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/glance/logo.png)
 
