@@ -3,15 +3,15 @@
 #
 # Build from the kiwix/ directory so the shared app code is in context:
 #     docker build -f kiwix/docker/Dockerfile -t kiwix-manager kiwix
+# kiwix-serve and kiwix-manage come from Kiwix's official multi-arch image on
+# GHCR (the same static binaries as their download.kiwix.org tarballs, which
+# are served by a mirror that manages only tens of KB/s). Pinned by digest;
+# to upgrade, change the tag and digest here and in ../Dockerfile.
+FROM ghcr.io/kiwix/kiwix-tools:3.8.2@sha256:2914a200ff64e0861c82733010eb7583d17334dde4d7248b9d9aa7b2f7b5a36d AS kiwix-tools
+
 FROM alpine:3.23
 
-# kiwix-tools ships fully static Linux builds, so kiwix-serve/kiwix-manage
-# drop straight onto Alpine with no runtime libraries to match. TARGETARCH is
-# filled in by buildx (amd64 / arm64).
-ARG TARGETARCH
-ARG KIWIX_TOOLS_VERSION=3.8.2
-
-COPY fetch-kiwix-tools.sh /tmp/fetch-kiwix-tools.sh
+COPY --from=kiwix-tools /usr/local/bin/kiwix-serve /usr/local/bin/kiwix-manage /usr/bin/
 RUN apk add --no-cache \
         python3 \
         py3-pip \
@@ -19,13 +19,7 @@ RUN apk add --no-cache \
         su-exec \
         shadow \
         wget \
-    && case "${TARGETARCH:-amd64}" in \
-        amd64) KIWIX_ARCH="x86_64" ;; \
-        arm64) KIWIX_ARCH="aarch64" ;; \
-        *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
-    && sh /tmp/fetch-kiwix-tools.sh "${KIWIX_TOOLS_VERSION}" "${KIWIX_ARCH}" \
-    && rm /tmp/fetch-kiwix-tools.sh
+    && kiwix-serve --version
 
 COPY app/requirements.txt /app/requirements.txt
 # --break-system-packages: Alpine's python3 marks itself "externally managed"

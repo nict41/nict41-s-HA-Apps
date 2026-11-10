@@ -2,11 +2,11 @@
 
 ## 0.2.3
 
-- **Much faster installs and updates.** kiwix-tools now downloads from a copy
-  attached to this repo's GitHub releases instead of Kiwix's download mirror,
-  which manages only tens of KB/s and made each build take 15-30 minutes.
-  Kiwix's own server is still used if the copy can't be reached.
-- The download is now checked against a pinned SHA-256 checksum.
+- **Much faster installs and updates.** kiwix-serve and kiwix-manage now come
+  from Kiwix's official image on GitHub's container registry instead of the
+  download.kiwix.org tarball. Its mirror manages only tens of KB/s, which made
+  each build take 15-30 minutes and sometimes fail. The binaries are
+  byte-for-byte the same, and the image is pinned by digest.
 - No change to the app's behaviour.
 
 ## 0.2.2

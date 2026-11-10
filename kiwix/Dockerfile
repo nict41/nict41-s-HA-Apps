@@ -1,22 +1,18 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/base:3.23
+
+# kiwix-serve and kiwix-manage come from Kiwix's official multi-arch image on
+# GHCR (the same static binaries as their download.kiwix.org tarballs, which
+# are served by a mirror that manages only tens of KB/s). Pinned by digest;
+# to upgrade, change the tag and digest here and in docker/Dockerfile.
+FROM ghcr.io/kiwix/kiwix-tools:3.8.2@sha256:2914a200ff64e0861c82733010eb7583d17334dde4d7248b9d9aa7b2f7b5a36d AS kiwix-tools
+
 FROM ${BUILD_FROM}
 
-# kiwix-tools ships fully static Linux builds, so kiwix-serve/kiwix-manage
-# drop straight onto the Alpine base with no runtime libraries to match.
-ARG BUILD_ARCH=amd64
-ARG KIWIX_TOOLS_VERSION=3.8.2
-
-COPY fetch-kiwix-tools.sh /tmp/fetch-kiwix-tools.sh
+COPY --from=kiwix-tools /usr/local/bin/kiwix-serve /usr/local/bin/kiwix-manage /usr/bin/
 RUN apk add --no-cache \
         python3 \
         py3-pip \
-    && case "${BUILD_ARCH}" in \
-        amd64) KIWIX_ARCH="x86_64" ;; \
-        aarch64) KIWIX_ARCH="aarch64" ;; \
-        *) echo "Unsupported architecture: ${BUILD_ARCH}" >&2; exit 1 ;; \
-    esac \
-    && sh /tmp/fetch-kiwix-tools.sh "${KIWIX_TOOLS_VERSION}" "${KIWIX_ARCH}" \
-    && rm /tmp/fetch-kiwix-tools.sh
+    && kiwix-serve --version
 
 COPY app/requirements.txt /app/requirements.txt
 # --break-system-packages: Alpine's python3 marks itself "externally managed"
