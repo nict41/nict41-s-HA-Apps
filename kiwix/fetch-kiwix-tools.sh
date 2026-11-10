@@ -34,10 +34,18 @@ copy="https://github.com/nict41/nict41-s-HA-Apps/releases/download/kiwix-tools-$
 fetch() {  # fetch URL FILE -> 0 if downloaded and the checksum matches
     echo "Downloading ${1}"
     rm -f "${2}"
-    if ! wget -q -T 60 -O "${2}" "${1}"; then
-        echo "Download failed: ${1}" >&2
-        return 1
-    fi
+    # kiwix.org's mirror sometimes drops the connection part-way, so resume
+    # (-c) up to three times before giving up on this source.
+    tries=0
+    until wget -q -c -T 60 -O "${2}" "${1}"; do
+        tries=$((tries + 1))
+        if [ "${tries}" -ge 3 ]; then
+            echo "Download failed: ${1}" >&2
+            return 1
+        fi
+        echo "Retrying ${1}" >&2
+        sleep 5
+    done
     if ! echo "${sha256}  ${2}" | sha256sum -c - >/dev/null 2>&1; then
         echo "Checksum mismatch: ${1}" >&2
         return 1

@@ -10,7 +10,9 @@ name: Mirror kiwix-tools
 # by hand. Does nothing if the release already has both archives.
 on:
   push:
-    branches: [main]
+    # TEMPORARY: ci/kiwix-fast-builds creates the first release so PR #106's
+    # own builds can use it. Remove before merging.
+    branches: [main, ci/kiwix-fast-builds]
     paths:
       - "kiwix/fetch-kiwix-tools.sh"
       - ".github/workflows/kiwix-tools-mirror.yml"
