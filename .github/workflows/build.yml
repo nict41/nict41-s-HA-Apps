@@ -62,6 +62,12 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      # Exposes the Actions cache service to the plain `docker buildx` call
+      # below, so unchanged layers (base packages, downloads, pip installs)
+      # come from the cache instead of being rebuilt on every run. Pull
+      # requests read the cache main wrote; each app and arch has its own.
+      - uses: crazy-max/ghaction-github-runtime@v3
+
       # The same two build args the Supervisor passes when it builds an app
       # on the machine it's installed on, with BUILD_FROM taken from the
       # app's own build.yaml - so this proves the real install-time build.
@@ -74,4 +80,6 @@ jobs:
             --build-arg BUILD_FROM="${build_from}" \
             --build-arg BUILD_ARCH=${{ matrix.arch }} \
             --output type=cacheonly \
+            --cache-from type=gha,scope=${{ matrix.app }}-${{ matrix.arch }} \
+            --cache-to type=gha,mode=min,scope=${{ matrix.app }}-${{ matrix.arch }},ignore-error=true \
             "${{ matrix.app }}"

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- **Much faster installs and updates.** kiwix-serve and kiwix-manage now come
+  from Kiwix's official image on GitHub's container registry instead of the
+  download.kiwix.org tarball. Its mirror manages only tens of KB/s, which made
+  each build take 15-30 minutes and sometimes fail. The binaries are
+  byte-for-byte the same, and the image is pinned by digest.
+- No change to the app's behaviour.
+
 ## 0.2.2
 
 - **Standalone Docker image.** The same app now also ships as a plain
