@@ -62,3 +62,15 @@ configuration:
       alternative or addition to 17track. New parcels are registered with
       whichever configured provider has room first; each then sticks to that
       provider for future refreshes.
+  dismiss_unconfirmed_after_days:
+    name: Dismiss unconfirmed candidates after (days)
+    description: >-
+      Auto-dismiss a candidate this many days after a tracking provider first
+      checks it without confirming it is a real tracking number. 0 disables.
+      Only applies when a tracking provider is configured.
+  provider_refresh_minutes:
+    name: Minimum minutes between provider refreshes
+    description: >-
+      On scheduled checks, skip re-querying a parcel's tracking provider until
+      this many minutes have passed, to save provider quota. "Check mail now"
+      always refreshes everything. 0 refreshes on every check.

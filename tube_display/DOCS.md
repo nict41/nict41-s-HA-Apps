@@ -1,4 +1,4 @@
-# Tube Display — full reference
+# Tube Display
 
 Renders Home Assistant information into pictures and pushes them to an IPSTube
 clock (six 135x240 colour IPS displays in a row, ESP32, custom firmware) that
@@ -109,7 +109,7 @@ template mode and are left exactly as written unless you change them.
 
 ### How it works
 
-The add-on registers an ingress panel **Tube Display** (`mdi:television-guide`)
+The app registers an ingress panel **Tube Display** (`mdi:television-guide`)
 in the Home Assistant sidebar. It is served by a second HTTP site on
 `0.0.0.0:8099` (not published in `ports:`) that only accepts requests coming
 from the ingress proxy (`172.30.32.2`); anything else gets `403`. Ingress
@@ -145,11 +145,11 @@ The 8098 API above is unchanged and has no write routes.
 
 - `POST http://<clock>/panel?tube=N` with raw RGB565 big-endian body
   (w*h*2 bytes, default full tube 135x240). Tubes 0..5 left to right.
-- The add-on keeps the last bytes sent per tube and only POSTs tubes whose
+- The app keeps the last bytes sent per tube and only POSTs tubes whose
   bytes changed (hash), plus any tube in the clock's `panels_needed` bitmask
   (from `clock/<id>/volatile/state` over MQTT) — those are re-sent
   immediately, even if unchanged (e.g. after the screen saver).
-- When a screen becomes active the add-on publishes `display=4` to
+- When a screen becomes active the app publishes `display=4` to
   `clock/<id>/set/display` (unless the clock's state already says `display: 4`),
   then sends all six tubes. When the rotation reaches `clock`, it publishes
   `display=0` and stops sending.
@@ -164,7 +164,7 @@ The 8098 API above is unchanged and has no write routes.
 
 ## HTTP API (port 8098)
 
-The add-on listens on `0.0.0.0:8098` inside the container, published to the
+The app listens on `0.0.0.0:8098` inside the container, published to the
 host on port 8098.
 
 | Endpoint | Description |
@@ -187,7 +187,7 @@ rest_command:
     payload: '{"screen": "doorbell", "seconds": 30}'
 ```
 
-`<addon-hostname>` is the add-on's internal hostname, `{REPO_HASH}-tube-display`
+`<addon-hostname>` is the app's internal hostname, `{REPO_HASH}-tube-display`
 (for this repository the hash is `beb500c8`, so `beb500c8-tube-display`; from
 the LAN you can also use the host's IP with the published port 8098).
 
@@ -207,7 +207,7 @@ automation:
 ## MQTT entities (device "Tube Display")
 
 Published via MQTT discovery, using the broker credentials the Supervisor
-injects (no passwords in the add-on):
+injects (no passwords in the app):
 
 - **select "Tube Display Screen"** — options: `Rotate`, `Clock`, plus every
   screen name. Selecting a screen pins it until `Rotate` is chosen again;
@@ -215,7 +215,7 @@ injects (no passwords in the add-on):
 - **switch "Tube Display Rotation"** — on/off; off pauses the rotation on the
   current screen.
 
-Discovery is republished when `screens.yaml` changes. The add-on also
+Discovery is republished when `screens.yaml` changes. The app also
 subscribes to `clock/<id>/volatile/state` (for `display`, `panel_tubes`,
 `panels_needed`) and publishes display-mode commands to
 `clock/<id>/set/display`.

@@ -185,10 +185,10 @@ clears that job's captured frames, never an archived GIF.
 
 ## Options
 
-These can be set either in the add-on **Configuration** tab (the values
+These can be set either in the app **Configuration** tab (the values
 below are the defaults) or, more conveniently, from the **Settings** page
 inside the app itself (the gear icon in the gallery header). In-app changes
-take effect on the next finished timelapse with no add-on restart, and
+take effect on the next finished timelapse with no app restart, and
 override the matching option below while set.
 
 | Option | Default | Description |

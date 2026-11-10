@@ -19,7 +19,7 @@ pictures on `POST /panel`); the stock time/date/weather firmware does not.
    Assistant config folder, which you can also edit by hand. Each screen is
    either six widgets — one per tube, left to right — or one 810x240 "strip"
    picture across all tubes.
-2. The add-on renders the active screen to an 810x240 image, converts it to
+2. The app renders the active screen to an 810x240 image, converts it to
    RGB565 and POSTs each 135x240 tube to `http://<clock>/panel?tube=N`.
    Only tubes whose picture changed are re-sent; tubes the clock reports as
    lost (`panels_needed` over MQTT, e.g. after the screen saver) are re-sent
@@ -43,7 +43,7 @@ button, the HTTP API, the MQTT entities and an example automation.
 - An IPSTube (or EleksTube-style) clock on the network running
   [HA Tubes](https://github.com/nict41/HA-Tubes) 2.3.0 or later, and its MQTT id
   (shown on the clock's Info and MQTT pages).
-- The MQTT broker service enabled in Home Assistant (the add-on uses the
-  broker the Supervisor injects; no credentials are stored in the add-on).
+- The MQTT broker service enabled in Home Assistant (the app uses the
+  broker the Supervisor injects; no credentials are stored in the app).
 - `homeassistant_api: true` (already set) so templates, history and camera
   snapshots can be fetched through the Supervisor.

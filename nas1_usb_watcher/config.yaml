@@ -1,11 +1,7 @@
 name: "NAS1 USB Link Watcher"
 version: "1.0.0"
 slug: "nas1_usb_watcher"
-description: >-
-  Watches the NAS1 external drive's USB port in sysfs and publishes a Home
-  Assistant binary_sensor over MQTT that goes to "problem" whenever the
-  drive's flaky USB data link drops, so drops and recoveries are visible
-  and can be notified on.
+description: "Flags a USB drive's dropped data link as an MQTT problem sensor, so drops can be seen and alerted on"
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/nas1_usb_watcher
 arch:
   - amd64

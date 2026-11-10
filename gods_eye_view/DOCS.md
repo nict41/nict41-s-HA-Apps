@@ -1,4 +1,4 @@
-# God's Eye View for Home Assistant
+# God's Eye View
 
 ![God's Eye View logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/gods_eye_view/logo.png)
 
@@ -91,7 +91,7 @@ metered.
 | `ll2_api_token` | Higher rate limits on rocket launch data | [Launch Library 2](https://thespacedevs.com) — optional |
 | `opensky_client_id` + `opensky_client_secret` | Higher-rate aircraft polling | [OpenSky](https://opensky-network.org) — free |
 | `extra_env` | Anything else upstream's `.env.example` documents | see below |
-| `client_diagnostics` | Browser-side errors and stalls in the add-on log (on by default) | — |
+| `client_diagnostics` | Browser-side errors and stalls in the app log (on by default) | — |
 | `auth_username` + `auth_password` | A login screen on the published port; leave empty to keep it open | — |
 | `auth_session_days` | How long a login lasts (default 7) | — |
 
@@ -164,7 +164,7 @@ the browser is importing. nginx restores those markers before proxying.
 
 And one more, added in 0.3.0. Upstream now checks three things on its
 cost-bearing routes — place search, voice, the AI HUD, Street Level — and the
-add-on failed all three by passing the request on as the client had made it:
+app failed all three by passing the request on as the client had made it:
 
 - **Forwarding headers.** `X-Forwarded-For`, `X-Real-IP`, `Via` and
   Cloudflare's `CF-Connecting-IP` among them, all read as proof a request came
@@ -189,7 +189,7 @@ Because the app runs with the ingress path as its `--base`, every document,
 module and asset request reaches the dev server under `/api/` — and middleware
 a plugin registers runs ahead of Vite's own, so the catch-all answered all of
 them before the prefix had been stripped. The whole app became that one error.
-The add-on therefore starts the dev server against a wrapper config that
+The app therefore starts the dev server against a wrapper config that
 replaces that plugin with one which steps aside for anything under the base.
 Real API calls reach it with the base already stripped, so they still get
 upstream's JSON 404.
@@ -225,7 +225,7 @@ machine you view it on needs the GPU, not the one running Home Assistant.
 ## When it will not load
 
 The globe runs in your browser, so a stall there used to leave nothing at all
-in the add-on log. It now reports what only the page can see. Open the add-on
+in the app log. It now reports what only the page can see. Open the app
 **Log** tab and look for `[client]` lines:
 
 ```
@@ -253,7 +253,7 @@ flat terrain on its own, each after roughly a 12-second timeout. So a splash
 that never clears is not explained by blocked map tiles alone.
 
 The log also prints a one-off reachability check at start, which tells you
-whether the add-on container itself can get out:
+whether the app container itself can get out:
 
 ```
 Reachability: Esri basemap OK (HTTP 200)

@@ -78,7 +78,7 @@ directly, another via a forwarding mailbox, and so on.
 
 ### 2. Configure the app
 
-Set the options below (**Settings → Add-ons → Parcel Tracker →
+Set the options below (**Settings → Apps → Parcel Tracker →
 Configuration**), then start the app.
 
 Under **Mailboxes**, add one entry per email account to scan:
@@ -100,6 +100,7 @@ The remaining options apply across all configured mailboxes:
 | `poll_interval_minutes` | `30` | How often to check mail and refresh status. Dashboard actions (confirm, archive, delete, etc.) update Home Assistant sensors immediately regardless of this interval. |
 | `auto_archive_after_days` | `14` | Auto-archive parcels this many days after delivery. `0` disables. |
 | `dismiss_unconfirmed_after_days` | `3` | Auto-dismiss a candidate this many days after a tracking provider first checks it without ever confirming it's a real number. `0` disables. Only applies when a tracking provider is configured. |
+| `provider_refresh_minutes` | `0` | Minimum minutes between tracking-provider refreshes of the same parcel on scheduled checks, to save provider quota when mail is checked often. **Check mail now** always refreshes everything. `0` refreshes on every check. |
 | `trusted_senders` | _(blank)_ | Comma-separated extra sender domains to treat as high-confidence retailers. |
 | `ignore_senders` | _(blank)_ | Comma-separated sender domains to skip entirely. |
 | `allowed_senders` | _(blank)_ | Comma-separated sender domains to scan exclusively - everything else is excluded before it's even fetched, speeding up mail checks. Leave blank to scan every sender. |
@@ -205,22 +206,22 @@ section's header) to collapse or expand that section's cards. The choice is
 remembered per browser.
 
 The **gear icon** in the header opens a **Settings** page for the
-operational knobs you'd otherwise have to change in the add-on
+operational knobs you'd otherwise have to change in the app
 configuration (and restart for):
 
 - **Check email every** - how often mailboxes are scanned and tracking is
-  refreshed. Applied immediately, without an add-on restart.
+  refreshed. Applied immediately, without an app restart.
 - **Refresh tracking status no more than every** - caps how often each
   parcel is re-queried from the tracking provider, to conserve API quota,
   independently of how often mail is checked. `0` means refresh on every
   check.
 - **Scan emails from the last** - how far back each mail check looks.
 - **Only scan / Trusted / Ignored sender domains** - the same sender-list
-  controls as the add-on options.
+  controls as the app options.
 - **Auto-archive** and **auto-dismiss** timings.
 
-These override the matching add-on options while set. Mailbox accounts and
-tracking-provider API keys stay in the add-on configuration (the managed,
+These override the matching app options while set. Mailbox accounts and
+tracking-provider API keys stay in the app configuration (the managed,
 secret store) and are not editable from here.
 
 A **Data management** menu near the top of the dashboard lets you export
@@ -230,11 +231,11 @@ can't be undone.
 
 ## Home Assistant entities
 
-With no extra setup beyond installing the add-on, your parcels are also
-exposed as Home Assistant sensor entities - using the add-on's own
+With no extra setup beyond installing the app, your parcels are also
+exposed as Home Assistant sensor entities - using the app's own
 Supervisor-granted access to the Home Assistant API, so no MQTT setup or
 extra credentials are needed. If you're upgrading from an older version,
-restart the add-on once so this new permission takes effect.
+restart the app once so this new permission takes effect.
 
 - `sensor.parcel_tracker_summary` - state is the number of currently
   tracked parcels (everything except archived/dismissed). Attributes
@@ -270,20 +271,20 @@ scheduled check (governed by `poll_interval_minutes`) re-creates them.
 
 ## Lovelace card
 
-A companion dashboard card ships with the add-on. It reads the parcel
+A companion dashboard card ships with the app. It reads the parcel
 list from `sensor.parcel_tracker_summary` via the card's normal `hass`
 property.
 
 ### Recommended: serve from Home Assistant's own `/local/` path
 
-The add-on automatically copies the card's JavaScript file into Home
+The app automatically copies the card's JavaScript file into Home
 Assistant's `/config/www/` folder on startup (and again whenever it
 changes, on an upgrade), so it's reachable at a normal HA frontend URL -
 this works through whatever remote-access setup Home Assistant itself is
 reachable through (a Cloudflare Tunnel, Nabu Casa, etc.), not just the
-local network the add-on's own direct port is limited to.
+local network the app's own direct port is limited to.
 
-1. If you're upgrading from an older version, restart the add-on once so
+1. If you're upgrading from an older version, restart the app once so
    its newly-required `/config` write access takes effect.
 2. **Settings → Dashboards → Resources → Add resource**. URL:
    `/local/parcel-tracker-card.js`, resource type **JavaScript module**.
@@ -294,24 +295,24 @@ local network the add-on's own direct port is limited to.
    ```
 
 Because `/local/` is served by Home Assistant itself rather than the
-add-on, the card needs to be told where the add-on actually lives for its
+app, the card needs to be told where the app actually lives for its
 on-demand fetches (the Archived group and a row's full tracking history -
-see below). Add `api_base` pointing at the add-on's direct port:
+see below). Add `api_base` pointing at the app's direct port:
 ```yaml
 type: custom:parcel-tracker-card
 title: Parcels
 api_base: "http://<home-assistant-host-or-ip>:8000"
 ```
 
-### Fallback: the add-on's direct port
+### Fallback: the app's direct port
 
-If you'd rather not grant the add-on write access to `/config`, or just
-haven't restarted yet, the card is still served from the add-on's own
+If you'd rather not grant the app write access to `/config`, or just
+haven't restarted yet, the card is still served from the app's own
 direct port too, exactly as before (no `api_base` needed - this method
 only works on the local network, not through remote access):
 
-1. Make sure direct port access is enabled for the add-on (**Settings →
-   Add-ons → Parcel Tracker**, the port row next to `8000`).
+1. Make sure direct port access is enabled for the app (**Settings →
+   Apps → Parcel Tracker**, the port row next to `8000`).
 2. **Settings → Dashboards → Resources → Add resource**. URL:
    `http://<home-assistant-host-or-ip>:8000/static/parcel-tracker-card.js`,
    resource type **JavaScript module**.
@@ -323,7 +324,7 @@ sections (collapsed state persists per-browser), each row shows a
 progress stepper, carrier/ETA chips, and a confidence meter while
 unconfirmed, with a link out to each carrier's tracking page. Click a
 row to expand its full tracking history, fetched on demand from the
-add-on's own `/api/parcels` endpoint - the entity attribute only ever
+app's own `/api/parcels` endpoint - the entity attribute only ever
 carries each parcel's latest status, since a full per-event history for
 every parcel wouldn't fit within Home Assistant's attribute size limit.
 The Archived section is also sourced from `/api/parcels`, since archived

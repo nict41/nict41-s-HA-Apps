@@ -25,9 +25,9 @@ finished GIFs.
 
 The in-app **Help** page (the **?** icon in the gallery header) walks
 through all of this interactively, pre-filled with your own entity IDs, and
-can create the 3 automations in step 4 directly — using the add-on's own
+can create the 3 automations in step 4 directly — using the app's own
 Supervisor-granted Home Assistant API access, no extra credentials or
-integrations needed. Restart the add-on once after upgrading to this
+integrations needed. Restart the app once after upgrading to this
 version for that access to take effect. The steps below are the manual
 fallback (and step 3, the `rest_command:` block, is always a manual paste
 either way — Home Assistant has no API for creating those, only YAML).
@@ -192,10 +192,10 @@ clears that job's captured frames, never an archived GIF.
 
 ## Options
 
-These can be set either in the add-on **Configuration** tab (the values
+These can be set either in the app **Configuration** tab (the values
 below are the defaults) or, more conveniently, from the **Settings** page
 inside the app itself (the gear icon in the gallery header). In-app changes
-take effect on the next finished timelapse with no add-on restart, and
+take effect on the next finished timelapse with no app restart, and
 override the matching option below while set.
 
 | Option | Default | Description |

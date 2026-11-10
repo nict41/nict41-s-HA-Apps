@@ -1,4 +1,4 @@
-# ElegooSlicer for Home Assistant
+# ElegooSlicer
 
 ![ElegooSlicer logo](https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/elegoo_slicer/logo.png)
 
@@ -27,7 +27,7 @@ Upstream ships Linux as an AppImage only, pinned here at **v1.5.3.5**. Bump
 | `web_password` | Password for the web interface. **Empty means no login at all** — the base image treats an unset password as open access |
 | `resolution` | Starting desktop size, `WIDTHxHEIGHT`. Default `1440x900`. Mainly affects phones and tablets; a desktop browser resizes on connect |
 | `extra_folders` | Extra paths to offer in the slicer's file dialogs. `/share` and `/media` mounts are added automatically |
-| `slice_api_token` | Bearer token for the [slice API](#slice-api). Empty means any add-on on the Supervisor network may use it |
+| `slice_api_token` | Bearer token for the [slice API](#slice-api). Empty means any app on the Supervisor network may use it |
 
 The username and password apply to the **direct port only**. The sidebar is
 served by a separate listener that Home Assistant has already authenticated,
@@ -38,8 +38,8 @@ both empty unless you are mapping port 3000.
 
 Slicing without the desktop: a small HTTP service on port **8100** runs the
 slicer's command line with named presets and writes the G-code to `/share` or
-`/media`. It is reachable only from Home Assistant and other add-ons, as
-`http://beb500c8-elegoo-slicer:8100` (the hostname is on the add-on's Info
+`/media`. It is reachable only from Home Assistant and other apps, as
+`http://beb500c8-elegoo-slicer:8100` (the hostname is on the app's Info
 tab). The port is not published, so nothing on your LAN can reach it.
 
 | Request | Does |
@@ -126,7 +126,7 @@ the symptom; the unreachable socket is the cause.
 The client does accept an explicit path via its query string. That is how the
 base image supports reverse-proxy subfolders, but it expects a value fixed at
 build time and an ingress token is neither fixed nor knowable in advance. So
-the add-on runs its own listener on 8099 for ingress, which injects the right
+the app runs its own listener on 8099 for ingress, which injects the right
 path per request from the `X-Ingress-Path` header and proxies the socket
 through. The base image's own listener on 3000 is untouched and still serves
 direct access.
@@ -143,7 +143,7 @@ wider grant than anything else in this repository.
 
 ## Graphics
 
-3D rendering needs a GL stack. The add-on requests `/dev/dri`, so on an Intel
+3D rendering needs a GL stack. The app requests `/dev/dri`, so on an Intel
 or AMD iGPU it renders on the GPU; where no render node is available it falls
 back to software rendering, which works but is noticeably slower to orbit a
 large model. The log says which it picked at startup:
@@ -155,11 +155,11 @@ large model. The log says which it picked at startup:
 ## Where settings live
 
 Printer selection, presets and the file-dialog shortcuts are kept in the
-add-on's own config folder, which Home Assistant stores outside the container
+app's own config folder, which Home Assistant stores outside the container
 at `/addon_configs/<slug>_elegoo_slicer` and mounts at `/config` inside it.
 They survive restarts, updates and rebuilds.
 
-They are removed if you **uninstall** the add-on — uninstalling deletes that
+They are removed if you **uninstall** the app — uninstalling deletes that
 folder. Updating never does, so there is no reason to uninstall and reinstall
 to pick up a new version; it would only throw your configuration away.
 
@@ -175,13 +175,13 @@ its open and save dialogs are GTK file choosers, and every mount found under
 those dialogs, under its own name. A share called NAS1 appears as **NAS1**, one
 click from any open dialog.
 
-The add-on log says what it found:
+The app log says what it found:
 
 ```
 [elegoo]   file dialogs: added /media/NAS1
 ```
 
-If nothing is listed, the mount is not reaching the add-on — check it is
+If nothing is listed, the mount is not reaching the app — check it is
 attached in Settings → System → Storage, then restart. `extra_folders` adds
 anywhere else.
 
@@ -201,7 +201,7 @@ is the opposite of what you might expect.
 Resizing*: the desktop becomes the size of the browser window. On a phone that
 produces a desktop a few hundred pixels wide, and the slicer's own dialogs have
 minimum widths larger than that — so their buttons sit off the edge of a screen
-that cannot be scrolled. The add-on therefore sets **Local Scaling** as the
+that cannot be scrolled. The app therefore sets **Local Scaling** as the
 starting mode on touch devices, which fits the whole desktop to the screen
 instead.
 
@@ -215,7 +215,7 @@ You can change it any time from the control bar (the tab on the left edge) under
 | **Remote Resizing** | desktop matches the window. Right on a desktop browser, a trap on a phone |
 
 That choice is stored per browser, so a phone and a laptop can differ. The
-add-on applies its touch default once per browser and then never again, so a
+app applies its touch default once per browser and then never again, so a
 choice you make here is never overridden afterwards.
 
 **Pinch-to-zoom.** There are three different things called pinch here, and it
@@ -223,11 +223,11 @@ is worth keeping them apart.
 
 1. **The client's own pinch** forwards `Ctrl`+scroll to the slicer, so it zooms
    the *model* in the 3D view. Always available.
-2. **Page zoom** would magnify the screen. The add-on allows it, but a
+2. **Page zoom** would magnify the screen. The app allows it, but a
    `viewport` meta applies only to the top-level document — and in the sidebar
    this page runs inside Home Assistant's iframe, so Home Assistant's viewport
-   governs and the add-on's is ignored. This works on the **published port**,
-   where the add-on *is* the top-level document.
+   governs and the app's is ignored. This works on the **published port**,
+   where the app *is* the top-level document.
 3. **WebView zoom**, which sits above the page and so is not subject to any of
    that. In the Home Assistant **Android** app, turn on
    **Settings → Companion App → Pinch-to-Zoom**. It zooms the whole app,
@@ -301,7 +301,7 @@ trusting the app to report the problem itself.
 
 The image is large — the desktop base, the GL stack and a 419 MB unpacked
 AppImage. The container also holds a running desktop session, so it idles
-heavier than a headless add-on. If you only slice occasionally, setting
+heavier than a headless app. If you only slice occasionally, setting
 **Start on boot** to off and starting it when you need it is reasonable.
 
 ## Installation

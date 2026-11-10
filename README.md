@@ -1,180 +1,66 @@
-# nict41's HA Apps
+# nict41's Home Assistant Apps
 
-This repository can be used as an app repository for Home Assistant.
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fnict41%2Fnict41-s-HA-Apps)
 
-[![Open your Home Assistant instance and show the app store with this repository pre-filled.](https://my.home-assistant.io/badges/supervisor_store.svg)](https://my.home-assistant.io/redirect/supervisor_store/?repository_url=https%3A%2F%2Fgithub.com%2Fnict41%2Fnict41-s-HA-Apps)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Build](https://github.com/nict41/nict41-s-HA-Apps/actions/workflows/build.yml/badge.svg)](https://github.com/nict41/nict41-s-HA-Apps/actions/workflows/build.yml)
+
+A collection of Home Assistant apps (formerly add-ons) for self-hosting,
+3D printing, media and development, built and tested for Home Assistant OS.
+
+## Installation
+
+1. Click the **Add repository** button above, or in Home Assistant go to
+   **Settings → Apps → App store**, open the **⋮** menu, choose
+   **Repositories** and add:
+
+   ```text
+   https://github.com/nict41/nict41-s-HA-Apps
+   ```
+
+2. Find the app you want in the store, click it and press **Install**.
+3. Read the app's **Documentation** tab for setup steps before starting it.
 
 ## Apps
 
-This repository contains the following apps
-
-### [Android Dev](./android_dev)
-
-![Android Dev logo](android_dev/logo.png)
-
-![Supports amd64 Architecture][amd64-shield]
-
-Provides Android SDK and Gradle tools to Claude Code through an authenticated MCP server, with wireless phone deployment and UI inspection.
-
-### [3D Print Timelapse](./print_timelapse)
-
-![3D Print Timelapse logo](print_timelapse/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Captures a frame-by-frame timelapse of each 3D print and compiles it into a GIF, with long-term storage of finished GIFs.
-
-### [Camera Share](./camera_share)
-
-![Camera Share logo](camera_share/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Shares one Home Assistant camera as a read-only public web page on a LAN port, for publishing a 3D printer's camera to friends through a Cloudflare tunnel - one subscription to Home Assistant however many people are watching.
-
-### [Claude Code (HA Server)](./claude_code)
-
-![Claude Code (HA Server) logo](claude_code/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-The Claude Code app from [sproft/hass-claude](https://github.com/sproft/hass-claude), plus a Remote Control server that starts with the app, so the box shows as a device called HA Server in the Claude mobile app and you can start sessions on it from your phone.
-
-### [CPU Performance Governor](./cpu_governor)
-
-![CPU Performance Governor logo](cpu_governor/logo.png)
-
-![Supports amd64 Architecture][amd64-shield]
-![Supports aarch64 Architecture][aarch64-shield]
-
-Sets the host CPU cpufreq scaling governor (default performance) so CPU-bound jobs get full clock speed instead of the powersave default, and re-applies it on every host boot.
-
-### [ElegooSlicer](./elegoo_slicer)
-
-![ElegooSlicer logo](elegoo_slicer/logo.png)
-
-![Supports amd64 Architecture][amd64-shield]
-
-ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a desktop in your browser so you can slice and send jobs from the sidebar.
-
-### [Glance Dashboard](./glance)
-
-![Glance logo](glance/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-![Supports armv7 Architecture][armv7-shield]
-
-Self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks, and more.
-
-### [God's Eye View](./gods_eye_view)
-
-![God's Eye View logo](gods_eye_view/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-A real-time intelligence console for planet Earth: photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, wildfires, traffic and public cameras, plus optional voice control.
-
-### [Immich Machine Learning (OpenVINO)](./immich_ml)
-
-![Immich Machine Learning logo](immich_ml/logo.png)
-
-![Supports amd64 Architecture][amd64-shield]
-
-Standalone Immich Machine Learning sidecar, hardware-accelerated with Intel OpenVINO, for offloading face detection and smart search from a separate Immich server app.
-
-### [Kiwix](./kiwix)
-
-![Kiwix logo](kiwix/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Offline Wikipedia and other ZIM archives: browse the Kiwix catalog, download archives onto a NAS share, and read them in the sidebar through kiwix-serve.
-
-### [NAS1 USB Link Watcher](./nas1_usb_watcher)
-
-![NAS1 USB Link Watcher logo](nas1_usb_watcher/logo.png)
-
-![Supports amd64 Architecture][amd64-shield]
-![Supports aarch64 Architecture][aarch64-shield]
-
-Watches the NAS1 external drive's USB port in sysfs and publishes an MQTT binary_sensor that flags when the drive's flaky USB data link drops, so drops and recoveries are visible and notifiable.
-
-### [Pantry Tracker](./pantry_tracker)
-
-![Pantry Tracker logo](pantry_tracker/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Scan grocery barcodes to track your pantry, read use-by dates from a photo with a self-hosted vision model, and get notified before food expires.
-
-### [Parcel Tracker](./parcel_tracker)
-
-![Parcel Tracker logo](parcel_tracker/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Automatically detects tracking numbers from your shipping emails (AliExpress, eBay, Amazon, and more) and tracks delivery status.
-
-### [Pingvin Share](./pingvin_share)
-
-![Pingvin Share logo](pingvin_share/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Self-hosted file sharing platform (a WeTransfer alternative), built on the actively-maintained Pingvin Share X fork.
-
-### [Transcribe-a-bot](./ascoltino)
-
-![Transcribe-a-bot logo](ascoltino/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Telegram bot that transcribes voice notes and audio files locally with Parakeet or Whisper - based on Ascoltino, patched to also handle audio files shared in from other apps.
-
-### [Tube Display](./tube_display)
-
-![Tube Display logo](tube_display/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Turns an IPSTube / EleksTube-style six-screen clock running [HA Tubes](https://github.com/nict41/HA-Tubes) firmware into a Home Assistant display: renders screens from your states (rings, big numbers, icons, pictures, cameras), rotates them or steps through them with the clock's button, and has a visual screen editor in the sidebar.
-
-### [WordPress](./wordpress)
-
-![WordPress logo](wordpress/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-![Supports armhf Architecture][armhf-shield]
-![Supports armv7 Architecture][armv7-shield]
-![Supports i386 Architecture][i386-shield]
-
-Self-hosted WordPress, built on the official docker-library/wordpress image.
-
-### [YouTube Music Sync](./youtube_music_sync)
-
-![YouTube Music Sync logo](youtube_music_sync/logo.png)
-
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-
-Watches public YouTube playlists and mirrors each video's audio into your music library, using combined title and duration matching to skip tracks you already own.
-
-See each app's own README/DOCS for configuration options and setup steps.
-
-[aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
-[amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
-[armhf-shield]: https://img.shields.io/badge/armhf-yes-green.svg
-[armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg
-[i386-shield]: https://img.shields.io/badge/i386-yes-green.svg
+| | App | Description | Architectures |
+|:-:|---|---|---|
+| <img src="android_dev/icon.png" width="48" alt=""> | **[Android Dev](./android_dev)** | Android SDK, Gradle and PlatformIO builds plus wireless phone control, served to Claude Code and other agents over an authenticated MCP server. | `amd64` |
+| <img src="claude_code/icon.png" width="48" alt=""> | **[Claude Code (HA Server)](./claude_code)** | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) in your sidebar, based on [sproft/hass-claude](https://github.com/sproft/hass-claude), plus a Remote Control server so you can start sessions on Home Assistant from the Claude mobile app. | `aarch64`, `amd64` |
+| <img src="elegoo_slicer/icon.png" width="48" alt=""> | **[ElegooSlicer](./elegoo_slicer)** | ElegooSlicer, the OrcaSlicer fork for Elegoo printers, running as a browser desktop so you can slice and send jobs from the sidebar. | `amd64` |
+| <img src="glance/icon.png" width="48" alt=""> | **[Glance Dashboard](./glance)** | [Glance](https://github.com/glanceapp/glance), a fast self-hosted dashboard for RSS, weather, bookmarks, calendars, stocks and more. | `aarch64`, `amd64`, `armv7` |
+| <img src="gods_eye_view/icon.png" width="48" alt=""> | **[God's Eye View](./gods_eye_view)** | A photorealistic 3D globe with live aircraft, ships, satellites, earthquakes, wildfires, traffic and public cameras, with optional voice control. | `aarch64`, `amd64` |
+| <img src="immich_ml/icon.png" width="48" alt=""> | **[Immich Machine Learning (OpenVINO)](./immich_ml)** | Immich machine-learning sidecar using Intel OpenVINO, so a separate Immich server can run face detection and smart search on an Intel iGPU. | `amd64` |
+| <img src="kiwix/icon.png" width="48" alt=""> | **[Kiwix](./kiwix)** | Offline Wikipedia and other ZIM archives: browse the Kiwix catalog, download archives to a NAS share and read them in the sidebar. | `aarch64`, `amd64` |
+| <img src="pantry_tracker/icon.png" width="48" alt=""> | **[Pantry Tracker](./pantry_tracker)** | Scan grocery barcodes to track your pantry, read use-by dates from a photo with a self-hosted vision model, and get reminders before food expires. | `aarch64`, `amd64` |
+| <img src="parcel_tracker/icon.png" width="48" alt=""> | **[Parcel Tracker](./parcel_tracker)** | Finds tracking numbers in your shipping emails (AliExpress, eBay, Amazon and more) and follows each delivery. | `aarch64`, `amd64` |
+| <img src="pingvin_share/icon.png" width="48" alt=""> | **[Pingvin Share](./pingvin_share)** | Self-hosted file sharing (a WeTransfer alternative), built on the actively maintained Pingvin Share X fork. | `aarch64`, `amd64` |
+| <img src="print_timelapse/icon.png" width="48" alt=""> | **[3D Print Timelapse](./print_timelapse)** | Captures a frame-by-frame timelapse of every 3D print and keeps the finished GIFs. | `aarch64`, `amd64` |
+| <img src="ascoltino/icon.png" width="48" alt=""> | **[Transcribe-a-bot](./ascoltino)** | Telegram bot that transcribes voice notes and shared audio files locally with Parakeet or Whisper. Based on [Ascoltino](https://github.com/soldatigabriele/ascoltino), patched to accept audio shared from other apps. | `aarch64`, `amd64` |
+| <img src="tube_display/icon.png" width="48" alt=""> | **[Tube Display](./tube_display)** | Turns an IPSTube-style six-screen clock running [HA Tubes](https://github.com/nict41/HA-Tubes) firmware into a Home Assistant display, with a visual screen editor in the sidebar. | `aarch64`, `amd64` |
+| <img src="wordpress/icon.png" width="48" alt=""> | **[WordPress](./wordpress)** | Self-hosted WordPress on the official image, with a built-in MariaDB database. | `aarch64`, `amd64`, `armhf`, `armv7`, `i386` |
+| <img src="youtube_music_sync/icon.png" width="48" alt=""> | **[YouTube Music Sync](./youtube_music_sync)** | Mirrors the audio of public YouTube playlists into your music library, skipping tracks you already have. | `aarch64`, `amd64` |
+
+## Personal and niche apps
+
+These were written for one particular setup. They work, and the
+documentation explains every assumption, but check that they fit your
+hardware before installing.
+
+| | App | Description | Architectures |
+|:-:|---|---|---|
+| <img src="camera_share/icon.png" width="48" alt=""> | **[Camera Share](./camera_share)** | Shares one camera as a read-only public web page, with a single connection to Home Assistant however many people watch. Built for the Elegoo Centauri Carbon 2 chamber camera. | `aarch64`, `amd64` |
+| <img src="cpu_governor/icon.png" width="48" alt=""> | **[CPU Performance Governor](./cpu_governor)** | Sets the host CPU's scaling governor (`performance` by default) and re-applies it on every boot. Written for an Intel N100 host. | `aarch64`, `amd64` |
+| <img src="nas1_usb_watcher/icon.png" width="48" alt=""> | **[NAS1 USB Link Watcher](./nas1_usb_watcher)** | Raises an MQTT problem sensor when a USB drive's data link drops. Written for one specific flaky drive enclosure. | `aarch64`, `amd64` |
+
+## Support
+
+Found a bug or have an idea? Open an
+[issue](https://github.com/nict41/nict41-s-HA-Apps/issues). Each app's
+`CHANGELOG.md` lists what changed in every version.
+
+## License
+
+Released under the [MIT License](LICENSE), except where a folder carries
+its own license (for example [`claude_code`](claude_code/LICENSE)). Apps
+that package another project keep that project's license for its code.

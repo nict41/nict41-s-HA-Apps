@@ -1,10 +1,7 @@
 name: "YouTube Music Sync"
 version: "0.2.6"
 slug: "youtube_music_sync"
-description: >-
-  Watches public YouTube playlists and mirrors each video's audio into your
-  music library, using combined title and duration matching to skip tracks
-  the library already has.
+description: "Mirrors the audio of public YouTube playlists into your music library, skipping tracks you already have"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/youtube_music_sync"
 arch:
   - aarch64
