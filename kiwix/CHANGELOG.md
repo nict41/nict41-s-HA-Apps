@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.3
+
+- **Much faster installs and updates.** kiwix-tools now downloads from a copy
+  attached to this repo's GitHub releases instead of Kiwix's download mirror,
+  which manages only tens of KB/s and made each build take 15-30 minutes.
+  Kiwix's own server is still used if the copy can't be reached.
+- The download is now checked against a pinned SHA-256 checksum.
+- No change to the app's behaviour.
+
 ## 0.2.2
 
 - **Standalone Docker image.** The same app now also ships as a plain

@@ -11,6 +11,7 @@ FROM alpine:3.23
 ARG TARGETARCH
 ARG KIWIX_TOOLS_VERSION=3.8.2
 
+COPY fetch-kiwix-tools.sh /tmp/fetch-kiwix-tools.sh
 RUN apk add --no-cache \
         python3 \
         py3-pip \
@@ -23,15 +24,8 @@ RUN apk add --no-cache \
         arm64) KIWIX_ARCH="aarch64" ;; \
         *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && wget -qO /tmp/kiwix-tools.tar.gz \
-        "https://download.kiwix.org/release/kiwix-tools/kiwix-tools_linux-${KIWIX_ARCH}-${KIWIX_TOOLS_VERSION}.tar.gz" \
-    && tar -xzf /tmp/kiwix-tools.tar.gz -C /tmp \
-    && install -m 0755 \
-        "/tmp/kiwix-tools_linux-${KIWIX_ARCH}-${KIWIX_TOOLS_VERSION}/kiwix-serve" \
-        "/tmp/kiwix-tools_linux-${KIWIX_ARCH}-${KIWIX_TOOLS_VERSION}/kiwix-manage" \
-        /usr/bin/ \
-    && rm -rf /tmp/kiwix-tools.tar.gz "/tmp/kiwix-tools_linux-${KIWIX_ARCH}-${KIWIX_TOOLS_VERSION}" \
-    && kiwix-serve --version
+    && sh /tmp/fetch-kiwix-tools.sh "${KIWIX_TOOLS_VERSION}" "${KIWIX_ARCH}" \
+    && rm /tmp/fetch-kiwix-tools.sh
 
 COPY app/requirements.txt /app/requirements.txt
 # --break-system-packages: Alpine's python3 marks itself "externally managed"

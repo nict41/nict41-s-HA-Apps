@@ -1,0 +1,76 @@
+name: Mirror kiwix-tools
+
+# Copies the pinned kiwix-tools archives from download.kiwix.org to a
+# "kiwix-tools-VERSION" release in this repo, so the Kiwix app's builds (in CI
+# and on users' Home Assistant hosts) can download them from GitHub in
+# seconds instead of from Kiwix's slow mirror. Each archive is checked
+# against the checksum pinned in kiwix/fetch-kiwix-tools.sh before upload.
+#
+# Runs when the fetch script changes on main (a new version or checksum) or
+# by hand. Does nothing if the release already has both archives.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "kiwix/fetch-kiwix-tools.sh"
+      - ".github/workflows/kiwix-tools-mirror.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}
+
+jobs:
+  mirror:
+    name: Mirror kiwix-tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: echo "version=$(yq -r '.args.KIWIX_TOOLS_VERSION' kiwix/build.yaml)" >> "${GITHUB_OUTPUT}"
+
+      - name: Check existing release
+        id: existing
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          assets=$(gh release view "kiwix-tools-${VERSION}" --json assets -q '.assets[].name' 2>/dev/null || true)
+          missing=""
+          for arch in x86_64 aarch64; do
+            echo "${assets}" | grep -qx "kiwix-tools_linux-${arch}-${VERSION}.tar.gz" || missing="${missing} ${arch}"
+          done
+          echo "missing=${missing# }" >> "${GITHUB_OUTPUT}"
+          echo "Missing archives: ${missing:-none}"
+
+      - name: Download and verify from download.kiwix.org
+        if: steps.existing.outputs.missing != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          MISSING: ${{ steps.existing.outputs.missing }}
+        run: |
+          for arch in ${MISSING}; do
+            sh kiwix/fetch-kiwix-tools.sh "${VERSION}" "${arch}" --to dist &
+          done
+          wait_all=0
+          for job in $(jobs -p); do wait "${job}" || wait_all=1; done
+          exit "${wait_all}"
+
+      - name: Upload to release
+        if: steps.existing.outputs.missing != ''
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          tag="kiwix-tools-${VERSION}"
+          if ! gh release view "${tag}" >/dev/null 2>&1; then
+            gh release create "${tag}" --latest=false \
+              --title "kiwix-tools ${VERSION} (build mirror)" \
+              --notes "Unmodified copies of the kiwix-tools ${VERSION} Linux archives from https://download.kiwix.org/release/kiwix-tools/, used by the Kiwix app's builds. Checksums are pinned in kiwix/fetch-kiwix-tools.sh. kiwix-tools is GPL-3.0; source: https://github.com/kiwix/kiwix-tools"
+          fi
+          gh release upload "${tag}" dist/*.tar.gz --clobber
