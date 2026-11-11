@@ -10,9 +10,9 @@
 #
 # Everything is selected when the change is not confined to apps - a
 # workflow edit, this script, the matrix itself - because such a change can
-# affect any of them. The caller also sets SELECT_ALL=true for a push to the
-# default branch and for a manual run, where the point is to prove the whole
-# repository still builds rather than to be quick.
+# affect any of them. The caller also sets SELECT_ALL=true for a manual run,
+# where the point is to prove the whole repository still builds rather than
+# to be quick.
 #
 # Selecting too much costs CI minutes. Selecting too little means a broken
 # image merges, so every case that is not clearly confined to one app
