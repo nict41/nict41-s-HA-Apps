@@ -1,5 +1,5 @@
-aiohttp==3.14.4
+aiohttp==3.14.5
 aiomqtt==2.5.1
 Pillow==13.0.0
-PyYAML==6.0.2
-ruamel.yaml==0.18.10
+PyYAML==6.0.3
+ruamel.yaml==0.19.1
