@@ -4,6 +4,10 @@ Versions are upstream's version with a `-N` suffix for this copy's changes.
 For changes up to 1.2.84, see
 [upstream's changelog](https://github.com/sproft/hass-claude/blob/main/claudecode/CHANGELOG.md).
 
+## 1.2.84-6
+
+- Security: built on the Home Assistant Python base image for Alpine 3.23 (was 3.21). The older base carried a `tempio` binary built with a Go release that has a known critical vulnerability.
+
 ## 1.2.84-5
 
 - Security: the image now runs `apk upgrade` at build time, so OS packages pick up the security fixes Alpine has published since the base image was built.
