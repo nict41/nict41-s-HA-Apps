@@ -61,7 +61,10 @@ jobs:
     name: Build ${{ matrix.app }} (${{ matrix.arch }})
     needs: select
     if: needs.select.outputs.build != '[]'
-    runs-on: ubuntu-latest
+    # Each image builds on a runner of its own architecture. aarch64 used to
+    # build under QEMU emulation on an amd64 runner, where `npm install`
+    # for claude_code stalled silently and the job sat until it was killed.
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     # A stuck build is stopped here instead of running to GitHub's six-hour
     # limit. The slowest image (kiwix) takes about 25 minutes.
     timeout-minutes: 45
@@ -72,8 +75,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # aarch64 images are built under emulation on the amd64 runner.
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
       # Exposes the Actions cache service to the plain `docker buildx` call
