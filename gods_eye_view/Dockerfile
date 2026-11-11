@@ -4,7 +4,7 @@ FROM ${BUILD_FROM}
 # God's Eye View has no release artefact and no published image, so the source
 # is fetched at a pinned commit and its dependencies are installed here. Bump
 # GEV_COMMIT (in build.yaml) to move to a newer upstream revision.
-ARG GEV_COMMIT=591f299d11f38a612629a274463196d57ae3862e
+ARG GEV_COMMIT=72eb3fdc739991a1286b7f1251de908e9744bb2a
 
 ENV GEV_HOME=/opt/gods-eye-view \
     PUPPETEER_SKIP_DOWNLOAD=1 \
@@ -26,9 +26,7 @@ RUN mkdir -p "${GEV_HOME}" \
     && wget -qO- "https://codeload.github.com/bilawalsidhu/gods-eye-view/tar.gz/${GEV_COMMIT}" \
         | tar -xz --strip-components=1 -C "${GEV_HOME}" \
     && cd "${GEV_HOME}" \
-    && npm ci --loglevel=error \
-    # Upstream's lockfile pins a DOMPurify release with a known vulnerability; override it.
-    && npm install --no-save --loglevel=error dompurify@3.4.17
+    && npm ci --loglevel=error
 
 # Pre-bundle Cesium and friends now rather than on the first page load, which
 # would otherwise run esbuild over ~200 MB of dependencies while the user is

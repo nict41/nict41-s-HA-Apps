@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.6
+
+- Move to upstream release v0.3.0 (`72eb3fd`, 28 October 2026), from `591f299` (10 October).
+- Security: upstream's own lockfile now carries DOMPurify 3.4.17 and sharp 0.35.5, so the DOMPurify override added in 0.3.5 is removed.
+
 ## 0.3.5
 
 - Security: override DOMPurify to 3.4.17 (upstream's lockfile pins a release with a known vulnerability), and run `apk upgrade` at build time so OS packages pick up the security fixes Alpine has published since the base image was built.
