@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Security: fastapi 0.162.4 (was 0.111.0, whose starlette 0.37.2 has known HIGH vulnerabilities fixed in starlette 1.3.1) and uvicorn 0.54.0 (was 0.30.1).
+
 ## 1.0.2
 
 - **Fixes the camera never loading.** The app read the camera through the
