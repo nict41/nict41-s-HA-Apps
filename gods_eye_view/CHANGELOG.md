@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.5
+
+- Security: override DOMPurify to 3.4.17 (upstream's lockfile pins a release with a known vulnerability), and run `apk upgrade` at build time so OS packages pick up the security fixes Alpine has published since the base image was built.
+
 ## 0.3.4
 
 - Fix the add-on showing "Error" after a normal stop. The stop handlers only

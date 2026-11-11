@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Security: move to Glance v0.8.8 (was v0.8.6) and the Home Assistant base image 3.23 (was 3.20; armv7 stays on 3.20, the last one published for it), and run `apk upgrade` at build time so OS packages pick up the security fixes Alpine has published since the base image was built.
+
 ## 0.2.5
 
 - Ask for the ingress path under whichever name the base image's bashio

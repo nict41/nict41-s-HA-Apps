@@ -14,7 +14,8 @@ ENV \
     TERM=xterm-256color
 
 # Install system dependencies (ttyd installed separately as static binary)
-RUN apk add --no-cache \
+# Pick up security fixes the distribution has published since the base image was built.
+RUN apk upgrade --no-cache && apk add --no-cache \
     bash \
     curl \
     git \

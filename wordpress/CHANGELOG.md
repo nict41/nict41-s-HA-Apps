@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.9
+
+- Security: rebuild on the wordpress:php8.3-apache image published 2026-11-08 (new digest pin), and run `apt-get upgrade` at build time so OS packages pick up the security fixes Debian has published since the base image was built.
+
 ## 1.1.8
 
 - Security: rebuild on PHP 8.3.36, which fixes the "php2shell"

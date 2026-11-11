@@ -1,11 +1,13 @@
-FROM smp46/pingvin-share-x:v2.0.0
+FROM smp46/pingvin-share-x:v2.1.1
 
 ARG BASHIO_VERSION="0.19.0"
 
 # Pingvin Share X's own image is Alpine-based and doesn't ship bash, so
 # bashio (needed to read this add-on's options.json) is vendored from
 # source, same as the WordPress app in this repository.
+# Pick up security fixes the distribution has published since the base image was built.
 RUN set -eu; \
+    apk upgrade --no-cache; \
     apk add --no-cache bash curl ca-certificates jq; \
     curl -L -f -s -o /tmp/bashio.tar.gz \
         "https://github.com/hassio-addons/bashio/archive/v${BASHIO_VERSION}.tar.gz"; \

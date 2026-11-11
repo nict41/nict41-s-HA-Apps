@@ -1,5 +1,5 @@
 name: Glance Dashboard
-version: 0.2.5
+version: 0.2.6
 slug: glance
 description: "Glance, a fast self-hosted dashboard for RSS, weather, calendars, stocks and more, in your sidebar"
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/glance

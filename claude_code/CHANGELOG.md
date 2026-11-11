@@ -4,6 +4,10 @@ Versions are upstream's version with a `-N` suffix for this copy's changes.
 For changes up to 1.2.84, see
 [upstream's changelog](https://github.com/sproft/hass-claude/blob/main/claudecode/CHANGELOG.md).
 
+## 1.2.84-5
+
+- Security: the image now runs `apk upgrade` at build time, so OS packages pick up the security fixes Alpine has published since the base image was built.
+
 ## 1.2.84-4
 
 - MCP servers you add yourself now survive a restart. The startup command

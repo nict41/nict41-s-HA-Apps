@@ -8,8 +8,10 @@ ARG BASHIO_VERSION="0.19.0"
 # MACHINE_LEARNING_* env vars. The Immich Machine Learning application
 # itself is used completely unmodified - same image, same tag as
 # BUILD_VERSION (the app version above), nothing rebuilt or recompiled.
+# Pick up security fixes the distribution has published since the base image was built.
 RUN set -eu; \
     apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; \
     apt-get install -y --no-install-recommends curl ca-certificates jq; \
     curl -L -f -s -o /tmp/bashio.tar.gz \
         "https://github.com/hassio-addons/bashio/archive/v${BASHIO_VERSION}.tar.gz"; \

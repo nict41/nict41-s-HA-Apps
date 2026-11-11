@@ -12,6 +12,7 @@ import io
 import logging
 
 from aiohttp import web
+from PIL import Image
 
 _LOG = logging.getLogger(__name__)
 
@@ -74,7 +75,7 @@ def create_app(controller) -> web.Application:
                 {"error": f"unknown screen {name!r}", "screens": controller.status()["screens"]},
                 status=404)
         if scale != 1:
-            strip = strip.resize((strip.width * scale, strip.height * scale), 0)
+            strip = strip.resize((strip.width * scale, strip.height * scale), Image.Resampling.NEAREST)
         buf = io.BytesIO()
         strip.save(buf, format="PNG")
         return web.Response(body=buf.getvalue(), content_type="image/png")

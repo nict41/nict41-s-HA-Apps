@@ -17,7 +17,8 @@ ENV GEV_HOME=/opt/gods-eye-view \
 # reading the bundled data packs as JSON, which upstream now relies on.
 # nginx must carry http_sub_module: the ingress shim is injected into
 # index.html with sub_filter, so a build without it would fail at runtime.
-RUN apk add --no-cache nodejs npm nginx \
+# Pick up security fixes the distribution has published since the base image was built.
+RUN apk upgrade --no-cache && apk add --no-cache nodejs npm nginx \
     && node --version \
     && nginx -V 2>&1 | grep -q -- '--with-http_sub_module'
 
@@ -25,7 +26,9 @@ RUN mkdir -p "${GEV_HOME}" \
     && wget -qO- "https://codeload.github.com/bilawalsidhu/gods-eye-view/tar.gz/${GEV_COMMIT}" \
         | tar -xz --strip-components=1 -C "${GEV_HOME}" \
     && cd "${GEV_HOME}" \
-    && npm ci --loglevel=error
+    && npm ci --loglevel=error \
+    # Upstream's lockfile pins a DOMPurify release with a known vulnerability; override it.
+    && npm install --no-save --loglevel=error dompurify@3.4.17
 
 # Pre-bundle Cesium and friends now rather than on the first page load, which
 # would otherwise run esbuild over ~200 MB of dependencies while the user is

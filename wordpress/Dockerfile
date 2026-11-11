@@ -1,7 +1,7 @@
 # Pinned by digest so a Home Assistant rebuild can't reuse a cached,
-# unpatched base layer. The digest is the multi-arch index for
-# wordpress:php8.3-apache with PHP 8.3.36 (CVE-2026-109618/109619).
-FROM wordpress:php8.3-apache@sha256:18b73b2dad9c0cdced35c5200dd6562c937a8e994762b4f2b43b1ece9fb317c9
+# unpatched base layer. The digest is the multi-arch index for the
+# wordpress:php8.3-apache image published 2026-11-08.
+FROM wordpress:php8.3-apache@sha256:9001ea7dafd2bc3f05d068e6413b0edd2a116eeed4dfe9e08b6bd718dee4960a
 
 ARG BASHIO_VERSION="0.19.0"
 
@@ -11,8 +11,10 @@ ARG BASHIO_VERSION="0.19.0"
 # other Supervisor add-on. Native mariadb-* command names are used
 # throughout run.sh - Debian trixie ships the mysql* names as separate
 # compat packages, deliberately not installed here.
+# Pick up security fixes the distribution has published since the base image was built.
 RUN set -eu; \
     apt-get update; \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; \
     apt-get install -y --no-install-recommends curl ca-certificates jq \
         mariadb-server mariadb-client; \
     curl -L -f -s -o /tmp/bashio.tar.gz \

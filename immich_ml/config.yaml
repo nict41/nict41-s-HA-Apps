@@ -1,5 +1,5 @@
 name: Immich Machine Learning (OpenVINO)
-version: "v3.3.1-openvino"
+version: "v3.4.0-openvino"
 slug: immich_ml
 description: "Immich machine-learning sidecar that runs face detection and smart search on an Intel iGPU via OpenVINO"
 url: https://github.com/nict41/nict41-s-HA-Apps/tree/main/immich_ml

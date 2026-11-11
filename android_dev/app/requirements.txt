@@ -13,7 +13,7 @@ starlette==1.10.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4
 uvicorn==0.54.0
-pillow==12.1.1
+pillow==13.0.0
 annotated-types==0.8.0
 attrs==26.1.0
 cffi==2.1.1
