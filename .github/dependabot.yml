@@ -1,0 +1,35 @@
+# Dependabot version updates. Security alerts and security-fix pull requests
+# are switched on in the repository settings and do not depend on this file.
+#
+# Monthly and grouped on purpose: every pull request here builds the images
+# it touches, so one pull request per ecosystem is cheaper than one per
+# package.
+version: 2
+updates:
+  # Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # Each app's Python requirements.
+  - package-ecosystem: pip
+    directories:
+      - "/*/app"
+    schedule:
+      interval: monthly
+    groups:
+      python:
+        patterns: ["*"]
+
+  # Images named directly in a Dockerfile `FROM` line. Base images taken
+  # from an app's build.yaml (BUILD_FROM) are not visible to Dependabot.
+  # Not grouped: a base-image bump is worth its own pull request.
+  - package-ecosystem: docker
+    directories:
+      - "/*"
+    schedule:
+      interval: monthly
