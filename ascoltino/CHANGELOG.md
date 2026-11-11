@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1-5
+
+- Security: run `apt-get upgrade` at build time so OS packages pick up the security fixes Debian has published since the base image was built, and upgrade the certifi CA bundle the image's Python uses.
+
 ## 1.4.1-4
 
 - No more "ready" Telegram message on every start: the app restarts for HA

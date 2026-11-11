@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.1.2
+
+- Security: move to smp46/pingvin-share-x:v2.1.1 (was v2.0.0), and run `apk upgrade` at build time so OS packages pick up the security fixes Alpine has published since the base image was built.
+
 ## 1.1.1
 
 - Move the vendored bashio from 0.17.5 to 0.19.0.

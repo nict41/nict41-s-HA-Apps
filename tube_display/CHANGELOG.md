@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7
+
+- Security: Pillow 13.0.0 (was 11.2.1) and aiohttp 3.14.4, which fix known vulnerabilities.
+
 ## 0.4.6
 
 - Editor: opening a tube with colour thresholds marked the screen changed and rewrote its colours in lower case; it now only rewrites them when you edit the thresholds.

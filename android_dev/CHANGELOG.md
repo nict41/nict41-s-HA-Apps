@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Security: pillow 13.0.0 (was 12.1.1), which fixes known vulnerabilities.
+
 ## 0.2.1
 - Documented ESP32 builds in full for other agents: absolute paths, targets, reading errors and warnings, CI=1, artifacts, and that flashing needs another route.
 

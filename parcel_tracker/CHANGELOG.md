@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.1
+
+- Security: python-multipart 0.0.33 (was 0.0.9), fastapi 0.162.4 (was 0.111.0, whose starlette 0.37.2 has known HIGH vulnerabilities fixed in starlette 1.3.1) and uvicorn 0.54.0 (was 0.30.1), which fix known vulnerabilities.
+
 ## 0.10.0
 
 - Redesigned the dashboard and settings pages onto a new editorial-technical

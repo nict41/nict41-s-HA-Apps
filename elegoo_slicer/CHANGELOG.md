@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.3
+
+- Security: run `apt-get upgrade` at build time so OS packages pick up the security fixes Ubuntu has published since the base image was built.
+
 ## 0.4.2
 
 - New `POST /printer/home`: home all axes, which raises the bed into the

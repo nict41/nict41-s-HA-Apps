@@ -136,7 +136,7 @@ included in Home Assistant's normal app backups/snapshots.
 
 ## Updating the bundled Pingvin Share X version
 
-This app pins an exact image tag (e.g. `v2.0.0`) in its `Dockerfile` for
+This app pins an exact image tag (e.g. `v2.1.1`) in its `Dockerfile` for
 reproducibility rather than tracking `latest`. To pick up a newer release,
 edit the `FROM` line and rebuild - check the
 [release notes](https://github.com/smp46/pingvin-share-x/releases) first,

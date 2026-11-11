@@ -1,5 +1,9 @@
 # Changelog
 
+## v3.4.0-openvino
+
+- Security: move to ghcr.io/immich-app/immich-machine-learning:v3.4.0-openvino (was v3.3.1-openvino), and run `apt-get upgrade` at build time so OS packages pick up the security fixes Debian has published since the base image was built.
+
 ## v3.3.1-openvino
 
 - **Vendored bashio moved from 0.17.5 to 0.19.0.** This app's version field

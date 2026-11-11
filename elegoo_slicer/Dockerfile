@@ -46,7 +46,9 @@ RUN grep -rlZ 'deb\.nodesource\.com' /etc/apt/sources.list /etc/apt/sources.list
         | xargs -0 -r rm -f \
     && echo "Removed stale NodeSource apt source"
 
+# Pick up security fixes the distribution has published since the base image was built.
 RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && apt-get install --no-install-recommends -y \
         ca-certificates \
         curl \
