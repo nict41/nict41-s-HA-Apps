@@ -13,7 +13,9 @@ on:
   schedule:
     - cron: "23 4 * * 1"
   workflow_dispatch:
-  # Lets a change to this file prove itself before it merges.
+  # Lets a change to this file prove itself before it merges. A pull request
+  # run reports findings as warnings instead of failing: it is checking that
+  # the workflow works, not gating the change on existing vulnerabilities.
   pull_request:
     paths:
       - .github/workflows/trivy.yml
@@ -48,18 +50,24 @@ jobs:
               "${TRIVY_IMAGE}" "$@"
           }
           trivy fs --scanners vuln,secret --severity HIGH,CRITICAL \
-            --ignore-unfixed --format sarif --output trivy-repo.sarif .
+            --ignore-unfixed --skip-files trivy-repo.sarif \
+            --format sarif --output trivy-repo.sarif .
           {
             echo '## Repository scan'
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           set +e
           trivy fs --scanners vuln,secret --severity HIGH,CRITICAL \
-            --ignore-unfixed --skip-db-update --exit-code 1 --format table . \
+            --ignore-unfixed --skip-files trivy-repo.sarif --skip-db-update \
+            --exit-code 1 --format table . \
             | tee -a "${GITHUB_STEP_SUMMARY}"
           status=${PIPESTATUS[0]}
           set -e
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${status}" -ne 0 ] && [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            echo "::warning::These findings would fail the scheduled run."
+            exit 0
+          fi
           exit "${status}"
 
       - name: Upload findings to code scanning
@@ -118,9 +126,12 @@ jobs:
               args+=(--build-arg "BUILD_FROM=${build_from}")
             fi
           fi
+          # BUILD_VERSION is the app version, as the Supervisor passes it;
+          # immich_ml uses it to pick its upstream image tag.
           docker buildx build \
             --platform linux/amd64 \
             --build-arg BUILD_ARCH=amd64 \
+            --build-arg "BUILD_VERSION=$(yq -r '.version' "${{ matrix.app }}/config.yaml")" \
             "${args[@]}" \
             --cache-from "type=gha,scope=${{ matrix.app }}-amd64" \
             --load --tag "scan/${{ matrix.app }}:latest" \
@@ -145,11 +156,17 @@ jobs:
             | tee -a "${GITHUB_STEP_SUMMARY}"
           echo '```' >> "${GITHUB_STEP_SUMMARY}"
           # Only a fixable CRITICAL fails the job.
-          trivy image --scanners vuln --severity CRITICAL --ignore-unfixed \
-            --skip-db-update --exit-code 1 --quiet --format table "${image}" > /dev/null
+          if ! trivy image --scanners vuln --severity CRITICAL --ignore-unfixed \
+              --skip-db-update --exit-code 1 --quiet --format table "${image}" > /dev/null; then
+            if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+              echo "::warning::A fixable CRITICAL here would fail the scheduled run."
+            else
+              exit 1
+            fi
+          fi
 
       - name: Upload findings to code scanning
-        if: always() && !github.event.repository.private
+        if: always() && !github.event.repository.private && hashFiles('trivy-image.sarif') != ''
         uses: github/codeql-action/upload-sarif@5895b2c9be147bc7f1c75ce72c5cb577febb1907 # v4
         with:
           sarif_file: trivy-image.sarif
