@@ -1,0 +1,173 @@
+name: Trivy
+
+# Weekly vulnerability scan. Dependabot only sees declared dependencies
+# (requirements.txt, workflow actions, FROM lines); this also covers what the
+# images actually contain: the base image's OS packages and everything a
+# Dockerfile installs with apk, apt, pip, npm or curl.
+#
+# Findings appear under Security > Code scanning. A job fails, and GitHub
+# emails about the failed scheduled run, only for the cases worth acting on:
+#   - repository scan: a HIGH or CRITICAL vulnerability with a fix, or a secret
+#   - image scan:      a CRITICAL vulnerability with a fix
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+  # Lets a change to this file prove itself before it merges. A pull request
+  # run reports findings as warnings instead of failing: it is checking that
+  # the workflow works, not gating the change on existing vulnerabilities.
+  pull_request:
+    paths:
+      - .github/workflows/trivy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The scanner runs from its published image, pinned by digest, rather than
+  # through a third-party action whose tag could be moved.
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+
+jobs:
+  repo:
+    name: Scan repository files
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for vulnerable dependencies and committed secrets
+        run: |
+          trivy() {
+            docker run --rm -v "${PWD}:/src" -w /src -v trivy-cache:/root/.cache \
+              "${TRIVY_IMAGE}" "$@"
+          }
+          trivy fs --scanners vuln,secret --severity HIGH,CRITICAL \
+            --ignore-unfixed --skip-files trivy-repo.sarif \
+            --format sarif --output trivy-repo.sarif .
+          {
+            echo '## Repository scan'
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          set +e
+          trivy fs --scanners vuln,secret --severity HIGH,CRITICAL \
+            --ignore-unfixed --skip-files trivy-repo.sarif --skip-db-update \
+            --exit-code 1 --format table . \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+          status=${PIPESTATUS[0]}
+          set -e
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          if [ "${status}" -ne 0 ] && [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            echo "::warning::These findings would fail the scheduled run."
+            exit 0
+          fi
+          exit "${status}"
+
+      - name: Upload findings to code scanning
+        if: always() && !github.event.repository.private
+        uses: github/codeql-action/upload-sarif@5895b2c9be147bc7f1c75ce72c5cb577febb1907 # v4
+        with:
+          sarif_file: trivy-repo.sarif
+          category: trivy-repo
+
+  list:
+    name: List the apps
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.list.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        name: Every directory with a Dockerfile is an app image
+        run: |
+          apps=$(ls -d */Dockerfile | cut -d/ -f1 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "apps=${apps}" | tee -a "${GITHUB_OUTPUT}"
+
+  image:
+    name: Scan ${{ matrix.app }} image
+    needs: list
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.list.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The largest images (elegoo_slicer, android_dev) need more room than
+      # the runner has spare once the image is also loaded for scanning.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: crazy-max/ghaction-github-runtime@v3
+
+      # Built the way the Supervisor builds it on an amd64 machine. Layers
+      # come from the cache the Build workflow wrote; nothing is written back.
+      - name: Build ${{ matrix.app }} (amd64)
+        run: |
+          args=()
+          if [ -f "${{ matrix.app }}/build.yaml" ]; then
+            build_from=$(yq -r '.build_from.amd64 // ""' "${{ matrix.app }}/build.yaml")
+            if [ -n "${build_from}" ]; then
+              args+=(--build-arg "BUILD_FROM=${build_from}")
+            fi
+          fi
+          # BUILD_VERSION is the app version, as the Supervisor passes it;
+          # immich_ml uses it to pick its upstream image tag.
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg BUILD_ARCH=amd64 \
+            --build-arg "BUILD_VERSION=$(yq -r '.version' "${{ matrix.app }}/config.yaml")" \
+            "${args[@]}" \
+            --cache-from "type=gha,scope=${{ matrix.app }}-amd64" \
+            --load --tag "scan/${{ matrix.app }}:latest" \
+            "${{ matrix.app }}"
+
+      - name: Scan the image
+        run: |
+          trivy() {
+            docker run --rm -v "${PWD}:/src" -w /src -v trivy-cache:/root/.cache \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              "${TRIVY_IMAGE}" "$@"
+          }
+          image="scan/${{ matrix.app }}:latest"
+          trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --format sarif --output trivy-image.sarif "${image}"
+          {
+            echo '## ${{ matrix.app }}: HIGH and CRITICAL with a fix available'
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          trivy image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --skip-db-update --format table "${image}" \
+            | tee -a "${GITHUB_STEP_SUMMARY}"
+          echo '```' >> "${GITHUB_STEP_SUMMARY}"
+          # Only a fixable CRITICAL fails the job.
+          if ! trivy image --scanners vuln --severity CRITICAL --ignore-unfixed \
+              --skip-db-update --exit-code 1 --quiet --format table "${image}" > /dev/null; then
+            if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+              echo "::warning::A fixable CRITICAL here would fail the scheduled run."
+            else
+              exit 1
+            fi
+          fi
+
+      - name: Upload findings to code scanning
+        if: always() && !github.event.repository.private && hashFiles('trivy-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@5895b2c9be147bc7f1c75ce72c5cb577febb1907 # v4
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image-${{ matrix.app }}
