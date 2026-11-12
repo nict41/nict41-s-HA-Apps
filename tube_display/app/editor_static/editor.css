@@ -215,3 +215,9 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .field-grid > .field-row:has(> .field.smart) { grid-column: auto; }
 .field-grid .field.smart .field-label { min-width: 64px; }
 .field.smart .template-result:empty { min-height: 0; margin: 0; }
+
+/* entity name suggestions */
+.ac-pop { position: absolute; z-index: 50; max-height: 260px; overflow-y: auto; background: #242424;
+  border: 1px solid var(--accent); border-radius: 6px; box-shadow: 0 6px 18px #000a; }
+.ac-opt { padding: 6px 8px; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+.ac-opt.active, .ac-opt:hover { background: #0d3a4d; }
