@@ -2,7 +2,7 @@
    (the page is served under the HA ingress X-Ingress-Path prefix). */
 "use strict";
 
-const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "sparkline", "blank"];
+const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "sparkline", "custom", "blank"];
 // fields per widget type, mirroring render._WIDGET_TEMPLATE_FIELDS plus the
 // other keys screens.py / render.py read
 const FIELDS = {
@@ -11,12 +11,52 @@ const FIELDS = {
   ring:       ["value", "max", "label", "unit", "unit_newline", "color"],
   bar:        ["value", "max", "label", "unit", "color"],
   icon:       ["icon", "text", "color"],
-  image:      ["source", "fit"],
+  image:      ["source"],
   sparkline:  ["entity", "hours", "unit", "color"],
+  custom:     [],
   blank:      [],
 };
+// less used fields, behind "More options"
+const MORE = {
+  text:       ["valign"],
+  big_number: ["value_size", "unit_size", "label_size", "value_color", "unit_color", "label_color"],
+  ring:       ["radius", "thickness", "value_size", "unit_size", "label_size", "value_color", "label_color"],
+  bar:        ["value_size", "label_size", "value_color", "label_color"],
+  icon:       ["icon_size", "text_size", "text_color"],
+};
+// what a custom tube is made of (render.ITEM_TYPES) and each item's fields
+const ITEM_FIELDS = {
+  text:  ["text", "x", "y", "size", "weight", "align", "color", "width", "height"],
+  ring:  ["value", "max", "x", "y", "radius", "thickness", "color", "track", "start", "sweep"],
+  bar:   ["value", "max", "x", "y", "width", "height", "direction", "color", "track"],
+  icon:  ["icon", "x", "y", "size", "color"],
+  image: ["source", "x", "y", "width", "height"],
+  rect:  ["x", "y", "width", "height", "radius", "color"],
+};
+const ITEM_NEW = {
+  text:  { type: "text", text: "Text", x: 67, y: 120, size: 20 },
+  ring:  { type: "ring", value: "50", max: 100, x: 67, y: 70, radius: 52, thickness: 10 },
+  bar:   { type: "bar", value: "50", max: 100, x: 67, y: 200, width: 110, height: 10 },
+  icon:  { type: "icon", icon: "mdi:star", x: 67, y: 120, size: 64 },
+  image: { type: "image", source: "builtin:claude", x: 67, y: 120, width: 135, height: 135 },
+  rect:  { type: "rect", x: 67, y: 120, width: 100, height: 2, color: "#444444" },
+};
 const VALUE_FIELDS = ["value", "text"];   // get the Entity/Fixed/Template source picker
-const COLOR_FIELDS = ["color"];
+const SELECTS = {                         // first option = the default, not written to the file
+  align: ["center", "left", "right"],
+  valign: ["middle", "top", "bottom"],
+  weight: ["", "bold"],
+  direction: ["", "right", "up", "left", "down"],
+};
+const MULTILINE = ["label", "unit"];      // Enter adds a line
+const HINTS = {
+  size: "auto", value_size: "auto", unit_size: "auto", label_size: "auto", icon_size: "auto", text_size: "auto",
+  radius: "52", thickness: "12", max: "100", start: "-90", sweep: "360",
+  width: "auto size: fit in", height: "auto size: fit in",
+};
+const isColorField = (f) => f === "color" || f.endsWith("_color") || f === "track";
+const hasTemplate = (v) => typeof v === "string" && (v.includes("{{") || v.includes("{%"));
+const TUBE_W = 135, TUBE_H = 240;
 
 const state = {
   data: null,          // parsed screens file
@@ -29,7 +69,10 @@ const state = {
   dirty: false,
   previewTimer: null,
   previewUrl: null,
+  designerRefresh: null,   // set while a custom tube's designer is open
+  designerSel: null,       // which of its items is selected
 };
+const stash = new WeakMap();   // screen -> the tubes / strip it had before its layout was switched
 
 const $ = (id) => document.getElementById(id);
 
@@ -224,6 +267,7 @@ function renderScreenSettings() {
   $("scrRefresh").value = s.refresh != null ? s.refresh : "";
   $("scrBackground").value = /^#[0-9a-fA-F]{6}$/.test(s.background || "") ? s.background : "#000000";
   $("scrWhen").value = s.when || "";
+  $("scrLayout").value = s.strip ? "strip" : "tubes";
 }
 
 function bindScreenSettings() {
@@ -253,6 +297,21 @@ function bindScreenSettings() {
 
 function curScreen() { return state.data.screens[state.selectedScreen]; }
 
+$("scrLayout").addEventListener("change", (e) => {
+  const s = curScreen(); if (!s) return;
+  const keep = stash.get(s) || {};
+  if (e.target.value === "strip" && !s.strip) {
+    keep.tubes = s.tubes; delete s.tubes;
+    s.strip = keep.strip || { source: "builtin:claude", fit: "contain" };
+  } else if (e.target.value === "tubes" && s.strip) {
+    keep.strip = s.strip; delete s.strip;
+    s.tubes = keep.tubes || Array.from({ length: 6 }, () => ({ type: "blank" }));
+  }
+  stash.set(s, keep);
+  state.selectedTube = null;
+  markDirty(); renderTubeEditor(); schedulePreview(0);
+});
+
 // ---------------------------------------------------------------- preview
 
 function schedulePreview(ms) {
@@ -264,6 +323,7 @@ async function refreshPreview() {
   const s = curScreen();
   const box = $("tubes");
   if (!s) { box.innerHTML = ""; return; }
+  if (state.designerRefresh) state.designerRefresh();
   if (state.previewUrl) { URL.revokeObjectURL(state.previewUrl); state.previewUrl = null; }
   const { status, res, body } = await api("api/preview", {
     method: "POST",
@@ -292,7 +352,11 @@ async function refreshPreview() {
       img.textContent = "tap to edit";
     }
     img.title = "tube " + i;
-    img.addEventListener("click", () => { state.selectedTube = i; renderTubeEditor(); markSelectedTube(); });
+    img.addEventListener("click", () => {
+      if (curScreen().strip) return;      // one picture: nothing per tube to edit
+      if (state.selectedTube !== i) state.designerSel = null;
+      state.selectedTube = i; renderTubeEditor(); markSelectedTube();
+    });
     box.appendChild(img);
   }
 }
@@ -310,8 +374,20 @@ $("refreshPreview").addEventListener("click", () => refreshPreview());
 function renderTubeEditor() {
   const panel = $("tubeEditor");
   const s = curScreen();
+  state.designerRefresh = null;
+  if (s && s.strip) {
+    // One picture across all six tubes: choose it and drag it into place
+    panel.classList.remove("hidden");
+    $("tubeTypeRow").classList.add("hidden");
+    $("tubeTitle").textContent = "Picture across all six tubes";
+    const box = $("tubeFields");
+    box.innerHTML = "";
+    box.appendChild(imageSourceField(s.strip, "source", 6 * TUBE_W, TUBE_H));
+    return;
+  }
   if (!s || state.selectedTube == null || !s.tubes) { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
+  $("tubeTypeRow").classList.remove("hidden");
   const w = s.tubes[state.selectedTube] || { type: "blank" };
   $("tubeTitle").textContent = "Tube " + state.selectedTube + " — " + (w.type || "?");
   const sel = $("tType");
@@ -331,15 +407,34 @@ function buildTubeFields(w) {
   const box = $("tubeFields");
   box.innerHTML = "";
   const type = w.type || "blank";
+  if (type === "custom") { box.appendChild(customEditor(w)); return; }
   (FIELDS[type] || []).forEach((f) => box.appendChild(fieldRow(w, f)));
+  const more = MORE[type] || [];
+  if (more.length) {
+    const d = document.createElement("details");
+    d.className = "more field-grid";
+    d.open = more.some((f) => w[f] != null);
+    const sum = document.createElement("summary");
+    sum.textContent = "More options (sizes, colours)";
+    d.appendChild(sum);
+    more.forEach((f) => d.appendChild(fieldRow(w, f)));
+    box.appendChild(d);
+  }
+  if (type !== "blank") {
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "Need something this type can't do? Change the type to custom: the tube keeps its " +
+      "contents as separate pieces you can move, resize and add to.";
+    box.appendChild(hint);
+  }
 }
 
-function fieldRow(w, f) {
+function fieldRow(w, f, opts) {
   const row = document.createElement("div");
   row.className = "field-row";
   if (VALUE_FIELDS.includes(f)) {
     row.appendChild(valueSourceEditor(w, f));
-  } else if (COLOR_FIELDS.includes(f)) {
+  } else if (isColorField(f)) {
     row.appendChild(colorEditor(w, f));
   } else if (f === "unit_newline") {
     const lab = document.createElement("label");
@@ -348,22 +443,14 @@ function fieldRow(w, f) {
     cb.addEventListener("change", () => { if (cb.checked) w[f] = true; else delete w[f]; markDirty(); schedulePreview(); });
     lab.append(cb, document.createTextNode(" unit on new line"));
     row.appendChild(lab);
-  } else if (f === "align") {
-    row.appendChild(selectField(w, f, ["center", "left", "right"]));
-  } else if (f === "weight") {
-    row.appendChild(selectField(w, f, ["", "bold"]));
-  } else if (f === "fit") {
-    row.appendChild(selectField(w, f, ["cover", "contain"]));
-  } else if (f === "size") {
-    row.appendChild(selectField(w, f, ["auto", "8", "12", "16", "20", "24", "32", "48", "64", "96", "120"]));
+  } else if (SELECTS[f]) {
+    row.appendChild(selectField(w, f, SELECTS[f]));
   } else if (f === "icon") {
     row.appendChild(iconField(w, f));
   } else if (f === "source") {
-    row.appendChild(imageSourceField(w, f));
-  } else if (f === "max" || f === "hours") {
-    row.appendChild(numberField(w, f));
+    row.appendChild(imageSourceField(w, f, (opts && opts.cw) || TUBE_W, (opts && opts.ch) || TUBE_H));
   } else {
-    row.appendChild(textField(w, f));
+    row.appendChild(smartField(w, f));
   }
   return row;
 }
@@ -410,7 +497,7 @@ function iconField(w, f) {
 }
 
 // ---- image source: picture library (file:<name>), Claude logo, or anything typed in ----------
-function imageSourceField(w, f) {
+function imageSourceField(w, f, cw, ch) {
   const wrap = document.createElement("div");
   wrap.className = "field wide";
   const grid = document.createElement("div");
@@ -422,9 +509,18 @@ function imageSourceField(w, f) {
   const msg = document.createElement("span");
   msg.className = "status";
 
+  const place = document.createElement("div");
+  function drawPlace() {
+    place.innerHTML = "";
+    if (w[f] && w[f] !== "builtin:claude") place.appendChild(positioner(w, f, cw, ch));
+  }
+
   function choose(src) {
     w[f] = src; input.value = src;
-    markDirty(); schedulePreview(); drawGrid();
+    // a different picture starts whole and centred
+    ["zoom", "offset_x", "offset_y", "rotate"].forEach((k) => delete w[k]);
+    if (src !== "builtin:claude") w.fit = "contain";
+    markDirty(); schedulePreview(); drawGrid(); drawPlace();
   }
 
   function tile(label, src, thumbUrl, deletable) {
@@ -484,37 +580,50 @@ function imageSourceField(w, f) {
 
   input.addEventListener("change", () => {
     if (input.value) w[f] = input.value; else delete w[f];
-    markDirty(); schedulePreview(); drawGrid();
+    markDirty(); schedulePreview(); drawGrid(); drawPlace();
   });
-  wrap.append(labelEl("picture"), grid, input, msg);
-  drawGrid();
+  wrap.append(labelEl("picture"), grid, input, msg, place);
+  drawGrid(); drawPlace();
   return wrap;
 }
 
-function textField(w, f) {
-  const wrap = document.createElement("label");
-  wrap.className = "field";
-  const input = document.createElement("input");
-  input.type = "text"; input.value = w[f] != null ? String(w[f]) : "";
-  input.addEventListener("change", () => {
-    if (input.value) w[f] = input.value; else delete w[f];
+// Any other field: fixed text or number, or a template (its live result shows underneath)
+function smartField(w, f) {
+  const wrap = document.createElement("div");
+  wrap.className = "field smart";
+  const multi = MULTILINE.includes(f);
+  const input = document.createElement(multi ? "textarea" : "input");
+  const cur = w[f] != null && w[f] !== "auto" ? String(w[f]) : "";
+  if (multi) input.rows = Math.max(1, cur.split("\n").length); else input.type = "text";
+  input.value = cur;
+  const hint = (f === "width" || f === "height") && w.type !== "text" ? "" : HINTS[f];
+  input.placeholder = hint || (multi ? "text or {{ template }}; Enter for a new line" : "");
+  const out = document.createElement("div");
+  out.className = "template-result";
+  let timer = null;
+  async function live() {
+    const t = input.value;
+    if (!hasTemplate(t)) { out.textContent = ""; return; }
+    const { body } = await api("api/template", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ template: t }),
+    });
+    out.textContent = body && body.result != null ? "→ " + body.result : (body && body.error ? "error: " + body.error : "");
+  }
+  input.addEventListener("input", () => {
+    const v = input.value;
+    if (multi) input.rows = Math.max(1, v.split("\n").length);
+    if (v.trim() === "") delete w[f];
+    else if (!multi && /^-?\d+(\.\d+)?$/.test(v.trim())) w[f] = Number(v.trim());
+    else w[f] = v;
     markDirty(); schedulePreview();
+    clearTimeout(timer); timer = setTimeout(live, 400);
   });
-  wrap.append(labelEl(f), input);
-  return wrap;
-}
-
-function numberField(w, f) {
-  const wrap = document.createElement("label");
-  wrap.className = "field";
-  const input = document.createElement("input");
-  input.type = "number"; input.value = w[f] != null ? w[f] : "";
-  input.addEventListener("change", () => {
-    const v = parseFloat(input.value);
-    if (!isNaN(v)) w[f] = v; else delete w[f];
-    markDirty(); schedulePreview();
-  });
-  wrap.append(labelEl(f), input);
+  const line = document.createElement("label");
+  line.className = "field";
+  line.append(labelEl(f.replace(/_/g, " ")), input);
+  wrap.append(line, out);
+  live();
   return wrap;
 }
 
@@ -529,13 +638,405 @@ function selectField(w, f, options) {
   });
   sel.value = w[f] != null ? String(w[f]) : options[0];
   sel.addEventListener("change", () => {
-    if (sel.value === options[0] && (f === "align" || f === "weight" || f === "fit" || f === "size")) delete w[f];
-    else if (f === "size" && sel.value !== "auto") w[f] = parseInt(sel.value, 10);
-    else w[f] = sel.value;
+    if (sel.value === options[0]) delete w[f]; else w[f] = sel.value;
     markDirty(); schedulePreview();
   });
-  wrap.append(labelEl(f), sel);
+  wrap.append(labelEl(f.replace(/_/g, " ")), sel);
   return wrap;
+}
+
+// ---- picture placement: drag to move, pinch / wheel / slider to zoom -------------------
+// Writes fit: contain plus zoom, offset_x, offset_y, rotate and background, which render.py's
+// _fit_image reads; the drawing here uses the same sums, so what you see is what the tube gets.
+function positioner(w, f, cw, ch) {
+  const wrap = document.createElement("div");
+  wrap.className = "positioner";
+  const canvas = document.createElement("canvas");
+  const S = cw > 400 ? 1 : 2;
+  canvas.width = cw * S; canvas.height = ch * S;
+  canvas.className = "pos-canvas" + (cw > 400 ? " wide" : "");
+  canvas.style.aspectRatio = cw + " / " + ch;
+  if (cw <= 400) canvas.style.width = Math.min(270, cw * 2) + "px";
+  const g = canvas.getContext("2d");
+  const msg = document.createElement("div");
+  msg.className = "status";
+  msg.textContent = "loading picture…";
+  let img = null, zoom = 1, ox = 0, oy = 0, rot = 0;
+
+  const num = (v, d) => (typeof v === "number" && isFinite(v) ? v : (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : d));
+  const hex = (v) => (/^#[0-9a-fA-F]{6}$/.test(v || "") ? v : null);
+  const screenBg = () => hex((curScreen() || {}).background) || "#000000";
+  const bgNow = () => hex(w.background) || screenBg();
+
+  function turned() {         // the picture's size once rotated
+    const a = rot * Math.PI / 180, c = Math.abs(Math.cos(a)), sn = Math.abs(Math.sin(a));
+    return [img.width * c + img.height * sn, img.width * sn + img.height * c];
+  }
+  const contain = () => { const [sw, sh] = turned(); return Math.min(cw / sw, ch / sh); };
+  const cover = () => { const [sw, sh] = turned(); return Math.max(cw / sw, ch / sh); };
+
+  function read() {
+    rot = num(w.rotate, 0);
+    zoom = num(w.zoom, 1);
+    if ((w.fit || "cover") !== "contain") zoom *= cover() / contain();
+    ox = num(w.offset_x, 0); oy = num(w.offset_y, 0);
+  }
+
+  function draw() {
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.fillStyle = bgNow();
+    g.fillRect(0, 0, canvas.width, canvas.height);
+    if (!img) return;
+    g.setTransform(S, 0, 0, S, 0, 0);
+    g.save();
+    g.translate(cw / 2 + ox, ch / 2 + oy);
+    g.rotate(-rot * Math.PI / 180);
+    const sc = contain() * zoom;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, -img.width * sc / 2, -img.height * sc / 2, img.width * sc, img.height * sc);
+    g.restore();
+    if (cw > TUBE_W) {        // where one tube ends and the next begins
+      g.strokeStyle = "rgba(255,255,255,0.45)"; g.lineWidth = 1; g.setLineDash([4, 4]);
+      for (let x = TUBE_W; x < cw; x += TUBE_W) { g.beginPath(); g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, ch); g.stroke(); }
+      g.setLineDash([]);
+    }
+    slider.value = Math.log2(zoom);
+    zoomOut.textContent = Math.round(zoom * 100) + "%";
+  }
+
+  function commit() {
+    zoom = Math.max(0.05, Math.min(20, zoom));
+    w.fit = "contain";
+    const z = Math.round(zoom * 1000) / 1000;
+    if (z !== 1) w.zoom = z; else delete w.zoom;
+    if (Math.round(ox)) w.offset_x = Math.round(ox); else delete w.offset_x;
+    if (Math.round(oy)) w.offset_y = Math.round(oy); else delete w.offset_y;
+    const r = ((Math.round(rot) % 360) + 360) % 360;
+    if (r) w.rotate = r; else delete w.rotate;
+    draw(); markDirty(); schedulePreview();
+  }
+
+  // one finger / mouse drags, two fingers pinch
+  const pts = new Map();
+  let pinch = null;
+  const scale = () => cw / canvas.getBoundingClientRect().width;   // screen px -> tube px
+  canvas.addEventListener("pointerdown", (e) => {
+    if (!img) return;
+    canvas.setPointerCapture(e.pointerId);
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom };
+    }
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    const p = pts.get(e.pointerId);
+    if (!p) return;
+    if (pts.size === 1) {
+      ox += (e.clientX - p.x) * scale(); oy += (e.clientY - p.y) * scale();
+    }
+    p.x = e.clientX; p.y = e.clientY;
+    if (pts.size === 2 && pinch) {
+      const [a, b] = [...pts.values()];
+      zoom = Math.max(0.05, Math.min(20, pinch.zoom * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d));
+    }
+    draw();
+  });
+  const up = (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    if (pts.size === 0) commit();
+  };
+  canvas.addEventListener("pointerup", up);
+  canvas.addEventListener("pointercancel", up);
+  let wheelTimer = null;
+  canvas.addEventListener("wheel", (e) => {
+    if (!img) return;
+    e.preventDefault();
+    zoom = Math.max(0.05, Math.min(20, zoom * Math.exp(-e.deltaY * 0.0015)));
+    draw();
+    clearTimeout(wheelTimer); wheelTimer = setTimeout(commit, 250);
+  }, { passive: false });
+
+  const controls = document.createElement("div");
+  controls.className = "pos-controls";
+  const slider = document.createElement("input");
+  slider.type = "range"; slider.min = "-4"; slider.max = "4"; slider.step = "0.01"; slider.value = "0";
+  slider.title = "zoom";
+  slider.addEventListener("input", () => { zoom = Math.pow(2, parseFloat(slider.value)); draw(); });
+  slider.addEventListener("change", commit);
+  const zoomOut = document.createElement("span");
+  zoomOut.className = "unit";
+  const zoomRow = document.createElement("label");
+  zoomRow.className = "field";
+  zoomRow.append(labelEl("zoom"), slider, zoomOut);
+  const buttons = document.createElement("div");
+  buttons.className = "row";
+  buttons.append(
+    mkBtn("Whole picture", () => { zoom = 1; ox = 0; oy = 0; commit(); }, "show all of the picture"),
+    mkBtn("Fill", () => { zoom = cover() / contain(); ox = 0; oy = 0; commit(); }, "fill the tube, cropping the picture"),
+    mkBtn("Centre", () => { ox = 0; oy = 0; commit(); }),
+    mkBtn("Rotate", () => {
+      const fill = Math.abs(zoom - cover() / contain()) < 0.002;
+      rot = (Math.round(rot / 90) * 90 + 270) % 360;      // a quarter turn clockwise
+      if (fill) zoom = cover() / contain();
+      commit();
+    }, "turn a quarter turn"),
+  );
+  const bg = document.createElement("input");
+  bg.type = "color"; bg.value = bgNow();
+  bg.addEventListener("input", () => { w.background = bg.value; draw(); markDirty(); schedulePreview(); });
+  const bgRow = document.createElement("label");
+  bgRow.className = "field";
+  bgRow.append(labelEl("background"), bg,
+    mkBtn("same as screen", (e) => { e.preventDefault(); delete w.background; bg.value = bgNow(); draw(); markDirty(); schedulePreview(); }));
+  controls.append(zoomRow, buttons, bgRow);
+  [slider, bg, ...buttons.querySelectorAll("button")].forEach((el) => { el.disabled = true; });
+
+  (async function load() {
+    const { status, res, body } = await api("api/source_image", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: w[f] }),
+    });
+    if (status !== 200) { msg.textContent = "can't show this picture here: " + ((body && body.error) || status); return; }
+    const url = URL.createObjectURL(await res.blob());
+    const im = new Image();
+    im.onload = () => {
+      img = im; read(); draw();
+      msg.textContent = "Drag the picture to move it. Pinch, scroll or use the slider to zoom.";
+      [slider, bg, ...buttons.querySelectorAll("button")].forEach((el) => { el.disabled = false; });
+    };
+    im.onerror = () => { msg.textContent = "can't show this picture here"; };
+    im.src = url;
+  })();
+
+  draw();
+  wrap.append(labelEl("position"), canvas, msg, controls);
+  return wrap;
+}
+
+// ---- custom tube: designer --------------------------------------------------------------
+// The tube is drawn by the app (so fonts and sizes are exact); the outlines over it are where
+// each item ended up (X-Item-Boxes from api/preview) and can be dragged.
+function customEditor(w) {
+  if (!Array.isArray(w.items)) w.items = [];
+  const tube = state.selectedTube;
+  const wrap = document.createElement("div");
+  wrap.className = "designer";
+  const stage = document.createElement("div");
+  stage.className = "designer-stage";
+  const pic = document.createElement("img");
+  pic.alt = "tube preview"; pic.draggable = false;
+  const overlay = document.createElement("div");
+  overlay.className = "designer-overlay";
+  stage.append(pic, overlay);
+  const side = document.createElement("div");
+  side.className = "designer-side";
+  const addRow = document.createElement("div");
+  addRow.className = "row";
+  const list = document.createElement("ul");
+  list.className = "item-list";
+  const fields = document.createElement("div");
+  fields.className = "field-grid";
+  side.append(addRow, list, fields);
+  wrap.append(stage, side);
+
+  const numOr = (v, d) => (typeof v === "number" ? v : (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : d));
+  let boxes = [], seq = 0, picUrl = null, dragging = false;
+
+  function summary(it) {
+    const v = it.type === "text" ? it.text : it.type === "icon" ? it.icon : it.type === "image" ? it.source
+      : (it.type === "ring" || it.type === "bar") ? it.value : "";
+    const t = v == null ? "" : String(v).replace(/\s+/g, " ");
+    return it.type + (t ? ": " + (t.length > 26 ? t.slice(0, 26) + "…" : t) : "");
+  }
+
+  function changed() { markDirty(); schedulePreview(0); }
+
+  function select(i, keepFields) {
+    state.designerSel = i;
+    drawList(); drawBoxes();
+    if (!keepFields) drawFields();
+  }
+
+  function drawList() {
+    list.innerHTML = "";
+    w.items.forEach((it, i) => {
+      const li = document.createElement("li");
+      li.className = "item-row" + (i === state.designerSel ? " selected" : "");
+      const name = document.createElement("span");
+      name.className = "rot-name"; name.textContent = summary(it);
+      name.addEventListener("click", () => select(i));
+      const move = (d) => () => {
+        const j = i + d;
+        if (j < 0 || j >= w.items.length) return;
+        [w.items[i], w.items[j]] = [w.items[j], w.items[i]];
+        state.designerSel = j; drawList(); changed();
+      };
+      li.append(name,
+        mkBtn("↑", move(-1), "further back"), mkBtn("↓", move(1), "further forward"),
+        mkBtn("⧉", () => {
+          const copy = JSON.parse(JSON.stringify(it));
+          if (typeof copy.y === "number") copy.y += 16;
+          w.items.splice(i + 1, 0, copy); state.designerSel = i + 1; drawList(); drawFields(); changed();
+        }, "duplicate"),
+        mkBtn("×", () => {
+          w.items.splice(i, 1);
+          state.designerSel = w.items.length ? Math.min(i, w.items.length - 1) : null;
+          drawList(); drawFields(); changed();
+        }, "delete"));
+      list.appendChild(li);
+    });
+    if (!w.items.length) {
+      const li = document.createElement("li");
+      li.className = "hint"; li.textContent = "Empty tube. Add something with the buttons above.";
+      list.appendChild(li);
+    }
+  }
+
+  function drawFields() {
+    fields.innerHTML = "";
+    const it = w.items[state.designerSel];
+    if (!it) return;
+    const head = document.createElement("h3");
+    head.textContent = it.type + (it.type === "text" && (it.align === "left" || it.align === "right")
+      ? " (x is its " + it.align + " edge)" : "");
+    fields.appendChild(head);
+    (ITEM_FIELDS[it.type] || []).forEach((f) => {
+      fields.appendChild(fieldRow(it, f, { cw: Math.round(numOr(it.width, TUBE_W)), ch: Math.round(numOr(it.height, TUBE_H)) }));
+    });
+  }
+
+  function drawBoxes() {
+    overlay.innerHTML = "";
+    boxes.forEach((b, i) => {
+      if (!w.items[i]) return;
+      const el = document.createElement("div");
+      el.className = "item-box" + (i === state.designerSel ? " selected" : "");
+      el.style.left = (b[0] / TUBE_W * 100) + "%";
+      el.style.top = (b[1] / TUBE_H * 100) + "%";
+      el.style.width = (Math.max(b[2] - b[0], 6) / TUBE_W * 100) + "%";
+      el.style.height = (Math.max(b[3] - b[1], 6) / TUBE_H * 100) + "%";
+      el.title = summary(w.items[i]);
+      el.addEventListener("pointerdown", (e) => startDrag(e, el, i));
+      overlay.appendChild(el);
+    });
+  }
+
+  function startDrag(e, el, i) {
+    e.preventDefault();
+    const it = w.items[i];
+    if (state.designerSel !== i) { state.designerSel = i; drawList(); drawFields(); }
+    overlay.querySelectorAll(".item-box").forEach((b) => b.classList.toggle("selected", b === el));
+    // a template for x or y decides the place itself; such an item can't be dragged
+    if (hasTemplate(it.x) || hasTemplate(it.y)) return;
+    el.setPointerCapture(e.pointerId);
+    dragging = true;
+    const k = TUBE_W / stage.getBoundingClientRect().width;
+    const sx = e.clientX, sy = e.clientY;
+    let dx = 0, dy = 0;
+    const move = (ev) => {
+      dx = (ev.clientX - sx) * k; dy = (ev.clientY - sy) * k;
+      el.style.transform = "translate(" + (dx / k) + "px," + (dy / k) + "px)";
+    };
+    const done = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", done);
+      el.removeEventListener("pointercancel", done);
+      dragging = false;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) { drawBoxes(); return; }
+      it.x = Math.round(numOr(it.x, TUBE_W / 2) + dx);
+      it.y = Math.round(numOr(it.y, TUBE_H / 2) + dy);
+      drawFields(); changed();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", done);
+    el.addEventListener("pointercancel", done);
+  }
+
+  async function refresh() {
+    const s = curScreen();
+    if (!s || !s.tubes || s.tubes[tube] !== w) return;
+    const mine = ++seq;
+    const { status, res } = await api("api/preview", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ screen: s, tube }),
+    });
+    if (mine !== seq || status !== 200) return;
+    const blob = await res.blob();
+    if (picUrl) URL.revokeObjectURL(picUrl);
+    picUrl = URL.createObjectURL(blob);
+    pic.src = picUrl;
+    try { boxes = JSON.parse(res.headers.get("X-Item-Boxes") || "[]"); } catch (e) { boxes = []; }
+    if (!dragging) drawBoxes();      // never swap the outline out from under a finger
+  }
+
+  Object.keys(ITEM_NEW).forEach((t) => {
+    addRow.appendChild(mkBtn("+ " + (t === "rect" ? "box / line" : t === "image" ? "picture" : t), () => {
+      w.items.push(JSON.parse(JSON.stringify(ITEM_NEW[t])));
+      state.designerSel = w.items.length - 1;
+      drawList(); drawFields(); changed();
+    }));
+  });
+
+  if (state.designerSel == null || !w.items[state.designerSel]) state.designerSel = w.items.length ? 0 : null;
+  drawList(); drawFields();
+  state.designerRefresh = refresh;
+  refresh();
+  return wrap;
+}
+
+// A widget of another type as custom items laid out roughly the same, so nothing is lost when
+// a tube's type is changed to custom.
+function toCustom(w) {
+  const items = [];
+  const cx = Math.round(TUBE_W / 2);
+  const text = (t, y, more) => { if (t != null && t !== "") items.push(Object.assign({ type: "text", text: t, x: cx, y }, more)); };
+  const col = (c, more) => Object.assign({}, more, c != null ? { color: c } : {});
+  const join = (a, b) => (b == null || b === "" ? a : String(a == null ? "" : a) + String(b));
+  if (w.type === "text") {
+    const align = w.align || "center";
+    text(w.text, 120, col(w.color, Object.assign(
+      { x: align === "left" ? 8 : align === "right" ? TUBE_W - 8 : cx, width: 119, height: 224 },
+      w.size != null && w.size !== "auto" ? { size: w.size } : {},
+      w.weight ? { weight: w.weight } : {}, align !== "center" ? { align } : {})));
+  } else if (w.type === "big_number") {
+    const big = { weight: "bold", width: 127 };
+    if (w.unit && w.unit_newline) {
+      text(w.value, 86, col(w.value_color || w.color, Object.assign({ height: 96 }, big, w.value_size ? { size: w.value_size } : {})));
+      text(w.unit, 166, col(w.unit_color || w.color, Object.assign({ height: 30 }, big, w.unit_size ? { size: w.unit_size } : {})));
+    } else {
+      text(join(w.value, w.unit), w.label ? 106 : 120, col(w.value_color || w.color,
+        Object.assign({ height: w.label ? 130 : 200 }, big, w.value_size ? { size: w.value_size } : {})));
+    }
+    text(w.label, 206, col(w.label_color || w.color, { size: w.label_size || 18 }));
+  } else if (w.type === "ring") {
+    const r = Number(w.radius) || 52, th = Number(w.thickness) || 12;
+    items.push(col(w.color, Object.assign({ type: "ring", value: w.value, x: cx, y: 104, radius: r, thickness: th },
+      w.max != null ? { max: w.max } : {})));
+    const inner = 2 * (r - th);
+    if (w.unit && w.unit_newline) {
+      text(w.value, 96, col(w.value_color, { weight: "bold", width: inner, height: 34, size: w.value_size || "auto" }));
+      text(w.unit, 128, col(w.unit_color || w.value_color, { weight: "bold", size: w.unit_size || 16 }));
+    } else {
+      text(join(w.value, w.unit), 104, col(w.value_color, { weight: "bold", width: inner, height: 30, size: w.value_size || "auto" }));
+    }
+    text(w.label, 104 + r + 18, col(w.label_color, { size: w.label_size || 16 }));
+  } else if (w.type === "bar") {
+    items.push(col(w.color, Object.assign({ type: "bar", value: w.value, x: cx, y: 104, width: 75, height: 160, radius: 4, direction: "up" },
+      w.max != null ? { max: w.max } : {})));
+    text(join(w.value, w.unit), 104, col(w.value_color, { weight: "bold", width: 70, height: 26, size: w.value_size || "auto" }));
+    text(w.label, 210, col(w.label_color, { size: w.label_size || 16 }));
+  } else if (w.type === "icon") {
+    if (w.icon) items.push(col(w.color, { type: "icon", icon: w.icon, x: cx, y: w.text ? 88 : 120, size: w.icon_size || (w.text ? 96 : 120) }));
+    text(w.text, 170, col(w.text_color, { width: 123, height: 60, size: w.text_size || 24 }));
+  } else if (w.type === "image" && w.source) {
+    const it = { type: "image", source: w.source, x: cx, y: 120, width: TUBE_W, height: TUBE_H, fit: w.fit || "cover" };
+    ["zoom", "offset_x", "offset_y", "rotate", "background"].forEach((k) => { if (w[k] != null) it[k] = w[k]; });
+    items.push(it);
+  }
+  return { type: "custom", items };
 }
 
 // ---- value source: Entity / Fixed / Template ------------------------------
@@ -639,9 +1140,13 @@ function valueSourceEditor(w, f) {
       body.appendChild(row);
       search();
     } else if (mode === "fixed") {
-      const input = document.createElement("input");
-      input.type = "text"; input.value = current;
-      input.addEventListener("change", () => apply(input.value));
+      const input = document.createElement("textarea");
+      input.rows = Math.max(1, current.split("\n").length); input.value = hasTemplate(current) ? "" : current;
+      input.placeholder = "Enter for a new line";
+      input.addEventListener("input", () => {
+        input.rows = Math.max(1, input.value.split("\n").length);
+        apply(input.value);
+      });
       const lab = document.createElement("label");
       lab.className = "field";
       lab.append(labelEl(f), input);
@@ -691,7 +1196,7 @@ function colorEditor(w, f) {
   const m = current.match(THRESH_RE);
   let mode = "template";
   if (m) mode = "thresholds";
-  else if (/^#[0-9a-fA-F]{3,6}$/.test(current)) mode = "fixed";
+  else if (current === "" || /^#[0-9a-fA-F]{3,6}$/.test(current)) mode = "fixed";
 
   const tabs = document.createElement("div");
   tabs.className = "tabs";
@@ -722,13 +1227,15 @@ function colorEditor(w, f) {
       input.type = "color";
       // With no colour set, start from what the tube really shows (icons, rings, bars and
       // sparklines default to Claude orange), so picking white is a real change that gets saved
-      const fallback = ["icon", "ring", "bar", "sparkline"].includes(w.type) ? "#d97757" : "#ffffff";
+      const fallback = f === "track" ? "#3c3c3c" : f !== "color" ? "#ffffff"
+        : ["icon", "ring", "bar", "sparkline"].includes(w.type) ? "#d97757" : "#ffffff";
       input.value = /^#[0-9a-fA-F]{6}$/.test(current) ? current : fallback;
       input.addEventListener("input", () => apply(input.value));
       input.addEventListener("change", () => apply(input.value));
+      const reset = mkBtn("default", () => { input.value = fallback; apply(""); }, "use the default colour");
       const lab = document.createElement("label");
       lab.className = "field";
-      lab.append(labelEl(f), input);
+      lab.append(labelEl(f.replace(/_/g, " ")), input, reset);
       body.appendChild(lab);
     } else if (mode === "thresholds") {
       const ent = m ? m[1] : "";
@@ -791,7 +1298,7 @@ function colorEditor(w, f) {
   let opening = true;
   setMode(mode);
   opening = false;
-  wrap.append(labelEl(f + " source"), tabs, body);
+  wrap.append(labelEl(f.replace(/_/g, " ") + " source"), tabs, body);
   return wrap;
 }
 
@@ -801,9 +1308,11 @@ $("tType").addEventListener("change", (e) => {
   const s = curScreen(); if (!s || state.selectedTube == null) return;
   const w = s.tubes[state.selectedTube];
   const old = { ...w };
-  const nw = { type: e.target.value };
+  let nw = { type: e.target.value };
   // keep fields that exist for the new type
-  (FIELDS[e.target.value] || []).forEach((f) => { if (f in old) nw[f] = old[f]; });
+  (FIELDS[e.target.value] || []).concat(MORE[e.target.value] || []).forEach((f) => { if (f in old) nw[f] = old[f]; });
+  if (e.target.value === "custom") nw = toCustom(old);
+  state.designerSel = null;
   s.tubes[state.selectedTube] = nw;
   markDirty(); renderTubeEditor(); schedulePreview();
 });

@@ -15,7 +15,8 @@ import yaml
 _LOG = logging.getLogger(__name__)
 
 CLOCK_ENTRY = "clock"  # rotation entry that hands the tubes back to the clock
-WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline", "blank")
+WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline", "custom", "blank")
+ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
 
 
@@ -87,6 +88,19 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
         if "value" not in w:
             errors.append(f"{where}: {wtype} widget needs a 'value'")
             return False
+    if wtype == "custom":
+        items = w.get("items", [])
+        if not isinstance(items, list):
+            errors.append(f"{where}: custom widget 'items' must be a list")
+            return False
+        for n, it in enumerate(items):
+            if not isinstance(it, dict) or it.get("type") not in ITEM_TYPES:
+                kind = it.get("type") if isinstance(it, dict) else type(it).__name__
+                errors.append(f"{where} item {n}: unknown item type {kind!r} (expected one of {', '.join(ITEM_TYPES)})")
+                return False
+            if it["type"] == "image" and it.get("fit", "contain") not in FITS:
+                errors.append(f"{where} item {n}: image 'fit' must be one of {', '.join(FITS)}")
+                return False
     return True
 
 
@@ -229,16 +243,21 @@ screens:
   doorbell:
     strip: {source: "camera:camera.front_door", fit: cover}
 
-# Widget types (all string fields may be Home Assistant templates):
-#   text       text (multi-line with \\n), size: auto fits the tube, align: left|center|right,
-#              weight: bold, color
-#   big_number value + unit + label, auto-sized to fit
-#   ring       circular gauge 0..max, value in the middle, label below, color
+# Widget types (every string field may be a Home Assistant template, and text fields
+# may have several lines with \\n):
+#   text       text, size: auto fits the tube (or a number), align: left|center|right,
+#              valign: top|middle|bottom, weight: bold, color
+#   big_number value + unit + label, auto-sized to fit (value_size, unit_size, label_size)
+#   ring       circular gauge 0..max, value in the middle, label below (several lines move
+#              the ring up), color, thickness, radius, value_size, unit_size, label_size
 #   bar        vertical bar gauge 0..max, value + label
-#   icon       mdi:<name> icon with optional text below, color
+#   icon       mdi:<name> icon with optional text below, color, icon_size, text_size
 #   image      source: builtin:claude | file:<uploaded picture> | http(s)://... | camera:<entity_id> |
-#              entity_picture:<entity_id>, fit: cover|contain
+#              entity_picture:<entity_id>, fit: cover|contain, zoom, offset_x, offset_y, rotate,
+#              background (the editor sets these when you drag the picture into place)
 #   sparkline  entity + hours, line graph from the HA history API, latest value shown
+#   custom     items: a list of text / ring / bar / icon / image / rect, each placed by x, y
+#              (easiest with the editor's designer)
 #   blank      empty tube
 # Colours accept "#RRGGBB" or a template returning one.
 """

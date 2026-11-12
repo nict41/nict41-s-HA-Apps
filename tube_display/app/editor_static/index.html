@@ -42,6 +42,10 @@
         <label>duration <input type="number" id="scrDuration" min="1" step="1" placeholder="default"></label>
         <label>refresh <input type="number" id="scrRefresh" min="1" step="1" placeholder="default"></label>
         <label>background <input type="color" id="scrBackground" value="#000000"></label>
+        <label>layout <select id="scrLayout">
+          <option value="tubes">six tubes</option>
+          <option value="strip">one picture across all six</option>
+        </select></label>
         <label class="wide">when (template, optional) <input type="text" id="scrWhen" placeholder="{{ is_state('...','on') }}"></label>
       </div>
       <div class="row">
@@ -60,7 +64,7 @@
 
     <div class="card tube-editor hidden" id="tubeEditor">
       <h2 id="tubeTitle">Tube</h2>
-      <div class="row">
+      <div class="row" id="tubeTypeRow">
         <label>type
           <select id="tType"></select>
         </label>

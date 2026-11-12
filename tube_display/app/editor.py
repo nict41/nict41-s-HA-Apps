@@ -10,6 +10,7 @@ everything at the root of its own site.
 - GET  api/config            {"yaml", "data", "mtime", "errors"}
 - POST api/validate          {"data": {...}} -> {"errors": [...]}
 - POST api/preview           {"screen": {...}, "tube": optional int} -> PNG
+- POST api/source_image      {"source": "..."} -> PNG of the picture itself (for placing it)
 - POST api/template          {"template": "..."} -> {"result"|"error"}
 - GET  api/entities?q=<text> up to 50 matching entities (cached ~10 s)
 - POST api/save              {"data": {...}, "mtime": ...} -> round-trip write
@@ -181,13 +182,54 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 screen = _parse_screen("__preview__", fixed, retry)
             if screen is None:
                 return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
-            strip = await render_mod.render_screen(screen, app["controller"]._ctx)
+            # A copy, so a preview running at the same time doesn't share the box recorder
+            import copy
+            ctx = copy.copy(app["controller"]._ctx)
+            headers: dict[str, str] = {}
+            if errors:
+                headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
+            # For the designer: where each item of a custom tube ended up
+            ctx.record_boxes = {}
+            strip = await render_mod.render_screen(screen, ctx)
+            boxes = ctx.record_boxes.get(f"__preview__:tube{tube}")
             if tube is not None:
                 from rgb565 import TUBE_W
                 strip = strip.crop((tube * TUBE_W, 0, (tube + 1) * TUBE_W, strip.height))
+                if boxes is not None:
+                    import json
+                    headers["X-Item-Boxes"] = json.dumps(boxes)
             buf = io.BytesIO()
             strip.save(buf, format="PNG")
-            return web.Response(body=buf.getvalue(), content_type="image/png", headers={"X-Preview-Errors": " | ".join(errors)[:900].encode("ascii", "replace").decode()} if errors else None)
+            return web.Response(body=buf.getvalue(), content_type="image/png", headers=headers or None)
+        return await ingress_only(request, handler)
+
+    async def api_source_image(request: web.Request) -> web.Response:
+        """The picture behind an image source, upright and no bigger than needed, so the
+        editor can show it while it is dragged into place (works for cameras and URLs too)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            import render as render_mod
+
+            source = body.get("source") if isinstance(body, dict) else None
+            if not isinstance(source, str) or not source:
+                return web.json_response({"error": "body needs a 'source' string"}, status=400)
+            ctx = app["controller"]._ctx
+            try:
+                if render_mod.is_template(source):
+                    source = (await ctx.renderer(source)).strip()
+                img = await render_mod._fetch_image(source, ctx)
+            except Exception as err:
+                return web.json_response({"error": str(err)}, status=400)
+            img = img.copy()
+            img.thumbnail((render_mod.MAX_SOURCE_PX, render_mod.MAX_SOURCE_PX))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return web.Response(body=buf.getvalue(), content_type="image/png",
+                                headers={"Cache-Control": "no-store"})
         return await ingress_only(request, handler)
 
     async def api_template(request: web.Request) -> web.Response:
@@ -292,9 +334,36 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 return LiteralScalarString(value)
             return value
 
+        def _custom(obj: dict):
+            """A custom widget, laid out as a block with one line per item so it stays
+            readable (an item with a multi-line string is written as a block instead)."""
+            from ruamel.yaml.comments import CommentedMap, CommentedSeq
+            out = CommentedMap()
+            for k, v in obj.items():
+                if k != "items" or not isinstance(v, list):
+                    out[k] = _convert(v)
+                    continue
+                seq = CommentedSeq()
+                for it in v:
+                    if isinstance(it, dict):
+                        node = CommentedMap((ik, _convert(iv)) for ik, iv in it.items())
+                        if not any(isinstance(iv, str) and "\n" in iv for iv in it.values()):
+                            node.fa.set_flow_style()
+                        seq.append(node)
+                    else:
+                        seq.append(_convert(it))
+                out[k] = seq
+            return out
+
+        def _is_flow(node) -> bool:
+            fa = getattr(node, "fa", None)
+            return bool(fa is not None and fa.flow_style())
+
         def _convert(obj):
             """Plain data -> ruamel-friendly data (literal blocks for multi-line)."""
             if isinstance(obj, dict):
+                if obj.get("type") == "custom" and "items" in obj:
+                    return _custom(obj)
                 return {k: _convert(v) for k, v in obj.items()}
             if isinstance(obj, list):
                 return [_convert(v) for v in obj]
@@ -304,6 +373,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             """Update `old` (ruamel node) to equal `new`, touching only what changed, so
             untouched screens/tubes keep their comments, flow style and quoting."""
             if isinstance(old, dict) and isinstance(new, dict):
+                if "items" in new and (_is_flow(old) or "items" not in old):
+                    return new      # a tube turned into a custom one: don't squeeze it onto one line
                 for k in [k for k in old if k not in new]:
                     del old[k]
                 for k, v in new.items():
@@ -521,6 +592,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_get("/api/config", api_config)
     app.router.add_post("/api/validate", api_validate)
     app.router.add_post("/api/preview", api_preview)
+    app.router.add_post("/api/source_image", api_source_image)
     app.router.add_post("/api/template", api_template)
     app.router.add_get("/api/entities", api_entities)
     app.router.add_post("/api/save", api_save)

@@ -54,10 +54,16 @@ screens:
 ```
 
 A screen is either `tubes:` (exactly 6 widgets) or `strip:` (one picture
-across all six tubes, `fit: cover` crops to fill, `contain` letterboxes).
+across all six tubes, `fit: cover` crops to fill, `contain` shows the whole
+picture). A strip takes the same placement fields as an `image` widget, see
+[Placing a picture](#placing-a-picture).
 
-All string fields may be Home Assistant templates (`{{ ... }}`), rendered
-concurrently through the Supervisor's API (`POST /api/template`). Colours
+Every string field of a widget may be a Home Assistant template (`{{ ... }}`
+or `{% ... %}`): values, labels, units, colours, sizes, even positions. They
+are rendered
+concurrently through the Supervisor's API (`POST /api/template`). Text fields
+(labels, units, values, icon text) can have several lines: a real line break,
+or `\n` typed in a one-line box. Colours
 accept `#RRGGBB` (or `#RGB`) or a template returning one. If a template fails,
 that widget shows a red `!` and the error is logged once per change, not on
 every refresh.
@@ -66,14 +72,68 @@ every refresh.
 
 | Widget | Fields |
 |---|---|
-| `text` | `text` (multi-line with `\n`), `size: auto` fits the tube (or a number), `align: left\|center\|right`, `weight: bold`, `color` |
-| `big_number` | `value`, `unit`, `label`, `color`, `unit_newline` — auto-sized to fit; `unit_newline: true` puts the unit on its own line so the value can be bigger. With no `unit` and no `label` the value fills the whole tube (e.g. one digit of a time per tube: `value: "{{ now().strftime('%H:%M')[0] }}"`) |
-| `ring` | `value`, `max`, `label`, `unit`, `color` — circular gauge 0..max, value in the middle, label below; `unit_newline: true` puts the unit under the value |
-| `bar` | `value`, `max`, `label`, `unit`, `color` — vertical bar gauge |
-| `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` (default Claude orange). Without `text` the icon is centred and a little bigger |
-| `image` | `source`: `builtin:claude` (procedural orange starburst), `file:<name>` (a picture you uploaded, see [Your own pictures](#your-own-pictures)), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit: cover\|contain` |
+| `text` | `text` (multi-line), `size: auto` fits the tube (or a number of pixels), `align: left\|center\|right`, `valign: top\|middle\|bottom`, `weight: bold`, `color` |
+| `big_number` | `value`, `unit`, `label`, `color`, `unit_newline` — auto-sized to fit; `unit_newline: true` puts the unit on its own line so the value can be bigger. With no `unit` and no `label` the value fills the whole tube (e.g. one digit of a time per tube: `value: "{{ now().strftime('%H:%M')[0] }}"`). Optional `value_size`, `unit_size`, `label_size`, `value_color`, `unit_color`, `label_color` |
+| `ring` | `value`, `max`, `label`, `unit`, `color` — circular gauge 0..max, value in the middle, label below; `unit_newline: true` puts the unit under the value. A label with several lines moves the ring to the top of the tube and uses the rest for the label. Optional `radius` (52), `thickness` (12), `value_size`, `unit_size`, `label_size`, `value_color`, `unit_color`, `label_color` |
+| `bar` | `value`, `max`, `label`, `unit`, `color` — vertical bar gauge. Optional `value_size`, `label_size`, `value_color`, `label_color` |
+| `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` (default Claude orange). Without `text` the icon is centred and a little bigger. Optional `icon_size`, `text_size`, `text_color` |
+| `image` | `source`: `builtin:claude` (procedural orange starburst), `file:<name>` (a picture you uploaded, see [Your own pictures](#your-own-pictures)), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit`, `zoom`, `offset_x`, `offset_y`, `rotate`, `background`, see [Placing a picture](#placing-a-picture) |
 | `sparkline` | `entity`, `hours` (HA history API), optional `unit`, `color` — line graph with the latest value on top |
+| `custom` | `items`: your own layout, see [Custom tubes](#custom-tubes) |
 | `blank` | empty tube |
+
+Sizes are font sizes in pixels; leave one out (or `auto`) and the text is
+fitted to its space as before.
+
+### Placing a picture
+
+A picture of any size or shape can go on a tube (135x240) or across the whole
+strip (810x240). In the editor, pick the picture and drag it into place; these
+are the fields that writes:
+
+| Field | Meaning |
+|---|---|
+| `fit` | `cover` (default) fills the space and crops; `contain` shows the whole picture. The editor always writes `contain` |
+| `zoom` | Multiplies that size: `2` is twice as big, `0.5` half. Default 1 |
+| `offset_x`, `offset_y` | Move the picture's centre away from the middle, in tube pixels (right and down are positive). Default 0 |
+| `rotate` | Degrees, anticlockwise. Default 0 |
+| `background` | Colour behind the picture and through its transparent parts. Default: the screen's background |
+
+```yaml
+- {type: image, source: "file:holiday.jpg", fit: contain, zoom: 1.8, offset_x: -12, offset_y: 30, background: "#000000"}
+```
+
+Phone photos stored sideways are turned upright (their EXIF orientation is
+applied).
+
+### Custom tubes
+
+A `custom` tube is a list of items you place yourself. Each item has `x` and
+`y`, the position of its centre in tube pixels: `0,0` is the top left corner,
+the tube is 135 wide and 240 high. Items are drawn in order, later ones on top.
+It is much easier to build one in the editor's designer than by hand.
+
+```yaml
+- type: custom
+  items:
+    - {type: ring, x: 67, y: 62, radius: 54, thickness: 11, value: "{{ states('sensor.week_usage') }}", max: 100, color: "#4CAF50"}
+    - {type: text, x: 67, y: 62, text: "{{ states('sensor.week_usage') }}%", size: 30, weight: bold}
+    - {type: text, x: 67, y: 150, text: "under pace", size: 20, color: "#4CAF50"}
+    - {type: rect, x: 67, y: 182, width: 90, height: 2, color: "#444444"}
+    - {type: text, x: 67, y: 208, text: "Resets\nThu 10:00", size: 18}
+```
+
+| Item | Fields (besides `x`, `y`) |
+|---|---|
+| `text` | `text` (multi-line), `size` (pixels) or `size: auto` with `width` and `height` of the space to fit in, `weight: bold`, `align: left\|center\|right` (with `left` or `right`, `x` is that edge of the text), `color` |
+| `ring` | `value`, `max`, `radius` (50), `thickness` (10), `color`, `track` (colour of the unfilled part, `none` to hide it), `start` (degrees, −90 = top, 0 = three o'clock), `sweep` (degrees, 360 = full circle; `start: 135, sweep: 270` is a gauge open at the bottom) |
+| `bar` | `value`, `max`, `width`, `height`, `direction: right\|up\|left\|down`, `radius` (corner), `color`, `track` |
+| `icon` | `icon: mdi:<name>`, `size` (64), `color` |
+| `image` | `source`, `width`, `height` and the fields under [Placing a picture](#placing-a-picture) (default `fit: contain`) |
+| `rect` | `width`, `height`, `radius` (corner), `color` — a box, or a line when it is thin |
+
+An item that can't be drawn shows a small red `!` where it should be; the rest
+of the tube still draws.
 
 ## Screen editor (ingress panel)
 
@@ -89,7 +149,8 @@ on the app's Info tab if it isn't there).
 * **Cycle automatically** (top bar): untick it for button-only mode, see
   [The clock's button](#the-clocks-button).
 * **Screens:** add, rename or delete; a screen's duration, refresh, background
-  and optional `when` template.
+  and optional `when` template. **Layout** switches a screen between six tubes
+  and one picture across all six.
 * **Preview:** the screen's six tubes rendered with live values. Tap one to edit
   it. A tube with a mistake shows a red **!** and the error at the top, and
   stays editable.
@@ -97,8 +158,19 @@ on the app's Info tab if it isn't there).
   **entity** (search box, decimals), **fixed** text or a **template** with its
   live result. Colours are **fixed** (colour picker), **thresholds** (an entity
   plus "below N → colour" rows) or a **template**. Icon names autocomplete from
-  Material Design Icons. Image tubes have a picture library with upload.
+  Material Design Icons. Labels, units and sizes take fixed text or a template,
+  with the template's live result underneath; press Enter in a label for another
+  line. **More options** has the sizes and extra colours.
   **Copy**/**Paste** and **←**/**→** copy or move a tube.
+* **Pictures:** image tubes (and one-picture screens) have a picture library
+  with upload. Under it the picture is shown on the tube: drag it to move it,
+  pinch, scroll or use the slider to zoom, **Whole picture** / **Fill** /
+  **Centre** / **Rotate** for the usual positions, and a background colour for
+  whatever the picture doesn't cover.
+* **Custom tubes (designer):** change a tube's type to `custom` and what it
+  showed becomes separate pieces. Drag a piece on the tube to move it, pick one
+  to change its text, size and colour, and add text, rings, bars, icons,
+  pictures and boxes with the **+** buttons. ↑/↓ change which piece is on top.
 * **Save** writes `screens.yaml`; the clock picks it up within a refresh.
   **Edit YAML** shows the whole file for anything the form can't do.
 
@@ -129,7 +201,8 @@ Editor API on the ingress site (all paths relative to the ingress prefix):
 |---|---|
 | `GET api/config` | `{"yaml", "data", "mtime", "errors"}` — the file text, its parsed form, mtime and validation errors. |
 | `POST api/validate` | Body `{"data": {...}}` → `{"errors": [...]}` (same validation as the loader). |
-| `POST api/preview` | Body `{"screen": {...}, "tube": optional int}` → PNG of the 810x240 strip (or one 135x240 tube), rendered with the real pipeline and live HA states. Does not touch the clock or the file. |
+| `POST api/preview` | Body `{"screen": {...}, "tube": optional int}` → PNG of the 810x240 strip (or one 135x240 tube), rendered with the real pipeline and live HA states. Does not touch the clock or the file. For a `custom` tube the `X-Item-Boxes` header lists each item's box `[x0, y0, x1, y1]`. |
+| `POST api/source_image` | Body `{"source": "..."}` → PNG of that picture (upright, at most 1620 pixels a side), used to show it while it is placed. |
 | `POST api/template` | Body `{"template": "..."}` → `{"result": "..."}` or `{"error": "..."}` (live HA template render). |
 | `GET api/entities?q=<text>` | Up to 50 matching `[{"entity_id","name","state","unit"}]` from the Supervisor core API `GET /states` (cached ~10 s). |
 | `POST api/save` | Body `{"data": {...}, "mtime": <from api/config>}` — 409 if the file changed on disk, 400 with errors if invalid; otherwise round-trip update and atomic write. Returns the new mtime. |
@@ -239,4 +312,4 @@ With HA Tubes 2.3.0 or later on the clock, pressing the clock's button while pan
 
 ## Your own pictures
 
-In the screen editor, pick an `image` tube and use **+ Upload** under *picture*. Pictures (.png, .jpg, .gif, .webp, .bmp, up to 10 MB) are saved in `tube_display/images/` next to `screens.yaml` (you can also copy files there with File editor or Samba) and used as `source: file:<name>`. Transparent parts show the screen's background colour; `fit: cover` fills the tube, `fit: contain` shows the whole picture. A tube is 135x240, so tall pictures fit best.
+In the screen editor, pick an `image` tube and use **+ Upload** under *picture*. Pictures (.png, .jpg, .gif, .webp, .bmp, up to 10 MB) are saved in `tube_display/images/` next to `screens.yaml` (you can also copy files there with File editor or Samba) and used as `source: file:<name>`. The picture can be any size or shape: drag and zoom it into place under the library, and choose the colour behind it (see [Placing a picture](#placing-a-picture)). Transparent parts show that colour too.

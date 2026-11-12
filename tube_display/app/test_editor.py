@@ -440,3 +440,69 @@ def test_icon_search(tmp_path, monkeypatch):
         assert body["icons"][:2] == ["mdi:train", "mdi:train-car"]
         assert "mdi:bus" not in body["icons"]
     _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# designer support: item boxes, source pictures, custom tubes in the file
+# ----------------------------------------------------------------------
+
+CUSTOM_TUBE = {"type": "custom", "items": [
+    {"type": "ring", "x": 67, "y": 60, "radius": 50, "value": "40"},
+    {"type": "text", "x": 67, "y": 160, "text": "two\nlines", "size": 16},
+    {"type": "text", "x": 67, "y": 200, "text": "one", "size": 16},
+]}
+
+
+def test_preview_returns_item_boxes_for_a_custom_tube(tmp_path):
+    async def check(client, screens_file):
+        import json
+        cfg = await (await client.get("/api/config")).json()
+        screen = cfg["data"]["screens"]["claude"]
+        screen["tubes"][5] = CUSTOM_TUBE
+        resp = await client.post("/api/preview", json={"screen": screen, "tube": 5})
+        assert resp.status == 200
+        boxes = json.loads(resp.headers["X-Item-Boxes"])
+        assert len(boxes) == 3 and boxes[0] == [17, 10, 117, 110]
+        # other tubes and the whole strip carry no boxes
+        resp = await client.post("/api/preview", json={"screen": screen, "tube": 1})
+        assert "X-Item-Boxes" not in resp.headers
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert "X-Item-Boxes" not in resp.headers
+    _with_client(tmp_path, check)
+
+
+def test_source_image(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.post("/api/source_image", json={"source": "builtin:claude"})
+        assert resp.status == 200 and resp.content_type == "image/png"
+        assert Image.open(io.BytesIO(await resp.read())).size == (TUBE_W, TUBE_H)
+        resp = await client.post("/api/source_image", json={"source": "file:missing.png"})
+        assert resp.status == 400 and "error" in await resp.json()
+        resp = await client.post("/api/source_image", json={})
+        assert resp.status == 400
+    _with_client(tmp_path, check)
+
+
+def test_save_custom_tube_is_readable_yaml(tmp_path):
+    async def check(client, screens_file):
+        cfg = await (await client.get("/api/config")).json()
+        data = cfg["data"]
+        data["screens"]["claude"]["tubes"][1] = CUSTOM_TUBE      # was a one-line {type: ring, ...}
+        resp = await client.post("/api/save", json={"data": data, "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text
+        assert yaml.safe_load(text)["screens"]["claude"]["tubes"][1] == CUSTOM_TUBE
+        lines = text.splitlines()
+        # one item per line, not the whole tube squeezed onto one
+        assert any(ln.strip().startswith("- {type: ring, x: 67") for ln in lines)
+        assert any(ln.strip() == "items:" for ln in lines)
+        assert max(len(ln) for ln in lines if "type: custom" in ln) < 40
+        # saving again with one item moved keeps the layout
+        cfg = await (await client.get("/api/config")).json()
+        cfg["data"]["screens"]["claude"]["tubes"][1]["items"][2]["y"] = 210
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200
+        text = open(screens_file, encoding="utf-8").read()
+        assert "y: 210" in text and any(ln.strip() == "items:" for ln in text.splitlines())
+    _with_client(tmp_path, check)
