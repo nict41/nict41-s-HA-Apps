@@ -20,7 +20,7 @@ not accept panels.
 | `clocks` | empty | More clocks, each `{name, host, mqtt_id, user, password}`. The clock in `clock_host` is called `main`. See [Several clocks](#several-clocks). |
 | `firmware_updates` | `true` | Offer new HA Tubes releases to the clocks, so Home Assistant shows a firmware update for each clock. See [Clock firmware updates](#clock-firmware-updates). |
 | `firmware_variant` | `ipstube` | Which HA Tubes build the clocks run: the part after `firmware-` in the release file names. |
-| `app_url` | empty | How a clock reaches this app's port 8098, e.g. `http://192.168.8.25:8098`. Empty: the Home Assistant host's own address. |
+| `app_url` | empty | How a clock reaches this app's HTTP API, e.g. `http://192.168.8.25:8098`. Empty: the Home Assistant host's address and the host port the app's port 8098 is published on (Network settings). |
 
 The screens file lives in your Home Assistant config folder at
 `tube_display/screens.yaml` (File editor, Samba or VS Code), set by the

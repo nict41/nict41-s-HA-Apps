@@ -231,10 +231,35 @@ class FirmwarePublisher:
             _LOG.info("Firmware: pruned old %s", old)
 
 
+async def host_port(session: aiohttp.ClientSession, token: str, port: int,
+                    supervisor: str = "http://supervisor") -> int | None:
+    """The host port that the app's container `port` is published on (Settings > Apps >
+    Network can move it, e.g. 8098 -> 8093 when 8098 is taken). None when it isn't
+    published at all; `port` itself if the Supervisor can't be asked."""
+    try:
+        async with session.get(f"{supervisor.rstrip('/')}/addons/self/info",
+                               headers={"Authorization": f"Bearer {token}"},
+                               timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status >= 400:
+                _LOG.warning("host_port: addons/self/info -> %s", resp.status)
+                return port
+            data = await resp.json()
+        network = (data.get("data") or {}).get("network")
+        key = f"{port}/tcp"
+        if not isinstance(network, dict) or key not in network:
+            return port
+        mapped = network[key]
+        return int(mapped) if mapped else None
+    except Exception as err:
+        _LOG.warning("host_port: %s", err)
+        return port
+
+
 async def host_base_url(session: aiohttp.ClientSession, token: str, port: int,
                         supervisor: str = "http://supervisor") -> str | None:
     """The app's own base URL from the Supervisor's network info: the primary
-    interface's IPv4 address with the port, e.g. "http://192.168.8.25:8098".
+    interface's IPv4 address with the host port that `port` is published on
+    (see host_port), e.g. "http://192.168.8.25:8098".
     None on any error."""
     try:
         async with session.get(f"{supervisor.rstrip('/')}/network/info",
@@ -266,7 +291,12 @@ async def host_base_url(session: aiohttp.ClientSession, token: str, port: int,
         ip = primary or first_ipv4
         if not ip:
             return None
-        return f"http://{ip}:{port}"
+        published = await host_port(session, token, port, supervisor)
+        if published is None:
+            _LOG.warning("host_base_url: port %d is not published on the host - set the "
+                         "app_url option or publish it under the app's Network settings", port)
+            return None
+        return f"http://{ip}:{published}"
     except Exception as err:
         _LOG.warning("host_base_url: %s", err)
         return None
