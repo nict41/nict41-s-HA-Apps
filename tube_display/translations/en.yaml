@@ -35,3 +35,27 @@ configuration:
     description: >-
       Where the screens are defined. Default /homeassistant/tube_display/screens.yaml,
       which is tube_display/screens.yaml in File editor.
+  clocks:
+    name: More clocks
+    description: >-
+      Optional. Further IPSTube clocks, each with a short name (letters, digits, _),
+      host, MQTT id and optional web login. The clock above is called "main". Give a
+      clock its own rotation under `clocks: {<name>: {rotation: [...]}}` in the
+      screens file; without one it shows the same rotation.
+  firmware_updates:
+    name: Offer clock firmware updates
+    description: >-
+      Check github.com/nict41/HA-Tubes for new HA Tubes releases every 6 hours and
+      offer them to the clocks, so Home Assistant shows a firmware update for each
+      clock. The app downloads the file and serves it to the clock itself, and stops
+      sending screens while a clock updates.
+  firmware_variant:
+    name: Firmware variant
+    description: >-
+      Which build of HA Tubes the clocks run (the part after firmware- in the release
+      file names). ipstube for the IPSTube H401/H402 clocks.
+  app_url:
+    name: App address for the clock
+    description: >-
+      Optional. How a clock reaches this app's port 8098, e.g. http://192.168.8.25:8098.
+      Leave empty to use the Home Assistant host's own address.

@@ -15,6 +15,9 @@ everything at the root of its own site.
 - GET  api/entities?q=<text> up to 50 matching entities (cached ~10 s)
 - POST api/save              {"data": {...}, "mtime": ...} -> round-trip write
 - POST api/save_yaml         {"yaml": "...", "mtime": ...} -> raw write
+- GET  api/history           {"items": [...]} snapshots taken before each save
+- GET  api/history/{id}      {"id", "yaml"} one snapshot
+- POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
 
 The 8098 API (api.py) is untouched and has no write routes.
 """
@@ -32,6 +35,7 @@ from aiohttp import web
 
 from render import IMAGE_EXTS, safe_image_name
 from screens import ScreensError, parse_screens
+from history import SaveHistory
 
 _LOG = logging.getLogger(__name__)
 
@@ -57,6 +61,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app["controller"] = controller
     app["ha"] = ha
     app["screens_file"] = screens_file
+    app["history"] = SaveHistory(screens_file)
     app["allow_local"] = test_allow_local
     app["_entities_cache"] = {"at": 0.0, "q": None, "items": []}
 
@@ -308,6 +313,14 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         path = app["screens_file"]
         folder = os.path.dirname(path) or "."
         tmp = os.path.join(folder, f".{os.path.basename(path)}.tmp")
+        # keep the current content in the history before overwriting it, so a
+        # save (or restore) can be undone; never block a save because of it
+        try:
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    app["history"].snapshot(f.read())
+        except OSError:
+            _LOG.warning("Editor: could not snapshot %s to history", path, exc_info=True)
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
@@ -477,6 +490,61 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------
+    # history: snapshots of the screens file taken before every save
+    # ------------------------------------------------------------------
+
+    async def api_history(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            return web.json_response({"items": app["history"].list()})
+        return await ingress_only(request, handler)
+
+    async def api_history_get(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            try:
+                text = app["history"].read(req.match_info["id"])
+            except KeyError:
+                return web.json_response({"error": "unknown history id"}, status=404)
+            return web.json_response({"id": req.match_info["id"], "yaml": text})
+        return await ingress_only(request, handler)
+
+    async def api_history_restore(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            if not isinstance(body, dict) or "mtime" not in body:
+                return web.json_response({"error": "body needs an 'mtime'"}, status=400)
+            conflict = _check_mtime(body)
+            if conflict is not None:
+                return conflict
+            try:
+                text = app["history"].read(req.match_info["id"])
+            except KeyError:
+                return web.json_response({"error": "unknown history id"}, status=404)
+            # the restored text must be valid, exactly like api_save_yaml checks
+            try:
+                data = yaml.safe_load(text)
+            except yaml.YAMLError as err:
+                return web.json_response({"error": "invalid YAML", "errors": [str(err)]}, status=400)
+            if data is None:
+                return web.json_response({"error": "invalid screens", "errors": ["file is empty"]}, status=400)
+            try:
+                errors = list(parse_screens(data).errors)
+            except ScreensError as err:
+                errors = [str(err)]
+            if errors:
+                return web.json_response({"error": "invalid screens", "errors": errors}, status=400)
+            # _atomic_write snapshots the current file first, so a restore can
+            # itself be undone
+            mtime = _atomic_write(text)
+            _LOG.info("Editor restored %s from history %s", app["screens_file"],
+                      req.match_info["id"])
+            return web.json_response({"ok": True, "mtime": mtime})
+        return await ingress_only(request, handler)
+
+    # ------------------------------------------------------------------
     # picture library: <screens file folder>/images, used as source "file:<name>"
     # ------------------------------------------------------------------
     images_dir = os.path.join(os.path.dirname(screens_file) or ".", "images")
@@ -597,4 +665,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_get("/api/entities", api_entities)
     app.router.add_post("/api/save", api_save)
     app.router.add_post("/api/save_yaml", api_save_yaml)
+    app.router.add_get("/api/history", api_history)
+    app.router.add_get("/api/history/{id}", api_history_get)
+    app.router.add_post("/api/history/{id}/restore", api_history_restore)
     return app

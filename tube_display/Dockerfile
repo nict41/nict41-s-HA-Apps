@@ -26,6 +26,7 @@ RUN mkdir -p /app/mdi \
     && rm /app/mdi/materialdesignicons.css
 
 COPY app /app
+COPY integration /app/integration
 COPY rootfs /
 
 RUN chmod a+x /etc/services.d/tube_display/run
