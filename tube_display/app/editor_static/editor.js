@@ -596,6 +596,7 @@ function smartField(w, f) {
   const cur = w[f] != null && w[f] !== "auto" ? String(w[f]) : "";
   if (multi) input.rows = Math.max(1, cur.split("\n").length); else input.type = "text";
   input.value = cur;
+  if (f === "entity") input.dataset.entity = "1";
   const hint = (f === "width" || f === "height") && w.type !== "text" ? "" : HINTS[f];
   input.placeholder = hint || (multi ? "text or {{ template }}; Enter for a new line" : "");
   const out = document.createElement("div");
@@ -844,6 +845,33 @@ function customEditor(w) {
 
   const numOr = (v, d) => (typeof v === "number" ? v : (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : d));
   let boxes = [], seq = 0, picUrl = null, dragging = false;
+  // snap to grid: remembered in the browser; the grid is measured from the tube's centre
+  const CX = Math.round(TUBE_W / 2), CY = TUBE_H / 2;
+  const snapCb = document.createElement("input");
+  snapCb.type = "checkbox"; snapCb.checked = localStorage.getItem("tdSnap") === "1";
+  const snapSize = document.createElement("select");
+  [2, 5, 10, 15, 20].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n + " px"; snapSize.appendChild(o); });
+  snapSize.value = localStorage.getItem("tdSnapSize") || "5";
+  const grid = () => (snapCb.checked ? parseInt(snapSize.value, 10) : 0);
+  function drawGrid() {
+    const g = grid(), k = stage.getBoundingClientRect().width / TUBE_W;
+    if (!g || !k) { overlay.style.backgroundImage = ""; return; }
+    const line = "rgba(255,255,255,0.13) 1px, transparent 1px";
+    overlay.style.backgroundImage = "linear-gradient(to right, " + line + "), linear-gradient(to bottom, " + line + ")";
+    overlay.style.backgroundSize = (g * k) + "px " + (g * k) + "px";
+    overlay.style.backgroundPosition = ((CX * k) % (g * k)) + "px " + ((CY * k) % (g * k)) + "px";
+  }
+  const snapChanged = () => {
+    localStorage.setItem("tdSnap", snapCb.checked ? "1" : "0");
+    localStorage.setItem("tdSnapSize", snapSize.value);
+    drawGrid();
+  };
+  snapCb.addEventListener("change", snapChanged);
+  snapSize.addEventListener("change", snapChanged);
+  const snapRow = document.createElement("label");
+  snapRow.className = "field";
+  snapRow.append(snapCb, document.createTextNode(" snap to grid "), snapSize);
+  side.insertBefore(snapRow, list);
 
   function summary(it) {
     const v = it.type === "text" ? it.text : it.type === "icon" ? it.icon : it.type === "image" ? it.source
@@ -946,8 +974,9 @@ function customEditor(w) {
       el.removeEventListener("pointercancel", done);
       dragging = false;
       if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) { drawBoxes(); return; }
-      it.x = Math.round(numOr(it.x, TUBE_W / 2) + dx);
-      it.y = Math.round(numOr(it.y, TUBE_H / 2) + dy);
+      const g = grid() || 1;
+      it.x = CX + Math.round((numOr(it.x, CX) + dx - CX) / g) * g;
+      it.y = CY + Math.round((numOr(it.y, CY) + dy - CY) / g) * g;
       drawFields(); changed();
     };
     el.addEventListener("pointermove", move);
@@ -970,6 +999,7 @@ function customEditor(w) {
     pic.src = picUrl;
     try { boxes = JSON.parse(res.headers.get("X-Item-Boxes") || "[]"); } catch (e) { boxes = []; }
     if (!dragging) drawBoxes();      // never swap the outline out from under a finger
+    drawGrid();
   }
 
   Object.keys(ITEM_NEW).forEach((t) => {
@@ -1242,7 +1272,7 @@ function colorEditor(w, f) {
       const rows = m ? [[m[3], m[2]], [m[5], m[4]]] : [["", "#4CAF50"], ["", "#F44336"]];
       const otherwise = m ? m[6] : "#FFC107";
       const entInput = document.createElement("input");
-      entInput.type = "text"; entInput.placeholder = "entity"; entInput.value = ent;
+      entInput.type = "text"; entInput.placeholder = "entity"; entInput.value = ent; entInput.dataset.entity = "1";
       const list = document.createElement("div");
       list.className = "thresh-rows";
       const rowEls = [];
@@ -1425,4 +1455,70 @@ load();
     cb.checked = !!b.enabled;
     setStatus(b.enabled ? "cycling automatically" : "button only: press the clock's button for the next screen");
   });
+})();
+
+// ---------------------------------------------------------------- entity name autocomplete
+// In any text box of the editor: type a domain and a dot ("sensor.") inside a template, or
+// just a few letters in an entity field, and matching entities are offered. Up/Down, Enter or
+// Tab picks one, Esc closes.
+(function entityAutocomplete() {
+  const pop = document.createElement("div");
+  pop.className = "ac-pop hidden";
+  document.body.appendChild(pop);
+  let target = null, start = 0, end = 0, sel = 0, timer = null, seq = 0;
+  const wanted = (el) => el && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && el.type === "text"))
+    && !el.hasAttribute("list") && el.id !== "yamlText" && !(el.placeholder || "").startsWith("search entity");
+  const close = () => { pop.classList.add("hidden"); target = null; };
+  function mark() { [...pop.children].forEach((c, i) => c.classList.toggle("active", i === sel)); }
+  function pick(id) {
+    const el = target; if (!el) return;
+    el.value = el.value.slice(0, start) + id + el.value.slice(end);
+    el.selectionStart = el.selectionEnd = start + id.length;
+    close();
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    el.focus();
+  }
+  async function look(el) {
+    const caret = el.selectionStart == null ? el.value.length : el.selectionStart;
+    const before = el.value.slice(0, caret);
+    const m = el.dataset.entity ? before.match(/[a-z0-9_.]{2,}$/) : before.match(/[a-z_]{2,}\.[a-z0-9_]*$/);
+    if (!m) { close(); return; }
+    const mine = ++seq;
+    const { status, body } = await api("api/entities?q=" + encodeURIComponent(m[0]));
+    if (mine !== seq || status !== 200 || !Array.isArray(body)) return;
+    const items = body.filter((e) => e.entity_id !== m[0]).slice(0, 12);
+    if (!items.length || document.activeElement !== el) { close(); return; }
+    target = el; start = caret - m[0].length; end = caret; sel = 0;
+    pop.innerHTML = "";
+    items.forEach((e) => {
+      const b = document.createElement("div");
+      b.className = "ac-opt";
+      b.textContent = e.entity_id + (e.state != null ? "  —  " + e.state + (e.unit || "") : "");
+      b.dataset.id = e.entity_id;
+      b.addEventListener("mousedown", (ev) => { ev.preventDefault(); pick(e.entity_id); });
+      pop.appendChild(b);
+    });
+    const r = el.getBoundingClientRect();
+    pop.style.left = (r.left + window.scrollX) + "px";
+    pop.style.top = (r.bottom + window.scrollY + 2) + "px";
+    pop.style.width = Math.max(240, r.width) + "px";
+    pop.classList.remove("hidden");
+    mark();
+  }
+  document.addEventListener("input", (e) => {
+    if (!wanted(e.target) || !e.isTrusted) return;
+    clearTimeout(timer); timer = setTimeout(() => look(e.target), 200);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (!target || pop.classList.contains("hidden")) return;
+    const n = pop.children.length;
+    if (e.key === "ArrowDown") { sel = (sel + 1) % n; mark(); }
+    else if (e.key === "ArrowUp") { sel = (sel + n - 1) % n; mark(); }
+    else if (e.key === "Enter" || e.key === "Tab") pick(pop.children[sel].dataset.id);
+    else if (e.key === "Escape") close();
+    else return;
+    e.preventDefault();
+  }, true);
+  document.addEventListener("focusout", () => setTimeout(() => { if (document.activeElement !== target) close(); }, 150));
 })();

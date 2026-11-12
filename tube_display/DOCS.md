@@ -171,6 +171,10 @@ on the app's Info tab if it isn't there).
   showed becomes separate pieces. Drag a piece on the tube to move it, pick one
   to change its text, size and colour, and add text, rings, bars, icons,
   pictures and boxes with the **+** buttons. ↑/↓ change which piece is on top.
+  **Snap to grid** makes dragged pieces land on a grid measured from the centre
+  of the tube.
+* **Entity names autocomplete:** type a domain and a dot (`sensor.`) in a
+  template, or a few letters in an entity field, and pick from the list.
 * **Save** writes `screens.yaml`; the clock picks it up within a refresh.
   **Edit YAML** shows the whole file for anything the form can't do.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Designer: **snap to grid** (2 to 20 px, measured from the centre of the tube) with the grid drawn over the tube. Remembered in the browser.
+- Entity names autocomplete: type a domain and a dot (`sensor.`) in any template or text box, or a few letters in an entity field, and pick from the matches (Up/Down, Enter or Tab; Esc closes).
+
 ## 0.5.0
 
 - Pictures of any size or shape: under the picture library the picture is shown on the tube, and you drag it into place, zoom it (pinch, scroll or slider), rotate it and choose the colour behind it. New fields `zoom`, `offset_x`, `offset_y`, `rotate` and `background` on `image` tubes and on `strip` screens. Sideways phone photos are turned upright.
