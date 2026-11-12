@@ -146,3 +146,78 @@ def test_custom_widget_items_validated():
     assert any("item 0" in e and "sparkle" in e for e in parse_screens(_cfg(screens={"a": {"tubes": bad}})).errors)
     not_list = [{"type": "blank"}] * 5 + [{"type": "custom", "items": "text"}]
     assert any("must be a list" in e for e in parse_screens(_cfg(screens={"a": {"tubes": not_list}})).errors)
+
+
+# ----------------------------------------------------------------------
+# per-clock overrides (`clocks:`) and the `night:` block
+# ----------------------------------------------------------------------
+
+def test_clock_overrides_parsed_and_fallback():
+    base = _cfg(rotation=["a"], screens={
+        "a": {"tubes": [{"type": "blank"}] * 6},
+        "b": {"tubes": [{"type": "blank"}] * 6},
+    })
+    base["rotation"] = ["a", "b"]
+    base["clocks"] = {"kitchen": {"rotation": ["b"], "clock": {"duration": 90}},
+                      "main": {"clock": {"duration": 5}}}
+    cfg = parse_screens(base)
+    assert cfg.errors == []
+    assert cfg.rotation_for("main") == ["a", "b"]            # global fallback
+    assert cfg.rotation_for("kitchen") == ["b"]              # its own override
+    assert cfg.clock_duration_for("main") == 5
+    assert cfg.clock_duration_for("kitchen") == 90
+    assert cfg.clock_duration_for("unknown") is None          # global clock.duration unset
+    cfg2 = parse_screens(_cfg(clock={"duration": 60}, clocks={"k": {"rotation": ["a"]}}))
+    assert cfg2.clock_duration_for("k") == 60                 # falls back to global clock
+    assert cfg2.rotation_for("k") == ["a"]
+
+
+def test_clock_overrides_bad_entries_are_errors_not_exceptions():
+    cfg = parse_screens(_cfg(clocks={
+        "bad1": {"rotation": "notalist"},
+        "bad2": {"rotation": []},
+        "bad3": {"rotation": ["ghost"]},          # no such screen
+        "bad4": {"clock": {"duration": -3}},
+        "bad5": "not a mapping",
+        "good": {"rotation": ["a"]},
+    }))
+    assert cfg.rotation_for("good") == ["a"]
+    assert cfg.rotation_for("bad1") == ["a"]      # bad override ignored -> global
+    assert len(cfg.errors) >= 5
+    assert any("bad1" in e and "rotation" in e for e in cfg.errors)
+    assert any("bad2" in e for e in cfg.errors)
+    assert any("bad3" in e and "ghost" in e for e in cfg.errors)
+    assert any("bad4" in e and "duration" in e for e in cfg.errors)
+    assert any("bad5" in e for e in cfg.errors)
+
+
+def test_clocks_not_a_mapping_is_error():
+    cfg = parse_screens(_cfg(clocks=["main"]))
+    assert any("'clocks' must be a mapping" in e for e in cfg.errors)
+
+
+def test_night_block_parsed():
+    cfg = parse_screens(_cfg(night={
+        "brightness_day": 200, "brightness_night": 40,
+        "bright_above": 4, "dim_below": -5, "dim_screens": 0.7,
+        "quiet": {"from": "23:00", "to": "07:00", "mode": "blank"},
+    }))
+    assert cfg.errors == []
+    assert cfg.night is not None
+    assert cfg.night.brightness_day == 200 and cfg.night.brightness_night == 40
+    assert cfg.night.dim_screens == 0.7
+    assert cfg.night.quiet.mode == "blank"
+    assert cfg.night.quiet.start.hour == 23 and cfg.night.quiet.end.hour == 7
+
+
+def test_night_absent_means_none():
+    cfg = parse_screens(_cfg())
+    assert cfg.night is None
+    assert cfg.errors == []
+
+
+def test_night_block_errors_go_to_cfg_errors():
+    cfg = parse_screens(_cfg(night={"brightness_day": 1, "quiet": {"from": "nope", "to": "07:00"}}))
+    assert cfg.night is None
+    assert any("brightness_day" in e for e in cfg.errors)
+    assert any("quiet.from" in e for e in cfg.errors)

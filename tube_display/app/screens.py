@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from night import NightConfig, parse_night
+
 _LOG = logging.getLogger(__name__)
 
 CLOCK_ENTRY = "clock"  # rotation entry that hands the tubes back to the clock
@@ -42,15 +44,39 @@ class Screen:
 
 
 @dataclass
+class ClockOverride:
+    """Per-clock override of the global rotation / clock duration (screens.yaml `clocks:`)."""
+
+    rotation: list[str] | None = None
+    clock_duration: int | None = None
+
+
+@dataclass
 class ScreensConfig:
     rotation: list[str] = field(default_factory=list)
     clock_duration: int | None = None   # duration for the "clock" rotation entry
     screens: dict[str, Screen] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)  # human-readable, per screen
+    clock_overrides: dict[str, ClockOverride] = field(default_factory=dict)  # clock name -> override
+    night: NightConfig | None = None     # the `night:` block, None when absent
 
     @property
     def ok(self) -> bool:
         return not self.errors
+
+    def rotation_for(self, clock_name: str) -> list[str]:
+        """The rotation for a clock: its override if it has one, else the global one."""
+        ov = self.clock_overrides.get(clock_name)
+        if ov is not None and ov.rotation is not None:
+            return list(ov.rotation)
+        return list(self.rotation)
+
+    def clock_duration_for(self, clock_name: str) -> int | None:
+        """The "clock" entry duration for a clock: its override if set, else the global one."""
+        ov = self.clock_overrides.get(clock_name)
+        if ov is not None and ov.clock_duration is not None:
+            return ov.clock_duration
+        return self.clock_duration
 
 
 def _err(errors: list[str], screen: str, msg: str) -> None:
@@ -158,6 +184,46 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
     return screen
 
 
+def _parse_clock_overrides(data: dict, cfg: ScreensConfig) -> None:
+    """The optional top-level `clocks:` mapping: clock name -> {rotation, clock}.
+
+    Validated like the global ones; problems go to cfg.errors (never raised) and
+    only the bad key is skipped."""
+    raw = data.get("clocks")
+    if raw is None:
+        return
+    if not isinstance(raw, dict):
+        cfg.errors.append(f"'clocks' must be a mapping of clock name -> {{rotation, clock}}, got {type(raw).__name__}")
+        return
+    for name, entry in raw.items():
+        if not isinstance(name, str) or not name:
+            cfg.errors.append(f"'clocks' key must be a non-empty clock name, got {name!r}")
+            continue
+        if entry is None:
+            entry = {}
+        if not isinstance(entry, dict):
+            cfg.errors.append(f"clocks '{name}': must be a mapping, got {type(entry).__name__}")
+            continue
+        ov = ClockOverride()
+        rotation = entry.get("rotation")
+        if rotation is not None:
+            if not isinstance(rotation, list) or not all(isinstance(r, str) for r in rotation) or not rotation:
+                cfg.errors.append(f"clocks '{name}': 'rotation' must be a non-empty list of screen names")
+            else:
+                ov.rotation = list(rotation)
+        clock = entry.get("clock")
+        if clock is not None:
+            if not isinstance(clock, dict):
+                cfg.errors.append(f"clocks '{name}': 'clock' must be a mapping, e.g. {{duration: 60}}")
+            else:
+                dur = clock.get("duration")
+                if dur is not None and (isinstance(dur, bool) or not isinstance(dur, (int, float)) or dur <= 0):
+                    cfg.errors.append(f"clocks '{name}': 'clock.duration' must be a positive number, got {dur!r}")
+                else:
+                    ov.clock_duration = int(dur) if dur is not None else None
+        cfg.clock_overrides[name] = ov
+
+
 def parse_screens(data: object) -> ScreensConfig:
     """Parse an already-YAML-loaded object into a ScreensConfig."""
     cfg = ScreensConfig()
@@ -180,6 +246,13 @@ def parse_screens(data: object) -> ScreensConfig:
             raise ScreensError(f"'clock.duration' must be a positive number, got {dur!r}")
         cfg.clock_duration = int(dur) if dur is not None else None
 
+    _parse_clock_overrides(data, cfg)
+
+    night_cfg, night_errors = parse_night(data.get("night"))
+    cfg.night = night_cfg
+    for e in night_errors:
+        cfg.errors.append(e)
+
     screens_raw = data.get("screens")
     if not isinstance(screens_raw, dict) or not screens_raw:
         raise ScreensError("'screens' must be a non-empty mapping of screen name -> definition")
@@ -195,6 +268,11 @@ def parse_screens(data: object) -> ScreensConfig:
     for entry in cfg.rotation:
         if entry != CLOCK_ENTRY and entry not in cfg.screens:
             cfg.errors.append(f"rotation entry '{entry}' has no matching screen in 'screens'")
+    # per-clock rotations reference screens too
+    for name, ov in cfg.clock_overrides.items():
+        for entry in (ov.rotation or []):
+            if entry != CLOCK_ENTRY and entry not in cfg.screens:
+                cfg.errors.append(f"clocks '{name}': rotation entry '{entry}' has no matching screen in 'screens'")
     return cfg
 
 

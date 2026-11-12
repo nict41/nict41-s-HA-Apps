@@ -156,3 +156,96 @@ def test_tubes_to_send_logic():
     p._last_hash = [p._hash(d) for d in payloads]
     assert p.tubes_to_send(payloads) == []
     assert p.tubes_to_send(payloads, needed_mask=0b000101) == [0, 2]
+
+
+# ----------------------------------------------------------------------
+# reachability: abort after a connection error, reachable flag, probe
+# ----------------------------------------------------------------------
+
+def test_connection_error_aborts_remaining_tubes_and_marks_unreachable():
+    import aiohttp
+
+    class DyingSession(FakeSession):
+        """Every POST raises a connection error (the clock is gone)."""
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def post(self, *a, **kw):
+            self.calls += 1
+            raise aiohttp.ClientConnectionError("clock offline")
+
+    session = DyingSession()
+    p = _pusher(session)
+    payloads = [_payload(i) for i in range(TUBE_COUNT)]
+    sent = asyncio.run(p.send_tubes(payloads))
+    assert sent == []                       # tube 0 gave up, the rest were skipped
+    assert p.reachable is False
+    assert session.calls == 6               # 6 retries for tube 0 only, not 6x6
+    assert p.last_error is not None
+
+
+def test_http_error_status_does_not_mark_unreachable():
+    session = FakeSession(statuses=[500] * TUBE_COUNT)
+    p = _pusher(session)
+    sent = asyncio.run(p.send_tubes([_payload(0)] * TUBE_COUNT))
+    assert sent == []
+    assert p.reachable is True              # an HTTP error is not "unreachable"
+    assert p.last_error is not None
+
+
+def test_success_marks_reachable_again():
+    import aiohttp
+
+    class FlakySession(FakeSession):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def post(self, *a, **kw):
+            self.calls += 1
+            if self.calls <= 6:
+                raise asyncio.TimeoutError()
+            return super().post(*a, **kw)
+
+    p = _pusher(FlakySession())
+    asyncio.run(p.send_tubes([_payload(0)] * TUBE_COUNT))
+    assert p.reachable is False
+    sent = asyncio.run(p.send_tubes([_payload(1)] * TUBE_COUNT))
+    assert sent == list(range(TUBE_COUNT))
+    assert p.reachable is True
+
+
+def test_probe_ok_sets_reachable_and_clears_error():
+    session = FakeSession()
+    p = _pusher(session)
+    p.reachable = False
+    p.last_error = "old"
+    ok = asyncio.run(p.probe())
+    assert ok is True
+    assert p.reachable is True
+    assert p.last_error is None
+    assert session.gets == ["http://clock.test/panel"]
+
+
+def test_probe_failure_marks_unreachable():
+    import aiohttp
+
+    class DeadSession(FakeSession):
+        def get(self, *a, **kw):
+            raise aiohttp.ClientConnectionError("no route")
+
+    p = _pusher(DeadSession())
+    ok = asyncio.run(p.probe())
+    assert ok is False
+    assert p.reachable is False
+
+
+def test_probe_non_200_marks_unreachable():
+    class BadStatusSession(FakeSession):
+        def get(self, *a, **kw):
+            return FakeResponse(503)
+
+    p = _pusher(BadStatusSession())
+    assert asyncio.run(p.probe()) is False
+    assert p.reachable is False

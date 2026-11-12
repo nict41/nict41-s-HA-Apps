@@ -1,9 +1,9 @@
 """Tube Display entry point.
 
-Wires everything together: settings, one aiohttp session, the HA client, the
-clock pusher, the MQTT bridge, the rotation controller and the HTTP API on
-0.0.0.0:8098. Writes a commented example /config/screens.yaml on first start
-if the file is missing.
+Wires everything together: settings, one aiohttp session, the HA client, one
+clock pusher and one controller per configured clock, one MQTT bridge for all
+of them, and the HTTP API on 0.0.0.0:8098. Writes a commented example
+/config/screens.yaml on first start if the file is missing.
 """
 
 from __future__ import annotations
@@ -56,8 +56,12 @@ async def run() -> None:
         level=settings.logging_level,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
-    _LOG.info("Tube Display starting (clock %s, mqtt id %s, screens %s)",
-              settings.clock_host, settings.clock_mqtt_id, settings.screens_file)
+    for err in settings.errors:
+        _LOG.error("Settings: %s", err)
+    _LOG.info("Tube Display starting (%d clock(s): %s, screens %s)",
+              len(settings.clocks),
+              ", ".join(f"{c.name}={c.host}" for c in settings.clocks) or "none",
+              settings.screens_file)
     ensure_screens_file(settings.screens_file)
 
     timeout = aiohttp.ClientTimeout(total=30)
@@ -65,47 +69,35 @@ async def run() -> None:
         token = os.environ.get("SUPERVISOR_TOKEN", "")
         ha = HaClient(session, token=token)
 
+        # One controller + pusher per clock, all sharing the session and HA client
+        controllers: list[Controller] = []
+        for clock in settings.clocks:
+            controller = Controller(settings, session, ha, clock=clock)
+            pusher = ClockPusher(session, clock.base_url,
+                                 user=clock.user, password=clock.password)
+            controller.set_pusher(pusher)
+            controllers.append(controller)
+        if not controllers:
+            _LOG.error("No clocks configured (TUBE_CLOCK_HOST / TUBE_CLOCKS_JSON) - "
+                       "running the HTTP API and editor only")
+
         mqtt: mqtt_bridge.MqttBridge | None = None
-
-        async def on_clock_state(state: dict) -> None:
-            await controller.on_clock_state(state)
-
-        async def on_select(value: str) -> None:
-            if value == mqtt_bridge.ROTATE:
-                controller.clear_pin()
-            elif value == mqtt_bridge.CLOCK:
-                controller.show_screen("clock")
-            else:
-                try:
-                    controller.show_screen(value)
-                except KeyError:
-                    _LOG.warning("MQTT select: unknown screen %r", value)
-
-        async def on_rotation(on: bool) -> None:
-            controller.set_rotation_enabled(on)
-
-        async def on_button() -> None:
-            controller.next_screen()
-
-        controller = Controller(settings, session, ha)
-        pusher = ClockPusher(
-            session, settings.clock_base_url,
-            user=settings.clock_user, password=settings.clock_password,
-        )
-        controller.set_pusher(pusher)
-
         if settings.mqtt:
-            mqtt = mqtt_bridge.MqttBridge(
-                settings.mqtt, settings.clock_mqtt_id,
-                on_clock_state, on_select, on_rotation,
-                get_state=controller._mqtt_state,
-                on_button=on_button,
-            )
-            pusher._publish_display = mqtt.publish_display
-            controller.set_mqtt(mqtt)
+            mqtt = mqtt_bridge.MqttBridge(settings.mqtt, controllers)
+            for controller in controllers:
+                pusher = controller._pusher
+                if pusher is not None:
+                    # display-mode commands go over MQTT to that clock
+                    pusher._publish_display = (
+                        lambda mode, cid=controller.clock.mqtt_id:
+                        mqtt.publish_display(cid, mode)
+                    )
+                controller.set_mqtt(mqtt)
             await mqtt.start()
 
-        app = api_mod.create_app(controller)
+        # WIRING: template cache, firmware publisher, integration installer
+
+        app = api_mod.create_app(controllers)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", API_PORT)
@@ -114,20 +106,24 @@ async def run() -> None:
 
         # The screen editor for the HA ingress panel: a second site on 8099
         # (not published in ports:), only reachable from the ingress proxy.
-        editor_app = editor_mod.create_app(controller, ha, settings.screens_file)
+        editor_app = editor_mod.create_app(
+            controllers[0] if controllers else None, ha, settings.screens_file,
+            controllers={c.name: c for c in controllers})
         editor_runner = web.AppRunner(editor_app)
         await editor_runner.setup()
         editor_site = web.TCPSite(editor_runner, "0.0.0.0", editor_mod.INGRESS_PORT)
         await editor_site.start()
         _LOG.info("Screen editor (ingress) listening on 0.0.0.0:%d", editor_mod.INGRESS_PORT)
 
-        rotation_task = asyncio.ensure_future(controller.run())
+        rotation_tasks = [asyncio.ensure_future(c.run()) for c in controllers]
         try:
-            await rotation_task
+            if rotation_tasks:
+                await asyncio.gather(*rotation_tasks)
         except asyncio.CancelledError:
             pass
         finally:
-            controller.stop()
+            for c in controllers:
+                c.stop()
             if mqtt is not None:
                 await mqtt.stop()
             await runner.cleanup()

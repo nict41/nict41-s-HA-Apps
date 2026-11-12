@@ -35,26 +35,40 @@ class FakePusher:
     def __init__(self):
         self.sent = []          # (tube_bytes, needed_mask)
         self.last_error = None
+        self.reachable = True
+        self.probes = 0
+        self.resets = 0
 
     async def send_tubes(self, tube_bytes, needed_mask=0):
         self.sent.append((tube_bytes, needed_mask))
         return list(range(TUBE_COUNT))
 
     def reset(self):
-        pass
+        self.resets += 1
+
+    async def probe(self):
+        self.probes += 1
+        self.reachable = True
+        return True
 
 
 class FakeMqtt:
     def __init__(self):
-        self.display_modes = []
-        self.states = []
+        self.display_modes = []     # modes, in order (legacy assertions compare these)
+        self.display_calls = []     # (mqtt_id, mode)
+        self.states = []            # (controller, state dict)
         self.discovery_calls = 0
+        self.brightness = []        # (mqtt_id, value)
 
-    async def publish_display(self, mode):
+    async def publish_display(self, mqtt_id, mode):
         self.display_modes.append(mode)
+        self.display_calls.append((mqtt_id, mode))
 
-    async def publish_state(self, state):
-        self.states.append(state)
+    async def publish_state(self, controller):
+        self.states.append((controller, controller._mqtt_state()))
+
+    async def publish_brightness(self, mqtt_id, value):
+        self.brightness.append((mqtt_id, value))
 
     async def publish_discovery(self):
         self.discovery_calls += 1
