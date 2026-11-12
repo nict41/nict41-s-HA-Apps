@@ -221,3 +221,70 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   border: 1px solid var(--accent); border-radius: 6px; box-shadow: 0 6px 18px #000a; }
 .ac-opt { padding: 6px 8px; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
 .ac-opt.active, .ac-opt:hover { background: #0d3a4d; }
+
+/* clock select above the rotation list (2+ clocks) */
+.clock-select-row { margin-bottom: 8px; }
+.clock-select-row label { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.clock-select-row select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
+.clock-override-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.clock-override-row .hint { margin: 0; flex: 1 1 auto; min-width: 0; }
+.rotation-list.greyed { opacity: 0.45; }
+
+/* topbar status chip: one line per clock, e.g. "main: claude · live · 50%" */
+.clock-chip {
+  color: var(--muted); font-size: 12px; white-space: normal; overflow-wrap: anywhere;
+  flex: 0 1 auto; max-width: 100%;
+}
+
+/* night mode card */
+#nightCard .row label { flex-wrap: nowrap; }
+#nightCard input[type="range"] { flex: 1 1 60px; min-width: 0; max-width: 180px; accent-color: var(--accent); }
+#nightCard input[type="number"] { width: 70px; }
+/* time inputs: dark like the other fields (the browser's default picker is white) */
+#nightCard input[type="time"] { width: 120px; color-scheme: dark; }
+#nightCard .unit { min-width: 34px; color: var(--muted); }
+
+/* modal (save history) */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 5vh 12px 12px; overflow-y: auto;
+}
+.modal-card {
+  width: 640px; max-width: 100%; max-height: 88vh; overflow-y: auto;
+  box-shadow: 0 10px 40px #000c;
+}
+.modal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.modal-head h2 { margin: 0; }
+
+/* history list */
+.history-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.history-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 6px;
+  border-radius: 6px; flex-wrap: wrap;
+}
+.history-item:hover { background: #262626; }
+.history-when { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; color: var(--text); font-size: 13px; }
+
+/* read-only YAML view of one snapshot */
+.yaml-view {
+  background: #111; border: 1px solid var(--card-border); border-radius: 8px;
+  padding: 10px; margin: 10px 0;
+  max-height: 55vh; overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  white-space: pre; overflow-wrap: normal;
+}
+
+/* phone: nothing wider than the screen */
+@media (max-width: 600px) {
+  .topbar { gap: 6px; padding: 8px 10px; }
+  .brand { font-size: 14px; margin-right: 4px; }
+  .btn { padding: 6px 10px; }
+  .status { flex-basis: 100%; min-width: 0; order: 10; }
+  .clock-chip { flex-basis: 100%; order: 11; }
+  .modal-overlay { padding: 3vh 8px 8px; }
+  .modal-card { width: 100%; max-height: 90vh; }
+  .yaml-view { max-height: 50vh; }
+  #nightCard input[type="time"] { width: 116px; }
+}

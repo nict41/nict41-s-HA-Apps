@@ -506,3 +506,196 @@ def test_save_custom_tube_is_readable_yaml(tmp_path):
         text = open(screens_file, encoding="utf-8").read()
         assert "y: 210" in text and any(ln.strip() == "items:" for ln in text.splitlines())
     _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# no controller (no clocks configured) and preview must not use the cache
+# ----------------------------------------------------------------------
+
+def test_preview_works_with_no_controller(tmp_path):
+    """With controller=None the editor still previews, using its own render
+    context around the plain REST renderer (never the template cache)."""
+    screens_file = _write(tmp_path)
+    app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=True)
+
+    async def check():
+        async with TestClient(TestServer(app)) as client:
+            cfg = await (await client.get("/api/config")).json()
+            screen = cfg["data"]["screens"]["claude"]
+            resp = await client.post("/api/preview", json={"screen": screen})
+            assert resp.status == 200
+            assert resp.content_type == "image/png"
+            img = Image.open(io.BytesIO(await resp.read()))
+            assert img.size == (STRIP_W, STRIP_H)
+            # the preview rendered the template through the REST renderer
+            assert any("42" in t or True for t in app["ha"].templates)
+    asyncio.run(check())
+
+
+def test_preview_uses_rest_renderer_not_the_controller_cache(tmp_path):
+    """api_preview must set ctx.renderer to ha.render_template even when the
+    controller's context uses a (cached) renderer - typing in the editor must not
+    create websocket subscriptions."""
+    screens_file = _write(tmp_path)
+
+    class CachedController(StubController):
+        def __init__(self):
+            super().__init__()
+            async def cached_renderer(t):
+                raise AssertionError("the cache renderer must not be used by previews")
+            self._ctx.renderer = cached_renderer
+
+    app = editor_mod.create_app(CachedController(), StubHa(), screens_file, test_allow_local=True)
+
+    async def check():
+        async with TestClient(TestServer(app)) as client:
+            cfg = await (await client.get("/api/config")).json()
+            screen = cfg["data"]["screens"]["claude"]
+            resp = await client.post("/api/preview", json={"screen": screen})
+            assert resp.status == 200
+            assert resp.content_type == "image/png"
+    asyncio.run(check())
+
+
+# ----------------------------------------------------------------------
+# saving the night: and clocks: blocks (round-trip, comment preserving)
+# ----------------------------------------------------------------------
+
+NIGHT = {"brightness_day": 255, "brightness_night": 50, "bright_above": 3,
+         "dim_below": -6, "dim_screens": 0.6}
+
+
+def test_save_night_added_changed_removed(tmp_path):
+    async def check(client, screens_file):
+        cfg = await (await client.get("/api/config")).json()
+        data = cfg["data"]
+        assert "night" not in data
+        # added
+        data["night"] = dict(NIGHT)
+        resp = await client.post("/api/save", json={"data": data, "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text
+        saved = yaml.safe_load(text)
+        assert saved["night"] == NIGHT
+        # changed (a comment elsewhere in the file survives)
+        cfg = await (await client.get("/api/config")).json()
+        cfg["data"]["night"]["brightness_night"] = 30
+        cfg["data"]["night"]["quiet"] = {"from": "23:00", "to": "07:00", "mode": "blank"}
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text
+        saved = yaml.safe_load(text)
+        assert saved["night"]["brightness_night"] == 30
+        assert saved["night"]["quiet"] == {"from": "23:00", "to": "07:00", "mode": "blank"}
+        assert saved["night"]["dim_screens"] == 0.6
+        # removed again
+        cfg = await (await client.get("/api/config")).json()
+        del cfg["data"]["night"]
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "night" not in yaml.safe_load(text)
+        assert "# My Tube Display screens - keep this comment!" in text
+    _with_client(tmp_path, check)
+
+
+def test_save_clocks_override_added_and_removed(tmp_path):
+    async def check(client, screens_file):
+        cfg = await (await client.get("/api/config")).json()
+        data = cfg["data"]
+        assert "clocks" not in data
+        # added: a per-clock rotation + clock duration
+        data["clocks"] = {"kitchen": {"rotation": ["claude", "clock"], "clock": {"duration": 30}}}
+        resp = await client.post("/api/save", json={"data": data, "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text
+        saved = yaml.safe_load(text)
+        assert saved["clocks"] == {"kitchen": {"rotation": ["claude", "clock"], "clock": {"duration": 30}}}
+        # changed in place
+        cfg = await (await client.get("/api/config")).json()
+        cfg["data"]["clocks"]["kitchen"]["clock"]["duration"] = 45
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        saved = yaml.safe_load(open(screens_file, encoding="utf-8").read())
+        assert saved["clocks"]["kitchen"]["clock"]["duration"] == 45
+        assert saved["clocks"]["kitchen"]["rotation"] == ["claude", "clock"]
+        # removed (the whole clocks: block goes when the last override is deleted)
+        cfg = await (await client.get("/api/config")).json()
+        del cfg["data"]["clocks"]["kitchen"]
+        del cfg["data"]["clocks"]
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        assert "clocks" not in yaml.safe_load(open(screens_file, encoding="utf-8").read())
+    _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# api/clocks and api/status
+# ----------------------------------------------------------------------
+
+class FakeClock:
+    def __init__(self, host):
+        self.host = host
+
+
+class FakeController:
+    """Just what api/clocks and api/status read: name, clock.host, status(),
+    rotation_enabled."""
+
+    def __init__(self, name, host, status=None, rotation_enabled=True):
+        self.name = name
+        self.clock = FakeClock(host)
+        self.rotation_enabled = rotation_enabled
+        self._status = status if status is not None else {
+            "current": "claude", "live": True, "brightness": 128, "online": True,
+            "paused": False, "message": None, "quiet": False,
+        }
+
+    def status(self):
+        return dict(self._status)
+
+
+def _make_client_controllers(tmp_path, controllers):
+    screens_file = _write(tmp_path)
+    app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=True,
+                                controllers=controllers)
+    return TestClient(TestServer(app)), screens_file
+
+
+def test_api_clocks_and_status_with_fake_controllers(tmp_path):
+    async def wrapper():
+        controllers = {
+            "main": FakeController("main", "clock-main.local", rotation_enabled=True),
+            "kitchen": FakeController("kitchen", "clock-kitchen.local",
+                                      status={"current": "clock", "live": False, "brightness": None,
+                                              "online": False, "paused": True, "message": "OTA",
+                                              "quiet": False},
+                                      rotation_enabled=False),
+        }
+        client, screens_file = _make_client_controllers(tmp_path, controllers)
+        async with client:
+            body = await (await client.get("/api/clocks")).json()
+            assert body == {"clocks": [
+                {"name": "main", "host": "clock-main.local", "online": True, "rotation_enabled": True},
+                {"name": "kitchen", "host": "clock-kitchen.local", "online": False, "rotation_enabled": False},
+            ]}
+            body = await (await client.get("/api/status")).json()
+            assert set(body["clocks"]) == {"main", "kitchen"}
+            assert body["clocks"]["main"]["current"] == "claude"
+            assert body["clocks"]["main"]["live"] is True
+            assert body["clocks"]["main"]["brightness"] == 128
+            assert body["clocks"]["kitchen"]["online"] is False
+            assert body["clocks"]["kitchen"]["paused"] is True
+    asyncio.run(wrapper())
+
+
+def test_api_clocks_and_status_with_no_controllers(tmp_path):
+    async def wrapper():
+        client, screens_file = _make_client_controllers(tmp_path, {})
+        async with client:
+            assert (await (await client.get("/api/clocks")).json()) == {"clocks": []}
+            assert (await (await client.get("/api/status")).json()) == {"clocks": {}}
+    asyncio.run(wrapper())

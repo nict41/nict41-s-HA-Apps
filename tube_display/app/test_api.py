@@ -20,11 +20,16 @@ if pil:
 
 
 class StubController:
-    def __init__(self):
+    def __init__(self, name="main"):
+        self.name = name
         self.current = "a"
         self.rotation_enabled = True
         self.shown = []
         self.rotation_calls = []
+        self.flashed = []
+        self.paused = []
+        self.resumed = 0
+        self.nexted = 0
 
     def status(self):
         return {
@@ -48,6 +53,18 @@ class StubController:
     def set_rotation_enabled(self, enabled):
         self.rotation_enabled = enabled
         self.rotation_calls.append(enabled)
+
+    def flash(self, message, seconds=10, icon=None, color=None):
+        self.flashed.append((message, seconds, icon, color))
+
+    def pause(self, seconds=None):
+        self.paused.append(seconds)
+
+    def resume(self):
+        self.resumed += 1
+
+    def next_screen(self):
+        self.nexted += 1
 
     async def render_preview(self, name):
         if name != "a":
@@ -157,3 +174,52 @@ def test_preview_unknown_screen_404():
         resp = await client.get("/preview/ghost.png")
         assert resp.status == 404
     _with_client(check)
+
+
+def test_api_status_includes_extra_status():
+    async def check(client, controller):
+        resp = await client.get("/api/status")
+        assert resp.status == 200
+        data = await resp.json()
+        assert data["templates"] == {"connected": True, "subscriptions": 3, "fallback_renders": 0}
+        assert data["firmware"] == {"latest": {"version": "1.2.3"}, "last_error": None}
+    async def wrapper():
+        controller = StubController()
+        app = api_mod.create_app(
+            controller,
+            extra_status=lambda: {"templates": {"connected": True, "subscriptions": 3,
+                                                 "fallback_renders": 0},
+                                  "firmware": {"latest": {"version": "1.2.3"}, "last_error": None}})
+        async with TestClient(TestServer(app)) as client:
+            await check(client, controller)
+    asyncio.run(wrapper())
+
+
+def test_api_status_extra_status_error_does_not_break():
+    async def wrapper():
+        controller = StubController()
+
+        def boom():
+            raise RuntimeError("nope")
+
+        app = api_mod.create_app(controller, extra_status=boom)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/status")
+            assert resp.status == 200
+            data = await resp.json()
+            assert "nope" in data["extra_status_error"]
+    asyncio.run(wrapper())
+
+
+def test_api_status_with_no_controllers():
+    """No clocks configured: /api/status still answers (empty clocks)."""
+    async def wrapper():
+        app = api_mod.create_app([])
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/status")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["clocks"] == {}
+            resp = await client.post("/api/show", json={"screen": "a"})
+            assert resp.status == 404
+    asyncio.run(wrapper())

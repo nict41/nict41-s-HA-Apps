@@ -1,9 +1,14 @@
 """Tube Display entry point.
 
-Wires everything together: settings, one aiohttp session, the HA client, the
-clock pusher, the MQTT bridge, the rotation controller and the HTTP API on
-0.0.0.0:8098. Writes a commented example /config/screens.yaml on first start
-if the file is missing.
+Wires everything together: settings, one aiohttp session, the HA client, one
+clock pusher and one controller per configured clock, one MQTT bridge for all
+of them, and the HTTP API on 0.0.0.0:8098. Writes a commented example
+/config/screens.yaml on first start if the file is missing.
+
+Also wired here: the websocket template cache (live updates, only with a
+SUPERVISOR_TOKEN), the firmware publisher (MQTT OTA offers), and the bundled
+integration install/announce. With no clocks configured the app still runs the
+HTTP API and the editor - it just waits forever instead of exiting.
 """
 
 from __future__ import annotations
@@ -18,6 +23,9 @@ from aiohttp import web
 
 import api as api_mod
 import editor as editor_mod
+import firmware as firmware_mod
+import ha_ws
+import integration_installer
 import mqtt_bridge
 from clock import ClockPusher
 from controller import Controller
@@ -56,8 +64,12 @@ async def run() -> None:
         level=settings.logging_level,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
-    _LOG.info("Tube Display starting (clock %s, mqtt id %s, screens %s)",
-              settings.clock_host, settings.clock_mqtt_id, settings.screens_file)
+    for err in settings.errors:
+        _LOG.error("Settings: %s", err)
+    _LOG.info("Tube Display starting (%d clock(s): %s, screens %s)",
+              len(settings.clocks),
+              ", ".join(f"{c.name}={c.host}" for c in settings.clocks) or "none",
+              settings.screens_file)
     ensure_screens_file(settings.screens_file)
 
     timeout = aiohttp.ClientTimeout(total=30)
@@ -65,47 +77,95 @@ async def run() -> None:
         token = os.environ.get("SUPERVISOR_TOKEN", "")
         ha = HaClient(session, token=token)
 
+        # Template cache (live updates): one websocket subscription per template,
+        # shared by every controller. Only with a Supervisor token; without one
+        # the controllers render over REST as before.
+        cache: ha_ws.TemplateCache | None = None
+        if token:
+            def _on_template_change(template: str) -> None:
+                for c in controllers:
+                    c.on_template_change()
+
+            cache = ha_ws.TemplateCache(session, token,
+                                        rest_renderer=ha.render_template,
+                                        on_change=_on_template_change)
+            await cache.start()
+
+        # One controller + pusher per clock, all sharing the session and HA client
+        controllers: list[Controller] = []
+        for clock in settings.clocks:
+            controller = Controller(settings, session, ha, clock=clock,
+                                    renderer=cache.render if cache is not None else None)
+            if cache is not None:
+                controller.live = True
+            pusher = ClockPusher(session, clock.base_url,
+                                 user=clock.user, password=clock.password)
+            controller.set_pusher(pusher)
+            controllers.append(controller)
+        if not controllers:
+            _LOG.warning("No clocks configured (TUBE_CLOCK_HOST / TUBE_CLOCKS_JSON) - "
+                         "running the HTTP API and editor only")
+
         mqtt: mqtt_bridge.MqttBridge | None = None
-
-        async def on_clock_state(state: dict) -> None:
-            await controller.on_clock_state(state)
-
-        async def on_select(value: str) -> None:
-            if value == mqtt_bridge.ROTATE:
-                controller.clear_pin()
-            elif value == mqtt_bridge.CLOCK:
-                controller.show_screen("clock")
-            else:
-                try:
-                    controller.show_screen(value)
-                except KeyError:
-                    _LOG.warning("MQTT select: unknown screen %r", value)
-
-        async def on_rotation(on: bool) -> None:
-            controller.set_rotation_enabled(on)
-
-        async def on_button() -> None:
-            controller.next_screen()
-
-        controller = Controller(settings, session, ha)
-        pusher = ClockPusher(
-            session, settings.clock_base_url,
-            user=settings.clock_user, password=settings.clock_password,
-        )
-        controller.set_pusher(pusher)
-
         if settings.mqtt:
-            mqtt = mqtt_bridge.MqttBridge(
-                settings.mqtt, settings.clock_mqtt_id,
-                on_clock_state, on_select, on_rotation,
-                get_state=controller._mqtt_state,
-                on_button=on_button,
-            )
-            pusher._publish_display = mqtt.publish_display
-            controller.set_mqtt(mqtt)
+            mqtt = mqtt_bridge.MqttBridge(settings.mqtt, controllers)
+            for controller in controllers:
+                pusher = controller._pusher
+                if pusher is not None:
+                    # display-mode commands go over MQTT to that clock
+                    pusher._publish_display = (
+                        lambda mode, cid=controller.clock.mqtt_id:
+                        mqtt.publish_display(cid, mode)
+                    )
+                controller.set_mqtt(mqtt)
             await mqtt.start()
 
-        app = api_mod.create_app(controller)
+        # Firmware publisher: offers HA Tubes firmware updates to the clocks over
+        # MQTT (retained clock/<id>/ota/latest) and serves the .bin over HTTP.
+        publisher: firmware_mod.FirmwarePublisher | None = None
+        firmware_task: asyncio.Task | None = None
+        if settings.firmware_updates and mqtt is not None:
+            async def _base_url() -> str | None:
+                if settings.app_url:
+                    return settings.app_url.rstrip("/")
+                return await firmware_mod.host_base_url(session, token, API_PORT)
+
+            publisher = firmware_mod.FirmwarePublisher(
+                session, "/data/firmware",
+                publish=lambda topic, payload: mqtt.publish(topic, payload, retain=True),
+                clock_ids=lambda: [c.clock.mqtt_id for c in controllers],
+                base_url=_base_url,
+                variant=settings.firmware_variant,
+            )
+
+            async def _firmware_run() -> None:
+                # wait until MQTT is connected before the first publish (no timeout)
+                await mqtt.connected.wait()
+                await publisher.run()
+
+            firmware_task = asyncio.ensure_future(_firmware_run())
+
+        # Bundled integration: install it into HA's config folder (a restart
+        # notification says so) and announce the app to the Supervisor. Never
+        # fail start-up because of these.
+        try:
+            version, was_installed = integration_installer.install()
+            if version:
+                await integration_installer.notify_restart(session, token, version,
+                                                           was_installed=was_installed)
+            if token:
+                await integration_installer.announce(session, token, API_PORT)
+        except Exception as err:
+            _LOG.warning("Integration install/announce failed (ignored): %s", err)
+
+        def _extra_status() -> dict:
+            return {
+                "templates": cache.stats() if cache is not None else None,
+                "firmware": ({"latest": publisher.latest, "last_error": publisher.last_error}
+                             if publisher is not None else None),
+            }
+
+        app = api_mod.create_app(controllers, firmware=publisher, extra_status=_extra_status)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", API_PORT)
@@ -114,20 +174,36 @@ async def run() -> None:
 
         # The screen editor for the HA ingress panel: a second site on 8099
         # (not published in ports:), only reachable from the ingress proxy.
-        editor_app = editor_mod.create_app(controller, ha, settings.screens_file)
+        editor_app = editor_mod.create_app(
+            controllers[0] if controllers else None, ha, settings.screens_file,
+            controllers={c.name: c for c in controllers})
         editor_runner = web.AppRunner(editor_app)
         await editor_runner.setup()
         editor_site = web.TCPSite(editor_runner, "0.0.0.0", editor_mod.INGRESS_PORT)
         await editor_site.start()
         _LOG.info("Screen editor (ingress) listening on 0.0.0.0:%d", editor_mod.INGRESS_PORT)
 
-        rotation_task = asyncio.ensure_future(controller.run())
+        rotation_tasks = [asyncio.ensure_future(c.run()) for c in controllers]
         try:
-            await rotation_task
+            if rotation_tasks:
+                await asyncio.gather(*rotation_tasks)
+            else:
+                # No clocks: keep the HTTP API + editor running forever
+                _LOG.info("No clocks to drive - waiting (HTTP API and editor stay up)")
+                await asyncio.Event().wait()
         except asyncio.CancelledError:
             pass
         finally:
-            controller.stop()
+            for c in controllers:
+                c.stop()
+            if firmware_task is not None:
+                firmware_task.cancel()
+                try:
+                    await firmware_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if cache is not None:
+                await cache.stop()
             if mqtt is not None:
                 await mqtt.stop()
             await runner.cleanup()

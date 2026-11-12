@@ -15,8 +15,17 @@ everything at the root of its own site.
 - GET  api/entities?q=<text> up to 50 matching entities (cached ~10 s)
 - POST api/save              {"data": {...}, "mtime": ...} -> round-trip write
 - POST api/save_yaml         {"yaml": "...", "mtime": ...} -> raw write
+- GET  api/history           {"items": [...]} snapshots taken before each save
+- GET  api/history/{id}      {"id", "yaml"} one snapshot
+- POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
+- GET  api/clocks            {"clocks": [{"name", "host", "online", "rotation_enabled"}]}
+- GET  api/status            {"clocks": {name: controller.status()}}
 
 The 8098 API (api.py) is untouched and has no write routes.
+
+The editor works with no clock configured too (`controller` may be None): previews
+then render with the plain REST template renderer and the picture library of the
+screens file's folder, never through the app's template cache.
 """
 
 from __future__ import annotations
@@ -24,6 +33,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -32,6 +42,7 @@ from aiohttp import web
 
 from render import IMAGE_EXTS, safe_image_name
 from screens import ScreensError, parse_screens
+from history import SaveHistory
 
 _LOG = logging.getLogger(__name__)
 
@@ -50,13 +61,25 @@ def _peer(request: web.Request) -> str:
     return request.remote or ""
 
 
-def create_app(controller, ha, screens_file: str, test_allow_local: bool = False) -> web.Application:
-    """The editor app. `controller` renders previews, `ha` renders templates and
-    lists entities, `screens_file` is the YAML file being edited."""
+async def _async_none(template: str) -> str:
+    """Renderer of last resort when there is no HA client at all (tests)."""
+    return ""
+
+
+def create_app(controller, ha, screens_file: str, test_allow_local: bool = False,
+               controllers: dict | None = None) -> web.Application:
+    """The editor app. `controller` renders previews (may be None when no clock is
+    configured - previews then build their own render context), `ha` renders
+    templates and lists entities, `screens_file` is the YAML file being edited.
+    `controllers` (optional) maps clock name -> controller for the rotation
+    toggle; defaults to the single controller passed in."""
     app = web.Application(client_max_size=12 * 1024 * 1024)
     app["controller"] = controller
+    app["controllers"] = (controllers if controllers is not None
+                          else {getattr(controller, "name", "main"): controller})
     app["ha"] = ha
     app["screens_file"] = screens_file
+    app["history"] = SaveHistory(screens_file)
     app["allow_local"] = test_allow_local
     app["_entities_cache"] = {"at": 0.0, "q": None, "items": []}
 
@@ -182,9 +205,23 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 screen = _parse_screen("__preview__", fixed, retry)
             if screen is None:
                 return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
-            # A copy, so a preview running at the same time doesn't share the box recorder
+            # A copy, so a preview running at the same time doesn't share the box recorder.
+            # The preview NEVER uses the controller's (possibly cached) renderer: typing in
+            # the editor would create hundreds of websocket subscriptions. With no
+            # controller at all, build a context of our own around the plain REST renderer.
             import copy
-            ctx = copy.copy(app["controller"]._ctx)
+            import render as render_mod
+            ha = app["ha"]
+            controller = app["controller"]
+            if controller is not None:
+                ctx = copy.copy(controller._ctx)
+                if ha is not None:
+                    ctx.renderer = ha.render_template
+            else:
+                ctx = render_mod.RenderContext(
+                    ha.render_template if ha is not None else _async_none,
+                    session=None, ha=ha)
+                ctx.images_dir = images_dir
             headers: dict[str, str] = {}
             if errors:
                 headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
@@ -217,7 +254,16 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             source = body.get("source") if isinstance(body, dict) else None
             if not isinstance(source, str) or not source:
                 return web.json_response({"error": "body needs a 'source' string"}, status=400)
-            ctx = app["controller"]._ctx
+            controller = app["controller"]
+            if controller is not None:
+                ctx = controller._ctx
+            else:
+                import render as render_mod
+                ha = app["ha"]
+                ctx = render_mod.RenderContext(
+                    ha.render_template if ha is not None else _async_none,
+                    session=None, ha=ha)
+                ctx.images_dir = images_dir
             try:
                 if render_mod.is_template(source):
                     source = (await ctx.renderer(source)).strip()
@@ -308,6 +354,14 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         path = app["screens_file"]
         folder = os.path.dirname(path) or "."
         tmp = os.path.join(folder, f".{os.path.basename(path)}.tmp")
+        # keep the current content in the history before overwriting it, so a
+        # save (or restore) can be undone; never block a save because of it
+        try:
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    app["history"].snapshot(f.read())
+        except OSError:
+            _LOG.warning("Editor: could not snapshot %s to history", path, exc_info=True)
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
@@ -315,8 +369,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     def _round_trip_update(old_text: str, data: dict) -> str:
         """Load the existing file with ruamel (comments/layout preserved), update
-        rotation/clock/screens in place to match `data`, dump. Multi-line strings
-        become literal block scalars (|-)."""
+        rotation/clock/screens/night/clocks in place to match `data`, dump. Multi-line
+        strings become literal block scalars (|-)."""
         from ruamel.yaml import YAML
         from ruamel.yaml.scalarstring import LiteralScalarString
 
@@ -332,6 +386,11 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         def _set_str(value):
             if isinstance(value, str) and "\n" in value:
                 return LiteralScalarString(value)
+            # "23:00" unquoted is a sexagesimal int in YAML 1.1 (PyYAML reads it as 1380),
+            # so time-of-day strings must be quoted to survive the round trip
+            if isinstance(value, str) and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", value):
+                from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+                return DoubleQuotedScalarString(value)
             return value
 
         def _custom(obj: dict):
@@ -396,7 +455,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return new
 
         new = _convert(data)
-        for key in ("rotation", "clock", "screens"):
+        for key in ("rotation", "clock", "screens", "night", "clocks"):
             if key in new:
                 root[key] = _merge(root[key], new[key]) if key in root else new[key]
             elif key in root:
@@ -477,6 +536,61 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------
+    # history: snapshots of the screens file taken before every save
+    # ------------------------------------------------------------------
+
+    async def api_history(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            return web.json_response({"items": app["history"].list()})
+        return await ingress_only(request, handler)
+
+    async def api_history_get(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            try:
+                text = app["history"].read(req.match_info["id"])
+            except KeyError:
+                return web.json_response({"error": "unknown history id"}, status=404)
+            return web.json_response({"id": req.match_info["id"], "yaml": text})
+        return await ingress_only(request, handler)
+
+    async def api_history_restore(request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            if not isinstance(body, dict) or "mtime" not in body:
+                return web.json_response({"error": "body needs an 'mtime'"}, status=400)
+            conflict = _check_mtime(body)
+            if conflict is not None:
+                return conflict
+            try:
+                text = app["history"].read(req.match_info["id"])
+            except KeyError:
+                return web.json_response({"error": "unknown history id"}, status=404)
+            # the restored text must be valid, exactly like api_save_yaml checks
+            try:
+                data = yaml.safe_load(text)
+            except yaml.YAMLError as err:
+                return web.json_response({"error": "invalid YAML", "errors": [str(err)]}, status=400)
+            if data is None:
+                return web.json_response({"error": "invalid screens", "errors": ["file is empty"]}, status=400)
+            try:
+                errors = list(parse_screens(data).errors)
+            except ScreensError as err:
+                errors = [str(err)]
+            if errors:
+                return web.json_response({"error": "invalid screens", "errors": errors}, status=400)
+            # _atomic_write snapshots the current file first, so a restore can
+            # itself be undone
+            mtime = _atomic_write(text)
+            _LOG.info("Editor restored %s from history %s", app["screens_file"],
+                      req.match_info["id"])
+            return web.json_response({"ok": True, "mtime": mtime})
+        return await ingress_only(request, handler)
+
+    # ------------------------------------------------------------------
     # picture library: <screens file folder>/images, used as source "file:<name>"
     # ------------------------------------------------------------------
     images_dir = os.path.join(os.path.dirname(screens_file) or ".", "images")
@@ -552,18 +666,72 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, handler)
 
     async def api_rotation(request: web.Request) -> web.Response:
-        """GET: {"enabled": bool}. POST {"enabled": bool}: on = cycle automatically, off = the
-        clock's button changes screens."""
+        """GET [?clock=<name>]: {"enabled": bool}. POST {"enabled": bool, "clock"?}: on =
+        cycle automatically, off = the clock's button changes screens. `clock` picks
+        one of the app's controllers (query string for GET, JSON body for POST)."""
         async def handler(req: web.Request) -> web.Response:
-            ctl = app["controller"]
+            name = req.query.get("clock")
             if req.method == "POST":
                 body = await req.json()
+                if name is None and isinstance(body, dict):
+                    name = body.get("clock")
+                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
+                if ctl is None:
+                    return web.json_response(
+                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                        status=404)
                 ctl.set_rotation_enabled(bool(body.get("enabled")))
+            else:
+                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
+                if ctl is None:
+                    return web.json_response(
+                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                        status=404)
             return web.json_response({"enabled": bool(ctl.rotation_enabled)})
         return await ingress_only(request, handler)
 
     app.router.add_get("/api/rotation", api_rotation)
     app.router.add_post("/api/rotation", api_rotation)
+
+    async def api_clocks(request: web.Request) -> web.Response:
+        """GET: {"clocks": [{"name", "host", "online", "rotation_enabled"}]} - one entry
+        per configured clock (empty when none)."""
+        async def handler(req: web.Request) -> web.Response:
+            out = []
+            for name, ctl in app["controllers"].items():
+                clock = getattr(ctl, "clock", None)
+                host = getattr(clock, "host", None) if clock is not None else None
+                if host is None:
+                    host = getattr(getattr(ctl, "settings", None), "clock_host", "") or ""
+                try:
+                    online = bool(ctl.status().get("online"))
+                except Exception:
+                    online = False
+                out.append({
+                    "name": str(name),
+                    "host": str(host),
+                    "online": online,
+                    "rotation_enabled": bool(getattr(ctl, "rotation_enabled", False)),
+                })
+            return web.json_response({"clocks": out})
+        return await ingress_only(request, handler)
+
+    async def api_status(request: web.Request) -> web.Response:
+        """GET: {"clocks": {name: controller.status()}} - live state of every clock
+        (empty when none)."""
+        async def handler(req: web.Request) -> web.Response:
+            out = {}
+            for name, ctl in app["controllers"].items():
+                try:
+                    out[str(name)] = ctl.status()
+                except Exception as err:
+                    out[str(name)] = {"error": str(err)}
+            return web.json_response({"clocks": out})
+        return await ingress_only(request, handler)
+
+    app.router.add_get("/api/clocks", api_clocks)
+    app.router.add_get("/api/status", api_status)
+
     async def api_icons(request: web.Request) -> web.Response:
         """GET ?q=<text>: up to 60 Material Design Icon names ("mdi:...") containing the text,
         names starting with it first."""
@@ -597,4 +765,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_get("/api/entities", api_entities)
     app.router.add_post("/api/save", api_save)
     app.router.add_post("/api/save_yaml", api_save_yaml)
+    app.router.add_get("/api/history", api_history)
+    app.router.add_get("/api/history/{id}", api_history_get)
+    app.router.add_post("/api/history/{id}/restore", api_history_restore)
     return app

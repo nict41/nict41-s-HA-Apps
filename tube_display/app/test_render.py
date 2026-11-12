@@ -384,3 +384,60 @@ def test_strip_placement(tmp_path):
     x0, y0, x1, y1 = _red_box(strip)
     assert (y0, y1) == (0, STRIP_H) and abs((x0 + x1) / 2 - (STRIP_W / 2 - 200)) <= 1
     assert strip.getpixel((STRIP_W - 5, 5)) == (0, 0, 128)
+
+
+def _non_bg_pixels(img, bg):
+    return [(x, y) for y in range(img.height) for x in range(img.width)
+            if img.getpixel((x, y)) != bg]
+
+
+def _dominant_ink(img, bg):
+    """The most common non-background colour (anti-aliasing blends the edges)."""
+    from collections import Counter
+    counts = Counter(img.getpixel((x, y)) for y in range(img.height) for x in range(img.width))
+    counts.pop(bg, None)
+    return counts.most_common(1)[0][0]
+
+
+def test_render_message_basic_shape_and_color():
+    ctx = _ctx()
+    img = render.render_message("Hello there", ctx)
+    assert img.size == (STRIP_W, STRIP_H) and img.mode == "RGB"
+    # default: white text on black, spanning the full strip (no icon)
+    px = _non_bg_pixels(img, (0, 0, 0))
+    assert px, "message text must be drawn"
+    assert _dominant_ink(img, (0, 0, 0)) == (255, 255, 255)
+    xs = [p[0] for p in px]
+    assert min(xs) < STRIP_W // 2 < max(xs)          # centred across the strip
+
+
+def test_render_message_color_and_background():
+    ctx = _ctx()
+    img = render.render_message("Hi", ctx, color="#FF0000", background="#0000FF")
+    px = _non_bg_pixels(img, (0, 0, 255))
+    assert px
+    assert _dominant_ink(img, (0, 0, 255)) == (255, 0, 0)
+
+
+def test_render_message_icon_uses_tube0_only_for_icon():
+    ctx = _ctx()
+    img = render.render_message("Doorbell!", ctx, icon="mdi:bell")
+    # the icon area (tube 0) has ink, and the text area starts after x=135
+    icon_px = _non_bg_pixels(img.crop((0, 0, TUBE_W, TUBE_H)), (0, 0, 0))
+    assert icon_px, "icon must be drawn on tube 0"
+    text_px = _non_bg_pixels(img.crop((TUBE_W, 0, STRIP_W, STRIP_H)), (0, 0, 0))
+    assert text_px, "text must be drawn right of tube 0"
+    xs = [p[0] for p in text_px]
+    assert min(xs) >= 0 and max(xs) < STRIP_W - TUBE_W
+
+
+def test_render_message_long_text_wraps_to_at_most_3_lines():
+    ctx = _ctx()
+    long_text = " ".join(f"word{i}" for i in range(60))
+    img = render.render_message(long_text, ctx)
+    assert img.size == (STRIP_W, STRIP_H)
+    # ink must stay inside the 8 px margins
+    px = _non_bg_pixels(img, (0, 0, 0))
+    assert px
+    assert min(p[0] for p in px) >= 8 - 2 and max(p[0] for p in px) <= STRIP_W - 8 + 2
+    assert min(p[1] for p in px) >= 8 - 2 and max(p[1] for p in px) <= STRIP_H - 8 + 2

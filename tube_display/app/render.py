@@ -875,6 +875,59 @@ async def render_screen(screen: Screen, ctx: RenderContext) -> Image.Image:
     return strip
 
 
+def _wrap_lines(draw: ImageDraw.ImageDraw, text: str, font, max_w: int) -> list[str]:
+    """Greedy word wrap of `text` to lines that fit max_w with `font`."""
+    words = text.split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    line = words[0]
+    for word in words[1:]:
+        if _text_size(draw, line + " " + word, font)[0] <= max_w:
+            line += " " + word
+        else:
+            lines.append(line)
+            line = word
+    lines.append(line)
+    return lines
+
+
+def render_message(message: str, ctx: RenderContext, icon: str | None = None,
+                   color: str | None = None, background: str = "#000000") -> Image.Image:
+    """A flash message across the whole 810x240 strip.
+
+    With an icon, the icon is centred on tube 0 (x 0..135) and the text uses
+    x 135..810; without one the text spans the full strip. The text is wrapped
+    onto up to 3 lines and auto-sized with _fit_font to fill the available box
+    (8 px margins), centred, in `color` (default white) on `background`."""
+    bg = parse_color(background, (0, 0, 0))
+    fill = parse_color(color, DEFAULT_COLOR)
+    img = Image.new("RGB", (STRIP_W, STRIP_H), bg)
+    draw = ImageDraw.Draw(img)
+    text_x0 = TUBE_W if icon else 0
+    box_w = STRIP_W - text_x0 - 2 * 8
+    box_h = STRIP_H - 2 * 8
+    if icon:
+        # same MDI helpers draw_icon uses; the glyph as large as the tube allows
+        probe = _fit_font(draw, "W", TUBE_W - 16, TUBE_H - 16, start=200)
+        _draw_mdi(draw, TUBE_W // 2, TUBE_H // 2, icon, _text_size(draw, "W", probe)[1] or 120, fill)
+    # Wrap at decreasing sizes until the text fits on at most 3 lines, then let
+    # _fit_font size the block to fill the box
+    text = _str(message)
+    size = 120
+    while size > 8:
+        f = fonts.load_font(size)
+        wrapped = _wrap_lines(draw, text, f, box_w)
+        if len(wrapped) <= 3 and _text_size(draw, "\n".join(wrapped), f)[1] <= box_h:
+            break
+        size -= 4
+    lines = _wrap_lines(draw, text, fonts.load_font(max(size, 8)), box_w)[:3]
+    font = _fit_font(draw, "\n".join(lines), box_w, box_h, start=120)
+    _draw_centered(draw, text_x0 + (STRIP_W - text_x0) / 2, STRIP_H / 2,
+                   "\n".join(lines), font, fill)
+    return img
+
+
 async def screen_when_true(screen: Screen, ctx: RenderContext) -> bool:
     """Evaluate the screen's `when` template; True unless it renders 'true'."""
     if not screen.when:

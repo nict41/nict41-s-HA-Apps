@@ -1,5 +1,5 @@
 name: "Tube Display"
-version: "0.5.1"
+version: "0.6.0"
 slug: "tube_display"
 description: "Renders Home Assistant information into pictures and pushes them to an IPSTube clock's six panel displays"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/tube_display"
@@ -10,6 +10,9 @@ init: false
 startup: services
 boot: auto
 homeassistant_api: true
+hassio_api: true
+discovery:
+  - tube_display
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:television-guide
@@ -32,12 +35,25 @@ options:
   default_refresh: 30
   log_level: "info"
   screens_file: "/homeassistant/tube_display/screens.yaml"
+  clocks: []
+  firmware_updates: true
+  firmware_variant: "ipstube"
+  app_url: ""
 schema:
-  clock_host: str
-  clock_mqtt_id: str
+  clock_host: str?
+  clock_mqtt_id: str?
   clock_user: str?
   clock_password: password?
   default_duration: int(3,3600)
   default_refresh: int(2,3600)
   log_level: list(debug|info|warning|error)?
   screens_file: str?
+  clocks:
+    - name: match(^[a-zA-Z0-9_]{1,20}$)
+      host: str
+      mqtt_id: str
+      user: str?
+      password: password?
+  firmware_updates: bool
+  firmware_variant: str
+  app_url: str?

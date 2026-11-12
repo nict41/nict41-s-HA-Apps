@@ -55,6 +55,10 @@ export TUBE_DEFAULT_DURATION="$(opt default_duration "15")"
 export TUBE_DEFAULT_REFRESH="$(opt default_refresh "30")"
 export TUBE_LOG_LEVEL="$(opt log_level "info")"
 export TUBE_SCREENS_FILE="$(opt screens_file "/homeassistant/tube_display/screens.yaml")"
+export TUBE_CLOCKS_JSON="$(jq -c '.clocks // []' <<< "${OPTIONS_JSON}")"
+export TUBE_FIRMWARE_UPDATES="$(opt firmware_updates "true")"
+export TUBE_FIRMWARE_VARIANT="$(opt firmware_variant "ipstube")"
+export TUBE_APP_URL="$(opt app_url "")"
 
 bashio::log.level "${TUBE_LOG_LEVEL}"
 

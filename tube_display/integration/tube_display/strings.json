@@ -1,0 +1,119 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tube Display",
+        "description": "Address of the Tube Display app's HTTP API.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      },
+      "hassio_confirm": {
+        "title": "Tube Display",
+        "description": "Add the actions of the Tube Display app (show a screen, flash a message, pause) to Home Assistant?"
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not reach the Tube Display app at that address."
+    },
+    "abort": {
+      "already_configured": "Tube Display is already set up.",
+      "single_instance_allowed": "Tube Display is already set up."
+    }
+  },
+  "services": {
+    "show_screen": {
+      "name": "Show screen",
+      "description": "Show one screen now, for a number of seconds or until the rotation is resumed.",
+      "fields": {
+        "screen": {
+          "name": "Screen",
+          "description": "Name of the screen in screens.yaml, or 'clock'."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to show it. Leave empty to keep it until another screen is chosen."
+        },
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    },
+    "flash_message": {
+      "name": "Flash message",
+      "description": "Show a short message across the six tubes, then go back to what was showing.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "Text to show. Templates are not rendered; render them in the automation."
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long the message stays."
+        },
+        "icon": {
+          "name": "Icon",
+          "description": "Optional icon shown on the first tube."
+        },
+        "color": {
+          "name": "Colour",
+          "description": "Text colour as #RRGGBB."
+        },
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    },
+    "pause": {
+      "name": "Pause",
+      "description": "Hand the tubes back to the clock's own time display and stop sending screens.",
+      "fields": {
+        "seconds": {
+          "name": "Seconds",
+          "description": "Resume by itself after this long. Leave empty to pause until resumed."
+        },
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    },
+    "resume": {
+      "name": "Resume",
+      "description": "End a pause, a pinned screen or a message and go back to the rotation.",
+      "fields": {
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    },
+    "next_screen": {
+      "name": "Next screen",
+      "description": "Move on to the next screen of the rotation, like the clock's button.",
+      "fields": {
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    },
+    "set_rotation": {
+      "name": "Set rotation",
+      "description": "Turn cycling through the screens on or off. Off means the clock's button changes screens.",
+      "fields": {
+        "enabled": {
+          "name": "Enabled",
+          "description": "On to cycle automatically."
+        },
+        "clock": {
+          "name": "Clock",
+          "description": "Name of the clock (as in the app's clocks option). Leave empty for every clock."
+        }
+      }
+    }
+  }
+}

@@ -31,13 +31,22 @@ pictures on `POST /panel`); the stock time/date/weather firmware does not.
    display.
 4. The clock's button shows the next screen while panels are showing. With
    **Cycle automatically** off, screens change only when you press it.
-5. Home Assistant automations can interrupt the rotation at any time via the
-   HTTP API (`POST /api/show`), and two MQTT entities (a screen select and a
-   rotation switch) appear in HA under the device "Tube Display".
+5. Screens update live: every template is subscribed over Home Assistant's
+   websocket, so a value changes on the tubes as soon as it changes in HA.
+6. Automations use the bundled integration's actions
+   (`tube_display.show_screen`, `flash_message`, `pause`, ...) or the HTTP
+   API, and MQTT entities (screen select, rotation and pause switches,
+   message text, next-screen button, current screen, clock online) appear
+   under the device "Tube Display".
+7. Night mode sets the clock's brightness from the sun and dims the screens,
+   with optional quiet hours; new HA Tubes firmware releases are offered to
+   the clock as a Home Assistant update; and one app can drive several
+   clocks.
 
 See [DOCS.md](DOCS.md) for the full reference: options, the screen editor,
 the screens.yaml format with every widget, your own pictures, the clock's
-button, the HTTP API, the MQTT entities and an example automation.
+button, actions, several clocks, night mode, firmware updates, the HTTP API,
+the MQTT entities and an example automation.
 
 ## Requirements
 
