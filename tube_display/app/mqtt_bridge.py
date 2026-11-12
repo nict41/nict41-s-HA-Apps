@@ -379,7 +379,9 @@ class MqttBridge:
             select_cfg = {
                 "unique_id": f"{t.prefix}_screen",
                 "object_id": f"{t.prefix}_screen",
-                "name": f"{t.title} Screen",
+                # Just the entity's own name: Home Assistant puts the device name ("Tube Display",
+                # "Tube Display Kitchen") in front, so "Tube Display Screen" would show twice
+                "name": "Screen",
                 "icon": "mdi:view-dashboard-variant",
                 "state_topic": t.select_state,
                 "command_topic": t.select_command,
@@ -390,7 +392,7 @@ class MqttBridge:
             switch_cfg = {
                 "unique_id": f"{t.prefix}_rotation",
                 "object_id": f"{t.prefix}_rotation",
-                "name": f"{t.title} Rotation",
+                "name": "Rotation",
                 "icon": "mdi:sync",
                 "state_topic": t.rotation_state,
                 "command_topic": t.rotation_command,
@@ -402,7 +404,7 @@ class MqttBridge:
             current_cfg = {
                 "unique_id": f"{t.prefix}_current",
                 "object_id": f"{t.prefix}_current",
-                "name": f"{t.title} Current Screen",
+                "name": "Current Screen",
                 "icon": "mdi:television-play",
                 "state_topic": t.current_state,
                 "availability_topic": t.availability_topic,
@@ -411,7 +413,7 @@ class MqttBridge:
             last_error_cfg = {
                 "unique_id": f"{t.prefix}_last_error",
                 "object_id": f"{t.prefix}_last_error",
-                "name": f"{t.title} Last Error",
+                "name": "Last Error",
                 "entity_category": "diagnostic",
                 "icon": "mdi:alert-circle-outline",
                 "state_topic": t.last_error_state,
@@ -421,7 +423,7 @@ class MqttBridge:
             online_cfg = {
                 "unique_id": f"{t.prefix}_clock_online",
                 "object_id": f"{t.prefix}_clock_online",
-                "name": f"{t.title} Clock Online",
+                "name": "Clock Online",
                 "device_class": "connectivity",
                 "payload_on": "on",
                 "payload_off": "off",
@@ -432,7 +434,7 @@ class MqttBridge:
             pause_cfg = {
                 "unique_id": f"{t.prefix}_pause",
                 "object_id": f"{t.prefix}_pause",
-                "name": f"{t.title} Pause",
+                "name": "Pause",
                 "icon": "mdi:pause-circle",
                 "state_topic": t.pause_state,
                 "command_topic": t.pause_command,
@@ -444,7 +446,7 @@ class MqttBridge:
             message_cfg = {
                 "unique_id": f"{t.prefix}_message",
                 "object_id": f"{t.prefix}_message",
-                "name": f"{t.title} Message",
+                "name": "Message",
                 "icon": "mdi:message-text",
                 "max": 255,
                 "state_topic": t.message_state,
@@ -455,7 +457,7 @@ class MqttBridge:
             next_cfg = {
                 "unique_id": f"{t.prefix}_next",
                 "object_id": f"{t.prefix}_next",
-                "name": f"{t.title} Next Screen",
+                "name": "Next Screen",
                 "icon": "mdi:skip-next",
                 "command_topic": t.next_command,
                 "payload_press": "PRESS",
