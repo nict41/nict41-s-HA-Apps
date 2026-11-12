@@ -5,10 +5,13 @@ tube_display.flash_message. It ships inside the app image at /app/integration
 and is copied into Home Assistant's config folder when it's missing or the
 bundled version differs; Home Assistant then needs one restart to load it, so
 a persistent notification says so (the app never restarts Home Assistant).
+install() returns (version, was_installed) so the caller can word the
+notification ("installed" vs "updated") correctly.
 
 The app also posts a Supervisor discovery message (service "tube_display"
 with its host name and API port), which Home Assistant shows as a discovered
-integration - set-up is one click.
+integration - set-up is one click. main.py calls both at start-up and never
+lets them fail start-up.
 """
 
 from __future__ import annotations
@@ -36,20 +39,23 @@ def _version(folder: str) -> str | None:
         return None
 
 
-def install(bundled: str = BUNDLED, target_root: str = TARGET_ROOT) -> str | None:
-    """Copy the integration if missing or a different version. Returns the version
-    installed now, or None if nothing changed (or it failed)."""
+def install(bundled: str = BUNDLED, target_root: str = TARGET_ROOT) -> tuple[str | None, bool]:
+    """Copy the integration if missing or a different version. Returns
+    (version installed now, was_installed) - (None, False) when nothing changed
+    or it failed; `was_installed` says whether an integration existed before
+    (for the restart notification's wording)."""
     want = _version(bundled)
     if want is None:
         _LOG.warning("Bundled integration not found at %s", bundled)
-        return None
+        return None, False
     target = os.path.join(target_root, DOMAIN)
     have = _version(target)
+    was_installed = have is not None
     if have == want:
-        return None
+        return None, was_installed
     if not os.path.isdir(target_root):
         _LOG.warning("%s not found - not installing the Tube Display integration", target_root)
-        return None
+        return None, was_installed
     tmp = target + ".new"
     try:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -59,10 +65,10 @@ def install(bundled: str = BUNDLED, target_root: str = TARGET_ROOT) -> str | Non
     except OSError as err:
         _LOG.error("Could not install the Tube Display integration: %s", err)
         shutil.rmtree(tmp, ignore_errors=True)
-        return None
+        return None, was_installed
     _LOG.info("Installed the Tube Display integration %s (was %s) - restart Home Assistant to load it",
               want, have or "not installed")
-    return want
+    return want, was_installed
 
 
 async def notify_restart(session: aiohttp.ClientSession, token: str, version: str, was_installed: bool,

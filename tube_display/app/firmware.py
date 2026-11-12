@@ -7,7 +7,10 @@ the release .bin from GitHub itself and serves it from the app's own HTTP port
 
 check_now() looks at the GitHub "latest release" of the firmware repo, downloads
 the matching asset once (with an ETag so unchanged releases are cheap), prunes
-old files and publishes the OTA payload to every clock.
+old files and publishes the OTA payload to every clock. main.py runs run() as a
+background task that first waits for the MQTT connection (MqttBridge.connected),
+so the first publish never goes out before the broker is up; latest/last_error
+are exposed on /api/status as "firmware".
 """
 
 from __future__ import annotations

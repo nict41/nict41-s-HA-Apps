@@ -23,7 +23,7 @@ def _bundle(tmp_path, version="1.0"):
 def test_installs_when_missing(tmp_path):
     root = tmp_path / "custom_components"
     root.mkdir()
-    assert inst.install(_bundle(tmp_path), str(root)) == "1.0"
+    assert inst.install(_bundle(tmp_path), str(root)) == ("1.0", False)
     assert (root / "tube_display" / "__init__.py").read_text() == "# v1.0"
 
 
@@ -33,7 +33,7 @@ def test_same_version_untouched(tmp_path):
     b = _bundle(tmp_path)
     inst.install(b, str(root))
     (root / "tube_display" / "__init__.py").write_text("local edit")
-    assert inst.install(b, str(root)) is None
+    assert inst.install(b, str(root)) == (None, True)   # nothing changed, but it was installed
     assert (root / "tube_display" / "__init__.py").read_text() == "local edit"
 
 
@@ -42,12 +42,12 @@ def test_other_version_replaced(tmp_path):
     (root / "tube_display").mkdir(parents=True)
     (root / "tube_display" / "manifest.json").write_text(json.dumps({"version": "0.1"}))
     (root / "tube_display" / "stale.py").write_text("x")
-    assert inst.install(_bundle(tmp_path, "2.0"), str(root)) == "2.0"
+    assert inst.install(_bundle(tmp_path, "2.0"), str(root)) == ("2.0", True)
     assert not (root / "tube_display" / "stale.py").exists()
 
 
 def test_no_custom_components_folder(tmp_path):
-    assert inst.install(_bundle(tmp_path), str(tmp_path / "missing")) is None
+    assert inst.install(_bundle(tmp_path), str(tmp_path / "missing")) == (None, False)
 
 
 def test_real_integration_is_consistent():

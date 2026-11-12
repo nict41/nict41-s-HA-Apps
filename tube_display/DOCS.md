@@ -17,6 +17,10 @@ not accept panels.
 | `default_refresh` | `30` | Seconds between re-renders of the shown screen when it doesn't set its own `refresh`. |
 | `log_level` | `info` | `debug` \| `info` \| `warning` \| `error`. |
 | `screens_file` | `/homeassistant/tube_display/screens.yaml` | Where the screens are kept (`tube_display/screens.yaml` in File editor). Uploaded pictures go in an `images` folder next to it. |
+| `clocks` | empty | More clocks, each `{name, host, mqtt_id, user, password}`. The clock in `clock_host` is called `main`. See [Several clocks](#several-clocks). |
+| `firmware_updates` | `true` | Offer new HA Tubes releases to the clocks, so Home Assistant shows a firmware update for each clock. See [Clock firmware updates](#clock-firmware-updates). |
+| `firmware_variant` | `ipstube` | Which HA Tubes build the clocks run: the part after `firmware-` in the release file names. |
+| `app_url` | empty | How a clock reaches this app's port 8098, e.g. `http://192.168.8.25:8098`. Empty: the Home Assistant host's own address. |
 
 The screens file lives in your Home Assistant config folder at
 `tube_display/screens.yaml` (File editor, Samba or VS Code), set by the
@@ -235,9 +239,15 @@ The 8098 API above is unchanged and has no write routes.
   sent one at a time; the loop never crashes on clock errors.
 - `GET http://<clock>/panel` returns `{"tubes": [...], "needed": [...],
   "width": 135, "height": 240, "firmware": "<version>"}` and is used for status.
-- **Updating the clock's firmware:** stop this app first (and start it again
-  afterwards). Pictures sent while the clock is receiving a firmware update can
-  make the update fail.
+- **While the clock updates its firmware** (it reports `in_progress` on
+  `clock/<id>/ota/state`) the app sends nothing at all and publishes no display
+  commands. When the update ends, or the clock comes back online after
+  restarting, it sends the current screen again. There's no need to stop the app.
+- **When the clock can't be reached** (switched off, Wi-Fi down) the app stops
+  trying every tube and only checks `GET /panel` every 5, 10, 20, 40 and then
+  60 seconds. As soon as the clock answers, or reports *online* on
+  `clock/<id>/availability`, everything is sent again. The **Clock Online**
+  entity shows which it is.
 
 ## HTTP API (port 8098)
 
@@ -246,14 +256,35 @@ host on port 8098.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/status` | JSON: current screen, rotation list, rotation enabled, pinned screen, screen names, config errors, last error, last clock state seen over MQTT. |
+| `GET /api/status` | JSON: current screen, rotation list, rotation enabled, pinned screen, screen names, config errors, last error, last clock state seen over MQTT, `paused`, `message`, `quiet`, `online`, `ota_busy`, `brightness`, `live`. With several clocks the top level is the first clock and `clocks` has every clock by name. Also `templates` (live-update statistics) and `firmware` (the release offered to the clocks). |
 | `POST /api/show` | Body `{"screen": "doorbell", "seconds": 30}` — interrupt the rotation with that screen for N seconds, then resume. `{"screen": "clock", ...}` hands the tubes to the clock. Unknown screen → 404. |
+| `POST /api/flash` | Body `{"message": "Washing done", "seconds": 10, "icon": "mdi:washing-machine", "color": "#FFC107"}` — show a message across the six tubes, then go back to what was showing. Only `message` is required (up to 255 characters, `seconds` up to 3600). |
+| `POST /api/pause` | Body `{"seconds": 600}` (optional) — hand the tubes back to the clock's own time display and send nothing until resumed or until the time is up. |
+| `POST /api/resume` | End a pause, a pinned screen or a message and go back to the rotation. |
+| `POST /api/next` | Next screen of the rotation, like the clock's button. |
 | `POST /api/rotation` | Body `{"enabled": false}` — pause the rotation (stays on the current screen); `true` resumes. |
 | `GET /preview/<screen>.png` | The rendered 810x240 PNG of a screen, for checking layouts without a clock. `?scale=2` zooms (1..8). |
+| `GET /firmware/<file>` | The HA Tubes firmware file the app offers to the clocks (the clock downloads it from here). |
+
+Every `POST` takes an optional `"clock": "<name>"`. Without it the request applies to every clock.
 
 ### Example automation: show the doorbell camera when it rings
 
-Add a `rest_command` once (Home Assistant has no API for creating these):
+With the Tube Display integration (see [Actions](#actions-tube-display-integration)):
+
+```yaml
+automation:
+  - alias: "Doorbell rings -> show front door on the clock"
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.doorbell
+        to: "on"
+    actions:
+      - action: tube_display.show_screen
+        data: {screen: doorbell, seconds: 30}
+```
+
+Without the integration, add a `rest_command` once (Home Assistant has no API for creating these):
 
 ```yaml
 rest_command:
@@ -281,6 +312,108 @@ automation:
       - service: rest_command.tube_display_show
 ```
 
+## Actions (Tube Display integration)
+
+The app comes with a small integration, `tube_display`, that adds named actions
+for automations and scripts:
+
+| Action | Fields |
+|---|---|
+| `tube_display.show_screen` | `screen`, `seconds` (optional), `clock` (optional) |
+| `tube_display.flash_message` | `message`, `seconds` (default 10), `icon`, `color` (`#RRGGBB`), `clock` |
+| `tube_display.pause` | `seconds` (optional: empty = until resumed), `clock` |
+| `tube_display.resume` | `clock` |
+| `tube_display.next_screen` | `clock` |
+| `tube_display.set_rotation` | `enabled`, `clock` |
+
+Leave `clock` empty for every clock. Setting it up:
+
+1. The app copies the integration into `custom_components/tube_display` when it
+   starts (and again whenever a new app version brings a new integration
+   version), and shows a notification.
+2. **Restart Home Assistant** once to load it.
+3. **Settings > Devices & services** shows *Tube Display* as discovered: click
+   **Add**. The address is filled in for you by the Supervisor.
+
+```yaml
+actions:
+  - action: tube_display.flash_message
+    data:
+      message: "Washing done"
+      icon: mdi:washing-machine
+      seconds: 20
+```
+
+## Several clocks
+
+Add more clocks in the `clocks` option, each with a short `name` (letters,
+digits and `_`), `host`, `mqtt_id` and, if it has a web login, `user` and
+`password`. The clock in `clock_host`/`clock_mqtt_id` is called `main`, and
+you can leave those empty if you only use `clocks`.
+
+Every clock shows the shared `rotation` unless it has its own in the screens
+file:
+
+```yaml
+rotation: [claude, weather, clock]
+clocks:
+  kitchen:
+    rotation: [train, weather]
+    clock: {duration: 30}
+```
+
+Each clock gets its own entities (the first clock keeps the names it always
+had, the others are called *Tube Display Kitchen ...*), and every action and
+API call can name a `clock`. The editor shows a clock picker above the
+rotation when there's more than one.
+
+## Night mode
+
+When the screens file has a `night:` block, the app sets the clock's
+brightness from the sun's elevation and can dim the screens and keep quiet
+hours. Without a `night:` block it never touches the brightness.
+
+```yaml
+night:
+  brightness_day: 255      # 10..255
+  brightness_night: 50     # 10..255
+  bright_above: 3          # sun elevation (°) at and above which it's full day
+  dim_below: -6            # at and below which it's full night; it fades in between
+  dim_screens: 0.6         # colours of the screens at full night (1 = never dimmed)
+  quiet:                   # optional, local time, may span midnight
+    from: "23:00"
+    to: "07:00"
+    mode: clock            # clock = the clock's own time; blank = black tubes
+```
+
+The brightness is sent to `clock/<id>/set/brightness` about once a minute, only
+when it changes by 3 or more. A message, a pinned screen and the clock's button
+still work during quiet hours. Use the **Night mode** card in the editor
+instead of writing this by hand. If you had an automation that set the clock's
+brightness, turn it off, or the two will fight.
+
+## Live updates
+
+The app subscribes to every template over Home Assistant's websocket, so a
+screen changes the moment the entities behind it change (at most once a
+second), not just every `refresh` seconds. `refresh` still applies as a
+fallback, and to things a template can't see changing, like camera pictures.
+If the websocket connection drops, the app renders templates over the REST API
+until it's back. `GET /api/status` shows `"live": true` and the number of
+subscriptions under `templates`.
+
+## Clock firmware updates
+
+With `firmware_updates` on, the app checks the latest release of
+[HA Tubes](https://github.com/nict41/HA-Tubes) every 6 hours. When there is
+one, it downloads `firmware-<variant>-<version>.bin` once, serves it on port
+8098 and publishes it, retained, to `clock/<id>/ota/latest`. The clock then
+shows the release on its **Firmware** update entity in Home Assistant, and
+**Install** there updates it over Wi-Fi. The clock only downloads over plain
+`http://`, which is why the app serves the file instead of the clock fetching
+it from GitHub. While the clock installs, the app sends nothing (see
+[Pushing to the clock](#pushing-to-the-clock)).
+
 ## MQTT entities (device "Tube Display")
 
 Published via MQTT discovery, using the broker credentials the Supervisor
@@ -291,11 +424,26 @@ injects (no passwords in the app):
   `Clock` hands the tubes to the clock's time display.
 - **switch "Tube Display Rotation"** — on/off; off pauses the rotation on the
   current screen.
+- **sensor "Tube Display Current Screen"** — what shows now: a screen name,
+  `clock`, `paused`, `message`, `quiet` or `offline`.
+- **switch "Tube Display Pause"** — on hands the tubes back to the clock until
+  turned off.
+- **text "Tube Display Message"** — set it to show a message for 10 seconds,
+  or to JSON `{"message": "...", "seconds": 30, "icon": "mdi:bell", "color": "#FFC107"}`.
+- **button "Tube Display Next Screen"**.
+- **binary sensor "Tube Display Clock Online"** — the clock answers over MQTT
+  and HTTP.
+- **sensor "Tube Display Last Error"** (diagnostic).
+
+With several clocks every clock has its own set (see [Several clocks](#several-clocks)).
+All of them go unavailable when the app stops.
 
 Discovery is republished when `screens.yaml` changes. The app also
 subscribes to `clock/<id>/volatile/state` (for `display`, `panel_tubes`,
-`panels_needed`) and publishes display-mode commands to
-`clock/<id>/set/display`.
+`panels_needed`), `clock/<id>/availability`, `clock/<id>/ota/state` and
+`clock/<id>/button`, and publishes to `clock/<id>/set/display`,
+`clock/<id>/set/brightness` (night mode) and `clock/<id>/ota/latest`
+(firmware updates).
 
 ## Development
 

@@ -20,6 +20,10 @@ everything at the root of its own site.
 - POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
 
 The 8098 API (api.py) is untouched and has no write routes.
+
+The editor works with no clock configured too (`controller` may be None): previews
+then render with the plain REST template renderer and the picture library of the
+screens file's folder, never through the app's template cache.
 """
 
 from __future__ import annotations
@@ -54,12 +58,18 @@ def _peer(request: web.Request) -> str:
     return request.remote or ""
 
 
+async def _async_none(template: str) -> str:
+    """Renderer of last resort when there is no HA client at all (tests)."""
+    return ""
+
+
 def create_app(controller, ha, screens_file: str, test_allow_local: bool = False,
                controllers: dict | None = None) -> web.Application:
-    """The editor app. `controller` renders previews, `ha` renders templates and
-    lists entities, `screens_file` is the YAML file being edited. `controllers`
-    (optional) maps clock name -> controller for the rotation toggle; defaults
-    to the single controller passed in."""
+    """The editor app. `controller` renders previews (may be None when no clock is
+    configured - previews then build their own render context), `ha` renders
+    templates and lists entities, `screens_file` is the YAML file being edited.
+    `controllers` (optional) maps clock name -> controller for the rotation
+    toggle; defaults to the single controller passed in."""
     app = web.Application(client_max_size=12 * 1024 * 1024)
     app["controller"] = controller
     app["controllers"] = (controllers if controllers is not None
@@ -192,9 +202,23 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 screen = _parse_screen("__preview__", fixed, retry)
             if screen is None:
                 return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
-            # A copy, so a preview running at the same time doesn't share the box recorder
+            # A copy, so a preview running at the same time doesn't share the box recorder.
+            # The preview NEVER uses the controller's (possibly cached) renderer: typing in
+            # the editor would create hundreds of websocket subscriptions. With no
+            # controller at all, build a context of our own around the plain REST renderer.
             import copy
-            ctx = copy.copy(app["controller"]._ctx)
+            import render as render_mod
+            ha = app["ha"]
+            controller = app["controller"]
+            if controller is not None:
+                ctx = copy.copy(controller._ctx)
+                if ha is not None:
+                    ctx.renderer = ha.render_template
+            else:
+                ctx = render_mod.RenderContext(
+                    ha.render_template if ha is not None else _async_none,
+                    session=None, ha=ha)
+                ctx.images_dir = images_dir
             headers: dict[str, str] = {}
             if errors:
                 headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
@@ -227,7 +251,16 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             source = body.get("source") if isinstance(body, dict) else None
             if not isinstance(source, str) or not source:
                 return web.json_response({"error": "body needs a 'source' string"}, status=400)
-            ctx = app["controller"]._ctx
+            controller = app["controller"]
+            if controller is not None:
+                ctx = controller._ctx
+            else:
+                import render as render_mod
+                ha = app["ha"]
+                ctx = render_mod.RenderContext(
+                    ha.render_template if ha is not None else _async_none,
+                    session=None, ha=ha)
+                ctx.images_dir = images_dir
             try:
                 if render_mod.is_template(source):
                     source = (await ctx.renderer(source)).strip()

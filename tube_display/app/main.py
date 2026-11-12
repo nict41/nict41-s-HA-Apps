@@ -4,6 +4,11 @@ Wires everything together: settings, one aiohttp session, the HA client, one
 clock pusher and one controller per configured clock, one MQTT bridge for all
 of them, and the HTTP API on 0.0.0.0:8098. Writes a commented example
 /config/screens.yaml on first start if the file is missing.
+
+Also wired here: the websocket template cache (live updates, only with a
+SUPERVISOR_TOKEN), the firmware publisher (MQTT OTA offers), and the bundled
+integration install/announce. With no clocks configured the app still runs the
+HTTP API and the editor - it just waits forever instead of exiting.
 """
 
 from __future__ import annotations
@@ -18,6 +23,9 @@ from aiohttp import web
 
 import api as api_mod
 import editor as editor_mod
+import firmware as firmware_mod
+import ha_ws
+import integration_installer
 import mqtt_bridge
 from clock import ClockPusher
 from controller import Controller
@@ -69,17 +77,34 @@ async def run() -> None:
         token = os.environ.get("SUPERVISOR_TOKEN", "")
         ha = HaClient(session, token=token)
 
+        # Template cache (live updates): one websocket subscription per template,
+        # shared by every controller. Only with a Supervisor token; without one
+        # the controllers render over REST as before.
+        cache: ha_ws.TemplateCache | None = None
+        if token:
+            def _on_template_change(template: str) -> None:
+                for c in controllers:
+                    c.on_template_change()
+
+            cache = ha_ws.TemplateCache(session, token,
+                                        rest_renderer=ha.render_template,
+                                        on_change=_on_template_change)
+            await cache.start()
+
         # One controller + pusher per clock, all sharing the session and HA client
         controllers: list[Controller] = []
         for clock in settings.clocks:
-            controller = Controller(settings, session, ha, clock=clock)
+            controller = Controller(settings, session, ha, clock=clock,
+                                    renderer=cache.render if cache is not None else None)
+            if cache is not None:
+                controller.live = True
             pusher = ClockPusher(session, clock.base_url,
                                  user=clock.user, password=clock.password)
             controller.set_pusher(pusher)
             controllers.append(controller)
         if not controllers:
-            _LOG.error("No clocks configured (TUBE_CLOCK_HOST / TUBE_CLOCKS_JSON) - "
-                       "running the HTTP API and editor only")
+            _LOG.warning("No clocks configured (TUBE_CLOCK_HOST / TUBE_CLOCKS_JSON) - "
+                         "running the HTTP API and editor only")
 
         mqtt: mqtt_bridge.MqttBridge | None = None
         if settings.mqtt:
@@ -95,9 +120,52 @@ async def run() -> None:
                 controller.set_mqtt(mqtt)
             await mqtt.start()
 
-        # WIRING: template cache, firmware publisher, integration installer
+        # Firmware publisher: offers HA Tubes firmware updates to the clocks over
+        # MQTT (retained clock/<id>/ota/latest) and serves the .bin over HTTP.
+        publisher: firmware_mod.FirmwarePublisher | None = None
+        firmware_task: asyncio.Task | None = None
+        if settings.firmware_updates and mqtt is not None:
+            async def _base_url() -> str | None:
+                if settings.app_url:
+                    return settings.app_url.rstrip("/")
+                return await firmware_mod.host_base_url(session, token, API_PORT)
 
-        app = api_mod.create_app(controllers)
+            publisher = firmware_mod.FirmwarePublisher(
+                session, "/data/firmware",
+                publish=lambda topic, payload: mqtt.publish(topic, payload, retain=True),
+                clock_ids=lambda: [c.clock.mqtt_id for c in controllers],
+                base_url=_base_url,
+                variant=settings.firmware_variant,
+            )
+
+            async def _firmware_run() -> None:
+                # wait until MQTT is connected before the first publish (no timeout)
+                await mqtt.connected.wait()
+                await publisher.run()
+
+            firmware_task = asyncio.ensure_future(_firmware_run())
+
+        # Bundled integration: install it into HA's config folder (a restart
+        # notification says so) and announce the app to the Supervisor. Never
+        # fail start-up because of these.
+        try:
+            version, was_installed = integration_installer.install()
+            if version:
+                await integration_installer.notify_restart(session, token, version,
+                                                           was_installed=was_installed)
+            if token:
+                await integration_installer.announce(session, token, API_PORT)
+        except Exception as err:
+            _LOG.warning("Integration install/announce failed (ignored): %s", err)
+
+        def _extra_status() -> dict:
+            return {
+                "templates": cache.stats() if cache is not None else None,
+                "firmware": ({"latest": publisher.latest, "last_error": publisher.last_error}
+                             if publisher is not None else None),
+            }
+
+        app = api_mod.create_app(controllers, firmware=publisher, extra_status=_extra_status)
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", API_PORT)
@@ -119,11 +187,23 @@ async def run() -> None:
         try:
             if rotation_tasks:
                 await asyncio.gather(*rotation_tasks)
+            else:
+                # No clocks: keep the HTTP API + editor running forever
+                _LOG.info("No clocks to drive - waiting (HTTP API and editor stay up)")
+                await asyncio.Event().wait()
         except asyncio.CancelledError:
             pass
         finally:
             for c in controllers:
                 c.stop()
+            if firmware_task is not None:
+                firmware_task.cancel()
+                try:
+                    await firmware_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if cache is not None:
+                await cache.stop()
             if mqtt is not None:
                 await mqtt.stop()
             await runner.cleanup()

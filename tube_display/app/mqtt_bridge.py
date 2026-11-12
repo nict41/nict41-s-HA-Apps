@@ -11,6 +11,9 @@
   "Tube Display", ...); every other clock <n> uses the prefix tube_display_<n>,
   topics tube_display/<n>/..., names "Tube Display <N> ..." and its own device
   linked via "tube_display".
+- Availability is ONE topic for the whole app, tube_display/availability, used by
+  every discovery config and set as the connection's last will (retained
+  "offline"), so all entities go unavailable when the app dies.
 
 Entities per clock: select <prefix>_screen, switch <prefix>_rotation,
 sensor <prefix>_current, sensor <prefix>_last_error,
@@ -23,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 
 import aiomqtt
 
@@ -40,6 +44,8 @@ ROTATE = "Rotate"
 CLOCK = "Clock"
 
 MAX_ERROR_LEN = 250
+MAX_FLASH_SECONDS = 3600
+_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 _DEVICE = {
     "identifiers": [BASE_TOPIC],
@@ -60,7 +66,9 @@ class _ClockTopics:
         self.prefix = BASE_TOPIC if first else f"{BASE_TOPIC}_{name}"
         self.title = "Tube Display" if first else f"Tube Display {name.title()}"
         self.state_topic = STATE_TOPIC if first else f"{BASE_TOPIC}/{name}/state"
-        self.availability_topic = AVAILABILITY_TOPIC if first else f"{BASE_TOPIC}/{name}/availability"
+        # ONE availability topic for the whole app (AVAILABILITY_TOPIC): it is also
+        # the connection's last will, so every entity goes unavailable if the app dies
+        self.availability_topic = AVAILABILITY_TOPIC
         self.select_state = SCREEN_SELECT_STATE if first else f"{BASE_TOPIC}/{name}/screen/state"
         self.select_command = SCREEN_SELECT_COMMAND if first else f"{BASE_TOPIC}/{name}/screen/set"
         self.rotation_state = ROTATION_SWITCH_STATE if first else f"{BASE_TOPIC}/{name}/rotation/state"
@@ -126,6 +134,9 @@ class MqttBridge:
         self._client: aiomqtt.Client | None = None
         self._task: asyncio.Task | None = None
         self._stop = False
+        # set after a successful connect, cleared on disconnect: lets other tasks
+        # (e.g. the firmware publisher) wait for MQTT before their first publish
+        self.connected = asyncio.Event()
 
     @property
     def enabled(self) -> bool:
@@ -166,10 +177,12 @@ class MqttBridge:
                     self._cfg["host"], self._cfg.get("port", 1883),
                     username=self._cfg.get("username") or None,
                     password=self._cfg.get("password") or None,
+                    # last will: if the app dies, every entity goes unavailable
+                    will=aiomqtt.Will(AVAILABILITY_TOPIC, "offline", retain=True),
                 ) as client:
                     self._client = client
-                    for t in self._topics:
-                        await client.publish(t.availability_topic, "online", retain=True)
+                    self.connected.set()
+                    await client.publish(AVAILABILITY_TOPIC, "online", retain=True)
                     await self.publish_discovery()
                     for c in self._controllers:
                         await self.publish_state(c)
@@ -192,7 +205,11 @@ class MqttBridge:
             except Exception as err:
                 _LOG.warning("MQTT connection failed (%s) - retrying in 10 s", err)
                 self._client = None
+                self.connected.clear()
                 await asyncio.sleep(10)
+            else:
+                self._client = None
+                self.connected.clear()
 
     async def _handle(self, message) -> None:
         topic = str(message.topic)
@@ -249,7 +266,8 @@ class MqttBridge:
 
     def _on_message(self, ctl, payload: str) -> None:
         """The message text entity: plain text flashes for 10 s, a JSON object
-        {"message", "seconds", "icon", "color"} sets them explicitly."""
+        {"message", "seconds", "icon", "color"} sets them explicitly. Invalid
+        values are logged and ignored (same rules as the HTTP API)."""
         text = payload.strip()
         if not text:
             return
@@ -259,10 +277,25 @@ class MqttBridge:
             except ValueError:
                 data = None
             if isinstance(data, dict) and isinstance(data.get("message"), str) and data["message"]:
+                seconds = data.get("seconds", 10)
+                if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) \
+                        or seconds <= 0 or seconds > MAX_FLASH_SECONDS:
+                    _LOG.warning("MQTT message: 'seconds' must be a number > 0 and <= %d, got %r - ignored",
+                                 MAX_FLASH_SECONDS, seconds)
+                    return
+                icon = data.get("icon")
+                if icon is not None and (not isinstance(icon, str) or not icon.startswith("mdi:")):
+                    _LOG.warning("MQTT message: 'icon' must be an 'mdi:...' string, got %r - ignored", icon)
+                    return
+                color = data.get("color")
+                if color is not None and (not isinstance(color, str)
+                                          or not _COLOR_RE.match(color)):
+                    _LOG.warning("MQTT message: 'color' must match #RRGGBB, got %r - ignored", color)
+                    return
                 ctl.flash(data["message"],
-                          seconds=data.get("seconds"),
-                          icon=data.get("icon"),
-                          color=data.get("color"))
+                          seconds=float(seconds),
+                          icon=icon,
+                          color=color)
                 return
             _LOG.warning("MQTT message payload is not a valid message object: %s", text[:120])
             return
@@ -449,8 +482,8 @@ class MqttBridge:
     async def stop(self) -> None:
         self._stop = True
         if self._client is not None:
-            for t in self._topics:
-                await self._client.publish(t.availability_topic, "offline", retain=True)
+            await self._client.publish(AVAILABILITY_TOPIC, "offline", retain=True)
+        self.connected.clear()
         if self._task is not None:
             self._task.cancel()
             try:

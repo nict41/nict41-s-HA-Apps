@@ -5,10 +5,14 @@ injectable (`now`, `sleep`) so tests can drive the rotation with a fake clock.
 The loop:
 
 - re-reads screens.yaml when its mtime changes,
-- applies night mode (brightness + quiet hours) about every 60 s,
+- applies night mode (brightness + quiet hours) about every 60 s - at the top of
+  the loop AND inside every waiting loop (screen, clock entry, pause, quiet
+  hours, flash, rotation-off), so the brightness follows the sun even during
+  long pauses and quiet hours,
 - honours, in priority order: OTA in progress (nothing is sent) > flash
   message > pinned screen (POST /api/show, MQTT select) > pause > quiet hours
-  > rotation (or the current screen when rotation is off),
+  > rotation (or the current screen when rotation is off; a flash/OTA that
+  ends there re-activates that screen immediately),
 - cycles through the clock's rotation (`rotation_for(name)`), skipping screens
   whose `when` is not "true", showing each for its duration and re-rendering
   every `refresh`.
@@ -575,6 +579,7 @@ class Controller:
         self._interrupted = False
         while self._is_paused() and not self._interrupted and not self._stop:
             await self._sleep(0.25)
+            await self._night_tick()      # brightness follows the sun even while paused
         if not self._is_paused():
             self._paused = False
             self._pause_until = None
@@ -603,6 +608,7 @@ class Controller:
         self._interrupted = False
         while self._quiet_now() and not self._interrupted and not self._stop:
             await self._sleep(0.25)
+            await self._night_tick()      # brightness follows the sun during quiet hours
         self._quiet_shown = False
 
     async def _refresh(self) -> None:
@@ -686,6 +692,7 @@ class Controller:
                 await self._sleep(wait)
             if self._interrupted:
                 break
+            await self._night_tick()      # brightness follows the sun while a screen shows
             next_refresh = await self._live_refresh(next_refresh, refresh)
             if self._now() >= next_refresh - 1e-9:
                 await self._refresh()
@@ -696,6 +703,7 @@ class Controller:
         end = self._now() + duration
         while self._now() < end and not self._interrupted:
             await self._sleep(min(1.0, end - self._now()))
+            await self._night_tick()      # brightness follows the sun while the clock shows
 
     async def _show_entry(self, entry: str) -> None:
         """Show one rotation entry once (used to re-show the entry that was active
@@ -765,6 +773,7 @@ class Controller:
                     while (self._flash is not None and not self._interrupted
                            and self._now() < self._flash["expiry"]):
                         await self._sleep(min(0.25, self._flash["expiry"] - self._now()))
+                        await self._night_tick()   # brightness follows the sun during a flash
                     if self._flash is not None and self._now() >= self._flash["expiry"]:
                         self._end_flash()
                     continue
@@ -792,6 +801,19 @@ class Controller:
                 if not self.rotation_enabled:
                     # Off: stay on the current screen, keeping its values up to date, until the
                     # clock's button asks for the next one
+                    if self._reshow is not None:
+                        # a flash/OTA just ended: re-show that entry now instead of waiting
+                        # for the next refresh
+                        entry = self._reshow
+                        self._reshow = None
+                        screen = (self._config.screens.get(entry)
+                                  if self._config and entry != CLOCK_ENTRY else None)
+                        if screen is not None:
+                            await self._activate_screen(screen)
+                            continue
+                        if entry == CLOCK_ENTRY:
+                            await self._activate_clock()
+                            continue
                     screen = (self._config.screens.get(self.current)
                               if self._config and self.current not in (None, CLOCK_ENTRY) else None)
                     if self._advance or (screen is None and self.current is None):
@@ -806,6 +828,7 @@ class Controller:
                     end = self._now() + refresh
                     while self._now() < end and not self._interrupted:
                         await self._sleep(min(0.25, end - self._now()))
+                        await self._night_tick()   # brightness follows the sun with rotation off
                         if self._now() < end and not self._interrupted:
                             end = await self._live_refresh(end, refresh)
                     if not self._interrupted:
@@ -835,3 +858,4 @@ class Controller:
 
     def stop(self) -> None:
         self._stop = True
+        self._interrupted = True   # wake any waiting loop so run() can exit now

@@ -3,7 +3,10 @@
 Instead of POSTing every template to /api/template on each refresh, this
 subscribes once per template with a `render_template` subscription and keeps
 the latest result, so a screen updates the moment the entity behind it
-changes.
+changes. main.py wires one TemplateCache for all controllers when a
+SUPERVISOR_TOKEN is present (controllers get renderer=cache.render and
+live=True; on_change calls every controller's on_template_change()); the
+editor's previews deliberately bypass it and use the REST renderer instead.
 
 HA parses template results into native JSON types over the websocket (a
 template rendering "[1, 2]" arrives as a list), while the REST API returns the

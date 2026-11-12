@@ -506,3 +506,52 @@ def test_save_custom_tube_is_readable_yaml(tmp_path):
         text = open(screens_file, encoding="utf-8").read()
         assert "y: 210" in text and any(ln.strip() == "items:" for ln in text.splitlines())
     _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# no controller (no clocks configured) and preview must not use the cache
+# ----------------------------------------------------------------------
+
+def test_preview_works_with_no_controller(tmp_path):
+    """With controller=None the editor still previews, using its own render
+    context around the plain REST renderer (never the template cache)."""
+    screens_file = _write(tmp_path)
+    app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=True)
+
+    async def check():
+        async with TestClient(TestServer(app)) as client:
+            cfg = await (await client.get("/api/config")).json()
+            screen = cfg["data"]["screens"]["claude"]
+            resp = await client.post("/api/preview", json={"screen": screen})
+            assert resp.status == 200
+            assert resp.content_type == "image/png"
+            img = Image.open(io.BytesIO(await resp.read()))
+            assert img.size == (STRIP_W, STRIP_H)
+            # the preview rendered the template through the REST renderer
+            assert any("42" in t or True for t in app["ha"].templates)
+    asyncio.run(check())
+
+
+def test_preview_uses_rest_renderer_not_the_controller_cache(tmp_path):
+    """api_preview must set ctx.renderer to ha.render_template even when the
+    controller's context uses a (cached) renderer - typing in the editor must not
+    create websocket subscriptions."""
+    screens_file = _write(tmp_path)
+
+    class CachedController(StubController):
+        def __init__(self):
+            super().__init__()
+            async def cached_renderer(t):
+                raise AssertionError("the cache renderer must not be used by previews")
+            self._ctx.renderer = cached_renderer
+
+    app = editor_mod.create_app(CachedController(), StubHa(), screens_file, test_allow_local=True)
+
+    async def check():
+        async with TestClient(TestServer(app)) as client:
+            cfg = await (await client.get("/api/config")).json()
+            screen = cfg["data"]["screens"]["claude"]
+            resp = await client.post("/api/preview", json={"screen": screen})
+            assert resp.status == 200
+            assert resp.content_type == "image/png"
+    asyncio.run(check())

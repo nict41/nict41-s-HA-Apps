@@ -1,6 +1,7 @@
 """HTTP API on 0.0.0.0:8098 (aiohttp).
 
 - GET  /api/status                 first clock's status + {"clocks": {name: status}}
+                                     + whatever `extra_status()` returns (templates, firmware)
 - POST /api/show    {"screen": "doorbell", "seconds": 30, "clock": optional}
 - POST /api/rotation {"enabled": false, "clock": optional}
 - POST /api/flash   {"message": "...", "seconds": 10, "icon", "color", "clock"}
@@ -11,7 +12,8 @@
 - GET  /firmware/{name}            a firmware file, when a firmware provider is wired
 
 Every POST accepts an optional "clock": the name of one clock. Omitted, the
-command applies to every clock; unknown -> 404.
+command applies to every clock; unknown -> 404. With no clocks configured the
+read-only routes still answer (status, firmware), the POSTs 404.
 """
 
 from __future__ import annotations
@@ -28,9 +30,11 @@ MAX_MESSAGE_LEN = 255
 MAX_FLASH_SECONDS = 3600
 
 
-def create_app(controllers, firmware=None) -> web.Application:
+def create_app(controllers, firmware=None, extra_status=None) -> web.Application:
     """`controllers`: a list of controllers (one per clock) or a single controller
-    (the legacy call). `firmware`: optional object with file_path(name) -> path."""
+    (the legacy call). `firmware`: optional object with file_path(name) -> path.
+    `extra_status`: optional callable returning a dict merged into the top level
+    of GET /api/status (e.g. template-cache and firmware-publisher info)."""
     if not isinstance(controllers, (list, tuple)):
         controllers = [controllers]
     controllers = list(controllers)
@@ -38,6 +42,7 @@ def create_app(controllers, firmware=None) -> web.Application:
     app["controller"] = controllers[0] if controllers else None
     app["controllers"] = {c.name: c for c in controllers}
     app["firmware"] = firmware
+    app["extra_status"] = extra_status
 
     def _resolve_clock(body: dict) -> tuple[list, web.Response | None]:
         """The controllers a POST applies to: the named clock, or all of them.
@@ -68,6 +73,12 @@ def create_app(controllers, firmware=None) -> web.Application:
         first = controllers[0] if controllers else None
         status = first.status() if first is not None else {}
         status["clocks"] = {c.name: c.status() for c in controllers}
+        extra = app["extra_status"]
+        if extra is not None:
+            try:
+                status.update(extra() or {})
+            except Exception as err:
+                status["extra_status_error"] = str(err)
         return web.json_response(status)
 
     async def api_show(request: web.Request) -> web.Response:

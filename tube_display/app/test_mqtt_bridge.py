@@ -189,7 +189,7 @@ def test_second_clock_prefixed_entities_and_device():
     assert select["name"] == "Tube Display Kitchen Screen"
     assert select["state_topic"] == "tube_display/kitchen/screen/state"
     assert select["command_topic"] == "tube_display/kitchen/screen/set"
-    assert select["availability_topic"] == "tube_display/kitchen/availability"
+    assert select["availability_topic"] == "tube_display/availability"
     assert select["device"] == {
         "identifiers": ["tube_display_kitchen"],
         "name": "Tube Display Kitchen",
@@ -205,6 +205,9 @@ def test_second_clock_prefixed_entities_and_device():
     assert "homeassistant/button/tube_display_kitchen_next/config" in disc
     # the first clock's entities are untouched
     assert "homeassistant/select/tube_display_screen/config" in disc
+    # ONE availability topic for every clock (also the connection's last will)
+    for cfg in disc.values():
+        assert cfg["availability_topic"] == "tube_display/availability"
 
 
 # ----------------------------------------------------------------------
@@ -365,3 +368,123 @@ def test_no_client_publishes_nothing():
     _run(b.publish_display("abc", 4))       # _client is None: no crash, no publish
     _run(b.publish_state(ctl))
     _run(b.publish_discovery())
+
+
+# ----------------------------------------------------------------------
+# message entity validation (same rules as the HTTP API)
+# ----------------------------------------------------------------------
+
+def test_message_plain_text_flashes_10s():
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b._handle(FakeMessage("tube_display/message/set", "hello")))
+    assert ctl.calls == [("flash", "hello", 10, None, None)]
+
+
+def test_message_json_valid():
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b._handle(FakeMessage("tube_display/message/set",
+                               '{"message": "hi", "seconds": 30, "icon": "mdi:bell", "color": "#FF00aa"}')))
+    assert ctl.calls == [("flash", "hi", 30.0, "mdi:bell", "#FF00aa")]
+
+
+def test_message_json_defaults_seconds_to_10():
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b._handle(FakeMessage("tube_display/message/set", '{"message": "hi"}')))
+    assert ctl.calls == [("flash", "hi", 10.0, None, None)]
+
+
+@pytest.mark.parametrize("payload", [
+    '{"message": "hi", "seconds": null}',          # None used to crash (now + None)
+    '{"message": "hi", "seconds": "30"}',
+    '{"message": "hi", "seconds": true}',
+    '{"message": "hi", "seconds": 0}',
+    '{"message": "hi", "seconds": -5}',
+    '{"message": "hi", "seconds": 3601}',
+    '{"message": "hi", "icon": "bell"}',            # must start with mdi:
+    '{"message": "hi", "icon": 5}',
+    '{"message": "hi", "color": "red"}',
+    '{"message": "hi", "color": "#FFF"}',
+    '{"message": "hi", "color": "#GGGGGG"}',
+    '{"message": "hi", "color": 123}',
+    '{"message": ""}',
+    '{"seconds": 30}',
+    '{not json',
+])
+def test_message_invalid_ignored(payload):
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b._handle(FakeMessage("tube_display/message/set", payload)))
+    assert ctl.calls == []                          # logged, not flashed, no crash
+
+
+def test_message_seconds_boundary_3600_ok():
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b._handle(FakeMessage("tube_display/message/set", '{"message": "hi", "seconds": 3600}')))
+    assert ctl.calls == [("flash", "hi", 3600.0, None, None)]
+
+
+# ----------------------------------------------------------------------
+# availability: one topic for the whole app, also the last will
+# ----------------------------------------------------------------------
+
+def test_availability_topic_is_shared_and_will_is_set(monkeypatch):
+    """_run() must connect with will=AVAILABILITY_TOPIC and publish "online" once."""
+    c1 = FakeController("main", "abc")
+    c2 = FakeController("kitchen", "k1")
+    b = MqttBridge({"host": "broker"}, [c1, c2])
+    seen = {}
+
+    class FakeWill:
+        def __init__(self, topic, payload, qos=0, retain=False, properties=None):
+            seen["will"] = (topic, payload, retain)
+
+    class FakeCtxClient:
+        def __init__(self, *args, **kwargs):
+            seen["client_kwargs"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            b._stop = True          # one connection, then the loop exits
+            return False
+
+        async def publish(self, topic, payload, retain=False):
+            seen.setdefault("published", []).append((str(topic), payload, retain))
+
+        async def subscribe(self, topic):
+            pass
+
+        @property
+        def messages(self):
+            class _Msgs:
+                def __aiter__(self):
+                    return self
+
+                async def __anext__(self):
+                    raise StopAsyncIteration
+            return _Msgs()
+
+    monkeypatch.setattr(mqtt_bridge.aiomqtt, "Client", FakeCtxClient)
+    monkeypatch.setattr(mqtt_bridge.aiomqtt, "Will", FakeWill)
+    _run(b._run())
+    assert seen["will"] == ("tube_display/availability", "offline", True)
+    assert seen["client_kwargs"]["will"] is not None
+    # "online" published exactly once, on the shared topic
+    online = [p for p in seen["published"] if p[0] == "tube_display/availability" and p[1] == "online"]
+    assert len(online) == 1 and online[0][2] is True
+    assert not b.connected.is_set()      # cleared when the connection ended
+
+
+def test_connected_event_set_and_cleared():
+    ctl = FakeController("main", "abc")
+    b = MqttBridge({"host": "broker"}, [ctl])
+    assert not b.connected.is_set()
+    b.connected.set()
+    assert b.connected.is_set()
+    _run(b.stop())
+    assert not b.connected.is_set()
