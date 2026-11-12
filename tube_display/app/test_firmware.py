@@ -68,7 +68,7 @@ class FakeGitHub:
 class FakeSupervisor:
     """Serves /network/info."""
 
-    def __init__(self, payload=None, status=200):
+    def __init__(self, payload=None, status=200, network=None, self_status=200):
         self.payload = payload if payload is not None else {
             "result": "ok",
             "data": {"interfaces": [
@@ -79,9 +79,12 @@ class FakeSupervisor:
             ]},
         }
         self.status = status
+        self.network = network if network is not None else {"8098/tcp": 8098}
+        self.self_status = self_status
         self.seen_auth = None
         app = web.Application()
         app.router.add_get("/network/info", self.info)
+        app.router.add_get("/addons/self/info", self.self_info)
         self.server = TestServer(app)
 
     async def info(self, request):
@@ -89,6 +92,11 @@ class FakeSupervisor:
         if self.status != 200:
             return web.json_response({"message": "nope"}, status=self.status)
         return web.json_response(self.payload)
+
+    async def self_info(self, request):
+        if self.self_status != 200:
+            return web.json_response({"message": "nope"}, status=self.self_status)
+        return web.json_response({"result": "ok", "data": {"network": self.network}})
 
 
 def _run(coro):
@@ -389,6 +397,28 @@ def test_host_base_url_errors_return_none():
             # connection refused
             assert await host_base_url(session, "t", 8098,
                                        supervisor="http://127.0.0.1:1") is None
+        finally:
+            await session.close()
+    _run(check())
+
+
+def test_host_base_url_uses_the_published_host_port():
+    """8098 inside the container published as 8093 on the host (8098 was taken)."""
+    async def check():
+        session = aiohttp.ClientSession()
+        try:
+            for network, self_status, want in (
+                ({"8098/tcp": 8093}, 200, "http://192.168.8.25:8093"),
+                ({"8098/tcp": None}, 200, None),                     # not published
+                ({}, 200, "http://192.168.8.25:8098"),               # unknown: assume same
+                ({"8098/tcp": 8093}, 403, "http://192.168.8.25:8098"),  # can't ask: assume same
+            ):
+                sup = FakeSupervisor(network=network, self_status=self_status)
+                await sup.server.start_server()
+                got = await host_base_url(session, "t", 8098,
+                                          supervisor=str(sup.server.make_url("")).rstrip("/"))
+                await sup.server.close()
+                assert got == want, (network, self_status, got)
         finally:
             await session.close()
     _run(check())

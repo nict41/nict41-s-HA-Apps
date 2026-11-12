@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- Firmware updates: the link offered to the clock used port 8098 even when the app's port is published on another host port (Settings > Apps > Tube Display > Network, e.g. 8093 when 8098 is taken), so the clock would have downloaded from the wrong place. The app now asks the Supervisor which host port it's on.
+
 ## 0.6.0
 
 - **Live updates:** templates are subscribed over Home Assistant's websocket, so a screen changes the moment its entities do (at most once a second) instead of every `refresh` seconds. Falls back to the REST API if the connection drops.
