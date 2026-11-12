@@ -54,11 +54,16 @@ def _peer(request: web.Request) -> str:
     return request.remote or ""
 
 
-def create_app(controller, ha, screens_file: str, test_allow_local: bool = False) -> web.Application:
+def create_app(controller, ha, screens_file: str, test_allow_local: bool = False,
+               controllers: dict | None = None) -> web.Application:
     """The editor app. `controller` renders previews, `ha` renders templates and
-    lists entities, `screens_file` is the YAML file being edited."""
+    lists entities, `screens_file` is the YAML file being edited. `controllers`
+    (optional) maps clock name -> controller for the rotation toggle; defaults
+    to the single controller passed in."""
     app = web.Application(client_max_size=12 * 1024 * 1024)
     app["controller"] = controller
+    app["controllers"] = (controllers if controllers is not None
+                          else {getattr(controller, "name", "main"): controller})
     app["ha"] = ha
     app["screens_file"] = screens_file
     app["history"] = SaveHistory(screens_file)
@@ -620,13 +625,27 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         return await ingress_only(request, handler)
 
     async def api_rotation(request: web.Request) -> web.Response:
-        """GET: {"enabled": bool}. POST {"enabled": bool}: on = cycle automatically, off = the
-        clock's button changes screens."""
+        """GET [?clock=<name>]: {"enabled": bool}. POST {"enabled": bool, "clock"?}: on =
+        cycle automatically, off = the clock's button changes screens. `clock` picks
+        one of the app's controllers (query string for GET, JSON body for POST)."""
         async def handler(req: web.Request) -> web.Response:
-            ctl = app["controller"]
+            name = req.query.get("clock")
             if req.method == "POST":
                 body = await req.json()
+                if name is None and isinstance(body, dict):
+                    name = body.get("clock")
+                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
+                if ctl is None:
+                    return web.json_response(
+                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                        status=404)
                 ctl.set_rotation_enabled(bool(body.get("enabled")))
+            else:
+                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
+                if ctl is None:
+                    return web.json_response(
+                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                        status=404)
             return web.json_response({"enabled": bool(ctl.rotation_enabled)})
         return await ingress_only(request, handler)
 
