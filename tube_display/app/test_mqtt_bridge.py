@@ -104,7 +104,7 @@ def _pub(bridge, topic):
 
 
 # ----------------------------------------------------------------------
-# discovery: first clock byte-for-byte legacy, second clock prefixed
+# discovery: first clock keeps its legacy ids and topics, second clock prefixed
 # ----------------------------------------------------------------------
 
 LEGACY_DEVICE = {
@@ -124,7 +124,7 @@ def test_first_clock_discovery_matches_legacy_select_and_switch():
     assert select == {
         "unique_id": "tube_display_screen",
         "object_id": "tube_display_screen",
-        "name": "Tube Display Screen",
+        "name": "Screen",
         "icon": "mdi:view-dashboard-variant",
         "state_topic": "tube_display/screen/state",
         "command_topic": "tube_display/screen/set",
@@ -136,7 +136,7 @@ def test_first_clock_discovery_matches_legacy_select_and_switch():
     assert switch == {
         "unique_id": "tube_display_rotation",
         "object_id": "tube_display_rotation",
-        "name": "Tube Display Rotation",
+        "name": "Rotation",
         "icon": "mdi:sync",
         "state_topic": "tube_display/rotation/state",
         "command_topic": "tube_display/rotation/set",
@@ -154,7 +154,7 @@ def test_first_clock_new_entities():
     disc = {p[0]: json.loads(p[1]) for p in b._client.published if p[0].startswith("homeassistant/")}
     current = disc["homeassistant/sensor/tube_display_current/config"]
     assert current["unique_id"] == "tube_display_current"
-    assert current["name"] == "Tube Display Current Screen"
+    assert current["name"] == "Current Screen"
     assert current["icon"] == "mdi:television-play"
     assert current["state_topic"] == "tube_display/current/state"
     assert current["availability_topic"] == "tube_display/availability"
@@ -186,7 +186,7 @@ def test_second_clock_prefixed_entities_and_device():
     disc = {p[0]: json.loads(p[1]) for p in b._client.published if p[0].startswith("homeassistant/")}
     select = disc["homeassistant/select/tube_display_kitchen_screen/config"]
     assert select["unique_id"] == "tube_display_kitchen_screen"
-    assert select["name"] == "Tube Display Kitchen Screen"
+    assert select["name"] == "Screen"
     assert select["state_topic"] == "tube_display/kitchen/screen/state"
     assert select["command_topic"] == "tube_display/kitchen/screen/set"
     assert select["availability_topic"] == "tube_display/availability"

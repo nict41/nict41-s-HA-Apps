@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Entity names no longer repeat the device name: *Tube Display Pause* instead of *Tube Display Tube Display Pause* (Home Assistant already puts the device name in front). Entity ids that already exist are kept; new installs get `select.tube_display_screen`, `switch.tube_display_pause` and so on.
+
 ## 0.6.1
 
 - Firmware updates: the link offered to the clock used port 8098 even when the app's port is published on another host port (Settings > Apps > Tube Display > Network, e.g. 8093 when 8098 is taken), so the clock would have downloaded from the wrong place. The app now asks the Supervisor which host port it's on.
