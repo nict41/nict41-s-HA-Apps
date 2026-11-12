@@ -187,6 +187,22 @@ template mode and are left exactly as written unless you change them.
 
 <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-entity.webp" alt="Entity search and colour thresholds on a phone" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-template.webp" alt="A template value with its live result" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-picture.webp" alt="The picture library" width="300">
 
+### Undo, history, clocks and night mode
+
+- **↶ / ↷** (or Ctrl+Z / Ctrl+Shift+Z outside a text box) undo and redo every
+  change since the editor was opened, saved or not.
+- **History** lists earlier versions of the screens file: a copy is kept
+  every time you save or restore (the last 30, in `tube_display/.history/`).
+  **View** shows one, **Restore** puts it back, and the restore itself can be
+  undone from the same list.
+- With several clocks, the **clock** picker above the rotation chooses whose
+  rotation you edit: *All clocks* is the shared one, and a clock can get its
+  own (or go back to the shared one). *Cycle automatically* follows the same
+  choice.
+- The **Night mode** card writes the `night:` block (see [Night mode](#night-mode)).
+- The line at the top right shows what each clock is showing, whether it's
+  live, and its brightness.
+
 ### How it works
 
 The app registers an ingress panel **Tube Display** (`mdi:television-guide`)

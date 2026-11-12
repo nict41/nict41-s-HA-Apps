@@ -18,6 +18,8 @@ everything at the root of its own site.
 - GET  api/history           {"items": [...]} snapshots taken before each save
 - GET  api/history/{id}      {"id", "yaml"} one snapshot
 - POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
+- GET  api/clocks            {"clocks": [{"name", "host", "online", "rotation_enabled"}]}
+- GET  api/status            {"clocks": {name: controller.status()}}
 
 The 8098 API (api.py) is untouched and has no write routes.
 
@@ -31,6 +33,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -366,8 +369,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     def _round_trip_update(old_text: str, data: dict) -> str:
         """Load the existing file with ruamel (comments/layout preserved), update
-        rotation/clock/screens in place to match `data`, dump. Multi-line strings
-        become literal block scalars (|-)."""
+        rotation/clock/screens/night/clocks in place to match `data`, dump. Multi-line
+        strings become literal block scalars (|-)."""
         from ruamel.yaml import YAML
         from ruamel.yaml.scalarstring import LiteralScalarString
 
@@ -383,6 +386,11 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         def _set_str(value):
             if isinstance(value, str) and "\n" in value:
                 return LiteralScalarString(value)
+            # "23:00" unquoted is a sexagesimal int in YAML 1.1 (PyYAML reads it as 1380),
+            # so time-of-day strings must be quoted to survive the round trip
+            if isinstance(value, str) and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", value):
+                from ruamel.yaml.scalarstring import DoubleQuotedScalarString
+                return DoubleQuotedScalarString(value)
             return value
 
         def _custom(obj: dict):
@@ -447,7 +455,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return new
 
         new = _convert(data)
-        for key in ("rotation", "clock", "screens"):
+        for key in ("rotation", "clock", "screens", "night", "clocks"):
             if key in new:
                 root[key] = _merge(root[key], new[key]) if key in root else new[key]
             elif key in root:
@@ -684,6 +692,46 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     app.router.add_get("/api/rotation", api_rotation)
     app.router.add_post("/api/rotation", api_rotation)
+
+    async def api_clocks(request: web.Request) -> web.Response:
+        """GET: {"clocks": [{"name", "host", "online", "rotation_enabled"}]} - one entry
+        per configured clock (empty when none)."""
+        async def handler(req: web.Request) -> web.Response:
+            out = []
+            for name, ctl in app["controllers"].items():
+                clock = getattr(ctl, "clock", None)
+                host = getattr(clock, "host", None) if clock is not None else None
+                if host is None:
+                    host = getattr(getattr(ctl, "settings", None), "clock_host", "") or ""
+                try:
+                    online = bool(ctl.status().get("online"))
+                except Exception:
+                    online = False
+                out.append({
+                    "name": str(name),
+                    "host": str(host),
+                    "online": online,
+                    "rotation_enabled": bool(getattr(ctl, "rotation_enabled", False)),
+                })
+            return web.json_response({"clocks": out})
+        return await ingress_only(request, handler)
+
+    async def api_status(request: web.Request) -> web.Response:
+        """GET: {"clocks": {name: controller.status()}} - live state of every clock
+        (empty when none)."""
+        async def handler(req: web.Request) -> web.Response:
+            out = {}
+            for name, ctl in app["controllers"].items():
+                try:
+                    out[str(name)] = ctl.status()
+                except Exception as err:
+                    out[str(name)] = {"error": str(err)}
+            return web.json_response({"clocks": out})
+        return await ingress_only(request, handler)
+
+    app.router.add_get("/api/clocks", api_clocks)
+    app.router.add_get("/api/status", api_status)
+
     async def api_icons(request: web.Request) -> web.Response:
         """GET ?q=<text>: up to 60 Material Design Icon names ("mdi:...") containing the text,
         names starting with it first."""

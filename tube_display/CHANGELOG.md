@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+- **Live updates:** templates are subscribed over Home Assistant's websocket, so a screen changes the moment its entities do (at most once a second) instead of every `refresh` seconds. Falls back to the REST API if the connection drops.
+- **Actions:** a bundled `tube_display` integration adds `tube_display.show_screen`, `flash_message`, `pause`, `resume`, `next_screen` and `set_rotation`. The app installs it and Home Assistant finds it after one restart (Settings > Devices & services).
+- **Flash messages:** `POST /api/flash`, the new *Message* text entity or `tube_display.flash_message` show a message across the six tubes (optional icon and colour), then go back to what was showing.
+- **Pause:** hand the tubes back to the clock's own time display until resumed or for a set time (*Pause* switch, `POST /api/pause`, `tube_display.pause`).
+- **Night mode:** a `night:` block in the screens file sets the clock's brightness from the sun's elevation, dims the screens at night and can keep quiet hours (the clock's own time, or black tubes). Without the block the brightness is left alone.
+- **Clock firmware updates:** the app offers new HA Tubes releases to the clocks (Home Assistant shows them on each clock's *Firmware* update entity) and serves the file to the clock itself. While a clock updates, the app sends nothing, so there's no longer any need to stop the app first.
+- **Clock offline:** when a clock can't be reached the app stops retrying every tube and checks it every 5 to 60 seconds instead, then sends everything again when it's back. New *Clock Online* binary sensor.
+- **Several clocks:** the new `clocks` option adds more clocks, each with its own entities and optionally its own rotation (`clocks: {<name>: {rotation: [...]}}` in the screens file). Every action and API call can name a `clock`.
+- **More entities:** *Current Screen* and *Last Error* sensors, *Pause* switch, *Message* text, *Next Screen* button. All of them go unavailable when the app stops.
+- **Editor:** undo and redo, a history of earlier versions of the screens file (a copy is kept every time you save) with restore, a clock picker for per-clock rotations, a *Night mode* card and a status line showing what each clock shows.
+- New options: `clocks`, `firmware_updates`, `firmware_variant`, `app_url`. `clock_host` and `clock_mqtt_id` can be left empty when all clocks are under `clocks`.
+
 ## 0.5.1
 
 - Designer: **snap to grid** (2 to 20 px, measured from the centre of the tube) with the grid drawn over the tube. Remembered in the browser.

@@ -71,8 +71,17 @@ const state = {
   previewUrl: null,
   designerRefresh: null,   // set while a custom tube's designer is open
   designerSel: null,       // which of its items is selected
+  clocks: [],              // api/clocks: [{name, host, online, rotation_enabled}]
+  selectedClock: "",       // "" = all clocks (the shared rotation)
+  savedJson: null,         // JSON of state.data as last loaded/saved (undo target "clean")
 };
 const stash = new WeakMap();   // screen -> the tubes / strip it had before its layout was switched
+
+// undo/redo: JSON snapshots of state.data, max 100; the top of `undo` is the current
+// state, so undo needs at least two entries. Changes less than 700 ms apart are
+// coalesced into one step (typing a word = one step).
+const HISTORY_MAX = 100;
+const history = { undo: [], redo: [], lastPush: 0, lastJson: null };
 
 const $ = (id) => document.getElementById(id);
 
@@ -94,10 +103,109 @@ function setStatus(text, kind) {
 }
 
 function markDirty() {
+  pushHistory();
   state.dirty = true;
   $("saveBtn").disabled = false;
   setStatus("unsaved changes", "dirty");
 }
+
+// ---------------------------------------------------------------- undo / redo
+
+function snapshot() { return JSON.stringify(state.data); }
+
+function pushHistory() {
+  if (!state.data) return;
+  const json = snapshot();
+  const now = Date.now();
+  if (history.lastJson === json) return;                 // nothing actually changed
+  if (history.undo.length && now - history.lastPush < 700) {
+    history.undo[history.undo.length - 1] = json;         // coalesce with the previous step
+  } else {
+    history.undo.push(json);
+    if (history.undo.length > HISTORY_MAX) history.undo.shift();
+  }
+  history.redo = [];
+  history.lastPush = now;
+  history.lastJson = json;
+  updateHistoryButtons();
+}
+
+function resetHistory() {
+  history.undo = state.data ? [snapshot()] : [];
+  history.redo = [];
+  history.lastPush = 0;    // the first change after a load always starts a new step
+  history.lastJson = history.undo.length ? history.undo[0] : null;
+  state.savedJson = history.lastJson;
+  updateHistoryButtons();
+}
+
+function updateHistoryButtons() {
+  $("undoBtn").disabled = history.undo.length < 2;
+  $("redoBtn").disabled = history.redo.length === 0;
+}
+
+function closeDesigner() {
+  // same reset renderTubeEditor does when the panel is hidden: drop the designer's
+  // refresh hook and its selection so nothing redraws into a detached panel
+  state.designerRefresh = null;
+  state.designerSel = null;
+}
+
+function applySnapshot(json) {
+  const data = JSON.parse(json);
+  state.data = data;
+  if (!state.data.screens) state.data.screens = {};
+  if (!state.data.rotation) state.data.rotation = Object.keys(state.data.screens);
+  if (!state.selectedScreen || !state.data.screens[state.selectedScreen]) {
+    state.selectedScreen = state.data.rotation.find((r) => r !== "clock") || Object.keys(state.data.screens)[0] || null;
+  }
+  if (state.selectedTube != null) {
+    const s = state.data.screens[state.selectedScreen];
+    if (!s || s.strip || !s.tubes || state.selectedTube >= s.tubes.length) state.selectedTube = null;
+  }
+  closeDesigner();
+  renderAll();
+  schedulePreview(0);
+  if (json === state.savedJson) {
+    state.dirty = false;
+    $("saveBtn").disabled = true;
+    setStatus("loaded", "");
+  } else {
+    state.dirty = true;
+    $("saveBtn").disabled = false;
+    setStatus("unsaved changes", "dirty");
+  }
+  history.lastJson = json;
+  history.lastPush = 0;   // a change right after an undo/redo starts a new step
+  updateHistoryButtons();
+}
+
+function undo() {
+  if (history.undo.length < 2) return;
+  history.redo.push(history.undo.pop());
+  applySnapshot(history.undo[history.undo.length - 1]);
+}
+
+function redo() {
+  if (!history.redo.length) return;
+  const json = history.redo.pop();
+  history.undo.push(json);
+  applySnapshot(json);
+}
+
+$("undoBtn").addEventListener("click", undo);
+$("redoBtn").addEventListener("click", redo);
+
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  // in a text field the browser's own undo/redo works on the text - leave it alone
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+  const key = e.key.toLowerCase();
+  if (key === "z" && (e.shiftKey)) { e.preventDefault(); redo(); }
+  else if (key === "z") { e.preventDefault(); undo(); }
+  else if (key === "y") { e.preventDefault(); redo(); }
+});
 
 // ---------------------------------------------------------------- load
 
@@ -113,13 +221,16 @@ async function load() {
   if (!state.selectedScreen || !state.data.screens[state.selectedScreen]) {
     state.selectedScreen = state.data.rotation.find((r) => r !== "clock") || Object.keys(state.data.screens)[0] || null;
   }
+  resetHistory();          // a (re)load starts a fresh undo history
   renderAll();
   setStatus(state.errors.length ? state.errors.length + " error(s) in file" : "loaded", state.errors.length ? "error" : "");
   schedulePreview(0);
 }
 
 function renderAll() {
+  renderClockSelect();
   renderRotation();
+  renderNight();
   renderScreenList();
   renderScreenSettings();
   renderTubeEditor();
@@ -127,15 +238,77 @@ function renderAll() {
 
 // ---------------------------------------------------------------- rotation
 
+// The rotation being edited: the chosen clock's override if it has one, else the
+// shared one (read-only while the clock has no override - the button copies it in).
+function rotationTarget() {
+  const ov = overrideFor(state.selectedClock);
+  if (ov && ov.rotation) return ov;
+  return state.data;
+}
+
+function overrideFor(name) {
+  if (!name || !state.data.clocks) return null;
+  return state.data.clocks[name] || null;
+}
+
+// Where a clock-duration edit goes: the override's clock when a clock is chosen
+// (created on demand), else the shared `clock:` block.
+function clockTarget(create) {
+  if (state.selectedClock) {
+    if (!state.data.clocks) state.data.clocks = {};
+    if (!state.data.clocks[state.selectedClock]) state.data.clocks[state.selectedClock] = {};
+    const ov = state.data.clocks[state.selectedClock];
+    if (!ov.clock) {
+      if (!create) return null;
+      ov.clock = {};
+    }
+    return ov.clock;
+  }
+  if (!state.data.clock && create) state.data.clock = {};
+  return state.data.clock || null;
+}
+
+function renderClockSelect() {
+  const row = $("clockSelectRow");
+  const sel = $("clockSelect");
+  if (state.clocks.length < 2) {
+    row.classList.add("hidden");
+    state.selectedClock = "";
+    return;
+  }
+  row.classList.remove("hidden");
+  const names = state.clocks.map((c) => c.name);
+  if (!names.includes(state.selectedClock)) state.selectedClock = "";
+  sel.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = ""; all.textContent = "All clocks";
+  sel.appendChild(all);
+  names.forEach((n) => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  });
+  sel.value = state.selectedClock;
+}
+
+$("clockSelect").addEventListener("change", (e) => {
+  state.selectedClock = e.target.value;
+  renderAll();
+});
+
 function renderRotation() {
   const ul = $("rotationList");
   ul.innerHTML = "";
-  const rot = state.data.rotation || [];
+  const tgt = rotationTarget();
+  const rot = tgt.rotation || [];
+  const own = !!(state.selectedClock && overrideFor(state.selectedClock)
+                 && overrideFor(state.selectedClock).rotation);
   rot.forEach((name, i) => {
     const li = document.createElement("li");
     li.className = "rot-item" + (name === state.selectedScreen ? " selected" : "");
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = true; cb.title = "include in rotation";
+    cb.disabled = !own && !!state.selectedClock;
     cb.addEventListener("change", () => { if (!cb.checked) removeFromRotation(name); markDirty(); });
     const label = document.createElement("span");
     label.textContent = name;
@@ -143,6 +316,7 @@ function renderRotation() {
     label.addEventListener("click", () => { if (name !== "clock") selectScreen(name); });
     const up = mkBtn("↑", () => moveRotation(i, -1));
     const down = mkBtn("↓", () => moveRotation(i, 1));
+    up.disabled = down.disabled = !own && !!state.selectedClock;
     li.append(cb, label, up, down);
     ul.appendChild(li);
   });
@@ -152,9 +326,10 @@ function renderRotation() {
     li.className = "rot-item off" + (name === state.selectedScreen ? " selected" : "");
     const cb = document.createElement("input");
     cb.type = "checkbox"; cb.checked = false; cb.title = "include in rotation";
+    cb.disabled = !own && !!state.selectedClock;
     cb.addEventListener("change", () => {
-      if (cb.checked && !state.data.rotation.includes(name)) {
-        state.data.rotation = (state.data.rotation || []).concat([name]);
+      if (cb.checked && !tgt.rotation.includes(name)) {
+        tgt.rotation = (tgt.rotation || []).concat([name]);
         markDirty(); renderRotation();
       }
     });
@@ -167,8 +342,47 @@ function renderRotation() {
   });
   const clockOn = rot.includes("clock");
   $("clockEnabled").checked = clockOn;
-  const clock = state.data.clock || {};
+  $("clockEnabled").disabled = !own && !!state.selectedClock;
+  // the duration shown is the override's when there is one, else the shared one
+  const ov = overrideFor(state.selectedClock);
+  const clock = (ov && ov.clock) || state.data.clock || {};
   $("clockDuration").value = clock.duration != null ? clock.duration : "";
+  $("clockDuration").disabled = !own && !!state.selectedClock;
+  renderClockOverrideRow(own);
+}
+
+// With 2+ clocks and one of them chosen: offer to give it its own rotation, or to
+// drop the override and go back to the shared one.
+function renderClockOverrideRow(own) {
+  const row = $("clockOverrideRow");
+  const name = state.selectedClock;
+  if (state.clocks.length < 2 || !name) { row.classList.add("hidden"); return; }
+  row.classList.remove("hidden");
+  $("clockOverrideHint").textContent = own
+    ? name + " has its own rotation."
+    : "The shared rotation is shown greyed.";
+  const btn = $("clockOverrideBtn");
+  if (own) {
+    btn.textContent = "Use the shared rotation";
+    btn.onclick = () => {
+      const ov = overrideFor(name);
+      delete ov.rotation;
+      if (ov.clock && !Object.keys(ov.clock).length) delete ov.clock;
+      if (!Object.keys(ov).length) delete state.data.clocks[name];
+      if (state.data.clocks && !Object.keys(state.data.clocks).length) delete state.data.clocks;
+      markDirty(); renderAll();
+    };
+  } else {
+    btn.textContent = "Give " + name + " its own rotation";
+    btn.onclick = () => {
+      if (!state.data.clocks) state.data.clocks = {};
+      if (!state.data.clocks[name]) state.data.clocks[name] = {};
+      state.data.clocks[name].rotation = (state.data.rotation || []).slice();
+      markDirty(); renderAll();
+    };
+  }
+  // while the clock has no override of its own, the shared list is only shown, greyed
+  $("rotationList").classList.toggle("greyed", !own);
 }
 
 function mkBtn(text, fn, title) {
@@ -180,7 +394,7 @@ function mkBtn(text, fn, title) {
 }
 
 function moveRotation(i, dir) {
-  const rot = state.data.rotation;
+  const rot = rotationTarget().rotation;
   const j = i + dir;
   if (j < 0 || j >= rot.length) return;
   [rot[i], rot[j]] = [rot[j], rot[i]];
@@ -188,20 +402,115 @@ function moveRotation(i, dir) {
 }
 
 function removeFromRotation(name) {
-  state.data.rotation = state.data.rotation.filter((r) => r !== name);
+  const tgt = rotationTarget();
+  tgt.rotation = tgt.rotation.filter((r) => r !== name);
   renderRotation();
 }
 
 $("clockEnabled").addEventListener("change", (e) => {
-  const rot = state.data.rotation;
+  const tgt = rotationTarget();
+  const rot = tgt.rotation;
   if (e.target.checked && !rot.includes("clock")) rot.push("clock");
-  if (!e.target.checked) state.data.rotation = rot.filter((r) => r !== "clock");
+  if (!e.target.checked) tgt.rotation = rot.filter((r) => r !== "clock");
   markDirty(); renderRotation();
 });
 $("clockDuration").addEventListener("change", (e) => {
   const v = parseInt(e.target.value, 10);
-  if (v > 0) state.data.clock = { duration: v };
-  else delete state.data.clock;
+  const clock = clockTarget(true);
+  if (v > 0) clock.duration = v;
+  else delete clock.duration;
+  // an emptied clock entry is removed again (and the clocks: block with it)
+  const ov = overrideFor(state.selectedClock);
+  if (ov && ov.clock && !Object.keys(ov.clock).length) {
+    delete ov.clock;
+    if (!Object.keys(ov).length) delete state.data.clocks[state.selectedClock];
+    if (state.data.clocks && !Object.keys(state.data.clocks).length) delete state.data.clocks;
+  }
+  if (!state.selectedClock && state.data.clock && !Object.keys(state.data.clock).length) delete state.data.clock;
+  markDirty();
+});
+
+// ---------------------------------------------------------------- night mode
+
+const NIGHT_DEFAULTS = { brightness_day: 255, brightness_night: 50, bright_above: 3, dim_below: -6, dim_screens: 0.6 };
+
+function renderNight() {
+  const n = state.data.night;
+  $("nightEnabled").checked = !!n;
+  $("nightFields").classList.toggle("hidden", !n);
+  if (!n) return;
+  $("nightDay").value = n.brightness_day != null ? n.brightness_day : NIGHT_DEFAULTS.brightness_day;
+  $("nightNight").value = n.brightness_night != null ? n.brightness_night : NIGHT_DEFAULTS.brightness_night;
+  $("nightAbove").value = n.bright_above != null ? n.bright_above : NIGHT_DEFAULTS.bright_above;
+  $("nightBelow").value = n.dim_below != null ? n.dim_below : NIGHT_DEFAULTS.dim_below;
+  const dim = n.dim_screens != null ? n.dim_screens : NIGHT_DEFAULTS.dim_screens;
+  $("nightDim").value = Math.round(dim * 100);
+  $("nightDayVal").textContent = $("nightDay").value;
+  $("nightNightVal").textContent = $("nightNight").value;
+  $("nightDimVal").textContent = $("nightDim").value + "%";
+  const q = n.quiet;
+  $("nightQuiet").checked = !!q;
+  $("quietFields").classList.toggle("hidden", !q);
+  if (q) {
+    $("quietFrom").value = q.from || "23:00";
+    $("quietTo").value = q.to || "07:00";
+    $("quietMode").value = q.mode === "blank" ? "blank" : "clock";
+  }
+}
+
+$("nightEnabled").addEventListener("change", (e) => {
+  if (e.target.checked) state.data.night = Object.assign({}, NIGHT_DEFAULTS);
+  else delete state.data.night;
+  markDirty(); renderNight();
+});
+
+function nightNum(id, key) {
+  $(id).addEventListener("input", (e) => {
+    const n = state.data.night; if (!n) return;
+    const v = parseFloat(e.target.value);
+    if (isFinite(v)) n[key] = v; else delete n[key];
+    if (id === "nightDay" || id === "nightNight") $(id + "Val").textContent = e.target.value;
+    if (id === "nightDim") $("nightDimVal").textContent = e.target.value + "%";
+    markDirty();
+  });
+  $(id).addEventListener("change", (e) => {
+    const n = state.data.night; if (!n) return;
+    const v = parseFloat(e.target.value);
+    if (isFinite(v)) n[key] = v; else delete n[key];
+    markDirty(); renderNight();
+  });
+}
+nightNum("nightDay", "brightness_day");
+nightNum("nightNight", "brightness_night");
+nightNum("nightAbove", "bright_above");
+nightNum("nightBelow", "dim_below");
+$("nightDim").addEventListener("input", (e) => {
+  const n = state.data.night; if (!n) return;
+  n.dim_screens = Math.round(parseInt(e.target.value, 10) || 100) / 100;
+  $("nightDimVal").textContent = e.target.value + "%";
+  markDirty();
+});
+$("nightDim").addEventListener("change", () => { markDirty(); renderNight(); });
+
+$("nightQuiet").addEventListener("change", (e) => {
+  const n = state.data.night; if (!n) return;
+  if (e.target.checked) n.quiet = { from: "23:00", to: "07:00", mode: "clock" };
+  else delete n.quiet;
+  markDirty(); renderNight();
+});
+$("quietFrom").addEventListener("change", (e) => {
+  const n = state.data.night; if (!n || !n.quiet) return;
+  if (e.target.value) n.quiet.from = e.target.value; else delete n.quiet.from;
+  markDirty();
+});
+$("quietTo").addEventListener("change", (e) => {
+  const n = state.data.night; if (!n || !n.quiet) return;
+  if (e.target.value) n.quiet.to = e.target.value; else delete n.quiet.to;
+  markDirty();
+});
+$("quietMode").addEventListener("change", (e) => {
+  const n = state.data.night; if (!n || !n.quiet) return;
+  n.quiet.mode = e.target.value;
   markDirty();
 });
 
@@ -226,6 +535,13 @@ function selectScreen(name) {
   schedulePreview(0);
 }
 
+// every rotation list in the file (the shared one plus each clock's override)
+function allRotations() {
+  const out = [state.data.rotation];
+  Object.values(state.data.clocks || {}).forEach((ov) => { if (ov.rotation) out.push(ov.rotation); });
+  return out;
+}
+
 $("addScreen").addEventListener("click", () => {
   let name = "screen" + (Object.keys(state.data.screens).length + 1);
   while (state.data.screens[name]) name = "s" + Math.random().toString(36).slice(2, 7);
@@ -242,7 +558,10 @@ $("renameScreen").addEventListener("click", () => {
   if (!name || name === old || state.data.screens[name]) return;
   state.data.screens[name] = state.data.screens[old];
   delete state.data.screens[old];
-  state.data.rotation = state.data.rotation.map((r) => (r === old ? name : r));
+  allRotations().forEach((rot) => {
+    const i = rot.indexOf(old);
+    if (i >= 0) rot[i] = name;
+  });
   state.selectedScreen = name;
   markDirty(); renderAll();
 });
@@ -251,7 +570,10 @@ $("deleteScreen").addEventListener("click", () => {
   const name = state.selectedScreen;
   if (!name || !confirm("Delete screen '" + name + "'?")) return;
   delete state.data.screens[name];
-  state.data.rotation = state.data.rotation.filter((r) => r !== name);
+  allRotations().forEach((rot) => {
+    const i = rot.indexOf(name);
+    if (i >= 0) rot.splice(i, 1);
+  });
   state.selectedScreen = Object.keys(state.data.screens)[0] || null;
   state.selectedTube = null;
   markDirty(); renderAll(); schedulePreview(0);
@@ -1387,6 +1709,10 @@ $("saveBtn").addEventListener("click", async () => {
   state.dirty = false;
   $("saveBtn").disabled = true;
   setStatus("saved", "ok");
+  // a save does NOT clear the undo history; it just becomes the new "clean" point
+  state.savedJson = snapshot();
+  history.lastJson = state.savedJson;
+  updateHistoryButtons();
   const cfg = await api("api/config");
   if (cfg.status === 200) { state.yaml = cfg.body.yaml; state.errors = cfg.body.errors || []; }
 });
@@ -1430,9 +1756,129 @@ $("yamlSave").addEventListener("click", async () => {
   state.dirty = false;
   $("saveBtn").disabled = true;
   $("yamlStatus").textContent = "saved";
-  await load();
+  await load();          // load() resets the undo history, like after Reload/restore
   $("yamlView").classList.add("hidden");
   $("editorView").classList.remove("hidden");
+});
+
+// ---------------------------------------------------------------- save history modal
+
+const histModal = { item: null };   // the history item currently being viewed
+
+function fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso || "";
+  // browser locale, e.g. "12 Nov, 21:42:05"
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getDate() + " " + months[d.getMonth()] + ", " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+
+function fmtSize(n) {
+  if (n == null) return "";
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(1) + " MB";
+}
+
+function openHistory() {
+  histModal.item = null;
+  $("historyListView").classList.remove("hidden");
+  $("historyYamlView").classList.add("hidden");
+  $("historyErrors").innerHTML = "";
+  $("historyYamlErrors").innerHTML = "";
+  $("historyModal").classList.remove("hidden");
+  drawHistoryList();
+}
+
+function closeHistory() {
+  $("historyModal").classList.add("hidden");
+  histModal.item = null;
+}
+
+async function drawHistoryList() {
+  const ul = $("historyList");
+  ul.innerHTML = "";
+  $("historyEmpty").classList.add("hidden");
+  $("historyErrors").innerHTML = "";
+  const { status, body } = await api("api/history");
+  if (status !== 200 || !body || !Array.isArray(body.items)) {
+    $("historyErrors").innerHTML = "";
+    const li = document.createElement("li");
+    li.textContent = "could not load history: " + ((body && body.error) || status);
+    $("historyErrors").appendChild(li);
+    return;
+  }
+  const items = body.items;   // newest first
+  if (!items.length) { $("historyEmpty").classList.remove("hidden"); return; }
+  items.forEach((it) => {
+    const li = document.createElement("li");
+    li.className = "history-item";
+    const when = document.createElement("span");
+    when.className = "history-when";
+    when.textContent = fmtWhen(it.saved_at) + "  ·  " + fmtSize(it.size);
+    const view = mkBtn("View", () => viewHistoryItem(it));
+    const restore = mkBtn("Restore", () => restoreHistoryItem(it));
+    restore.classList.add("primary");
+    li.append(when, view, restore);
+    ul.appendChild(li);
+  });
+}
+
+async function viewHistoryItem(it) {
+  histModal.item = it;
+  $("historyListView").classList.add("hidden");
+  $("historyYamlView").classList.remove("hidden");
+  $("historyYamlErrors").innerHTML = "";
+  $("historyYaml").textContent = "loading…";
+  const { status, body } = await api("api/history/" + encodeURIComponent(it.id));
+  if (status !== 200 || !body) {
+    $("historyYaml").textContent = "could not load this version: " + ((body && body.error) || status);
+    return;
+  }
+  $("historyYaml").textContent = body.yaml || "";
+}
+
+$("historyBack").addEventListener("click", () => {
+  $("historyYamlView").classList.add("hidden");
+  $("historyListView").classList.remove("hidden");
+  histModal.item = null;
+});
+
+async function restoreHistoryItem(it) {
+  if (state.dirty && !confirm("Discard your unsaved changes and restore this version?")) return;
+  $("historyErrors").innerHTML = "";
+  $("historyYamlErrors").innerHTML = "";
+  const { status, body } = await api("api/history/" + encodeURIComponent(it.id) + "/restore", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mtime: state.mtime }),
+  });
+  if (status === 200 && body && body.ok) {
+    closeHistory();
+    await load();          // resets the undo history, like Reload
+    setStatus("restored version from " + fmtWhen(it.saved_at), "ok");
+    return;
+  }
+  if (status === 409) {
+    closeHistory();
+    setStatus("changed on disk — reload to keep your edits safe", "conflict");
+    return;
+  }
+  // 400 (or anything else): show the errors in the modal
+  const errs = (body && (body.errors || [body.error])) || ["restore failed: " + status];
+  const target = $("historyYamlView").classList.contains("hidden") ? $("historyErrors") : $("historyYamlErrors");
+  errs.forEach((e) => {
+    const li = document.createElement("li"); li.textContent = e; target.appendChild(li);
+  });
+}
+
+$("historyBtn").addEventListener("click", openHistory);
+$("historyClose").addEventListener("click", closeHistory);
+$("historyRestoreYaml").addEventListener("click", () => { if (histModal.item) restoreHistoryItem(histModal.item); });
+$("historyModal").addEventListener("click", (e) => { if (e.target === $("historyModal")) closeHistory(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("historyModal").classList.contains("hidden")) closeHistory();
 });
 
 // ---------------------------------------------------------------- boot
@@ -1440,22 +1886,75 @@ $("yamlSave").addEventListener("click", async () => {
 bindScreenSettings();
 load();
 
+// ---------------------------------------------------------------- clocks (several) + status chip
+
+async function fetchClocks() {
+  const { status, body } = await api("api/clocks");
+  state.clocks = (status === 200 && body && Array.isArray(body.clocks)) ? body.clocks : [];
+  renderClockSelect();
+  renderRotation();
+  const chip = $("clockChip");
+  chip.classList.toggle("hidden", state.clocks.length === 0);
+  if (state.clocks.length) refreshClockChip();
+  refreshAutoRotate();
+}
+
+// the toggle's state for the chosen clock ("All clocks" reads the default one)
+async function refreshAutoRotate() {
+  const q = state.selectedClock ? "?clock=" + encodeURIComponent(state.selectedClock) : "";
+  const { body } = await api("api/rotation" + q);
+  if (body) $("autoRotate").checked = !!body.enabled;
+}
+
+// "main: claude · live · 50%" per clock: current screen (or paused/message/quiet/offline),
+// "live" when status.live, brightness as % of 255 when not null.
+function chipText(st) {
+  if (st.online === false) return "offline";
+  if (st.paused) return "paused";
+  if (st.message) return String(st.message);
+  if (st.quiet) return "quiet";
+  const cur = st.current == null ? "—" : String(st.current);
+  const live = st.live ? " · live" : "";
+  const bri = st.brightness == null ? "" : " · " + Math.round(st.brightness / 255 * 100) + "%";
+  return cur + live + bri;
+}
+
+async function refreshClockChip() {
+  const { status, body } = await api("api/status");
+  if (status !== 200 || !body || !body.clocks) return;
+  const parts = state.clocks
+    .map((c) => c.name + ": " + chipText(body.clocks[c.name] || {}))
+    .filter((p) => p);
+  $("clockChip").textContent = parts.join("  |  ");
+}
+
+setInterval(() => { if (state.clocks.length) refreshClockChip(); }, 15000);
+
 // ---------------------------------------------------------------- automatic cycling on/off
 (async function initAutoRotate() {
   const cb = $("autoRotate");
-  const { body } = await api("api/rotation");
-  if (body) cb.checked = !!body.enabled;
   cb.addEventListener("change", async () => {
-    const { status, body: b } = await api("api/rotation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ enabled: cb.checked }),
-    });
-    if (status !== 200 || !b) { cb.checked = !cb.checked; setStatus("couldn't change cycling", "error"); return; }
-    cb.checked = !!b.enabled;
-    setStatus(b.enabled ? "cycling automatically" : "button only: press the clock's button for the next screen");
+    // with 2+ clocks and "All clocks" chosen, set every clock; otherwise the chosen one
+    const names = state.clocks.length >= 2 && !state.selectedClock
+      ? state.clocks.map((c) => c.name) : [state.selectedClock || null];
+    let ok = true, last = null;
+    for (const name of names) {
+      const { status, body: b } = await api("api/rotation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(name ? { enabled: cb.checked, clock: name } : { enabled: cb.checked }),
+      });
+      if (status !== 200 || !b) { ok = false; } else { last = b.enabled; }
+    }
+    if (!ok) { cb.checked = !cb.checked; setStatus("couldn't change cycling", "error"); return; }
+    cb.checked = !!last;
+    setStatus(cb.checked ? "cycling automatically" : "button only: press the clock's button for the next screen");
   });
+  // when the clock select changes, the toggle shows that clock's state
+  $("clockSelect").addEventListener("change", refreshAutoRotate);
 })();
+
+fetchClocks();
 
 // ---------------------------------------------------------------- entity name autocomplete
 // In any text box of the editor: type a domain and a dot ("sensor.") inside a template, or
