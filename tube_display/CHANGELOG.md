@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0
+
+- Pictures of any size or shape: under the picture library the picture is shown on the tube, and you drag it into place, zoom it (pinch, scroll or slider), rotate it and choose the colour behind it. New fields `zoom`, `offset_x`, `offset_y`, `rotate` and `background` on `image` tubes and on `strip` screens. Sideways phone photos are turned upright.
+- Editor: a screen can be switched between six tubes and one picture across all six (**layout**), and that picture is placed the same way.
+- New `custom` tube: any number of text, ring, bar, icon, picture and box items, each placed by `x`/`y`. The editor has a designer for it: drag items on the tube, add, duplicate, reorder and delete them. Changing a tube's type to `custom` keeps what it showed as separate items.
+- Templates work in every field of a widget, including ones that only use `{% ... %}`; the editor shows a template's live result under labels, units and sizes too.
+- Several lines in labels, units, values and icon text (Enter in the editor, or `\n`). A ring whose label has several lines moves up to make room.
+- Text sizes and colours per part: `value_size`, `unit_size`, `label_size`, `icon_size`, `text_size`, `value_color`, `unit_color`, `label_color`, `text_color`; ring `radius` and `thickness`; text `valign`. Text size in the editor is any number, not a fixed list.
+- Rings have smooth edges.
+- `fit: contain` fills the leftover space with the background colour instead of black.
+
 ## 0.4.7
 
 - Security: Pillow 13.0.0 (was 11.2.1) and aiohttp 3.14.4, which fix known vulnerabilities.

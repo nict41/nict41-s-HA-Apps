@@ -14,8 +14,9 @@ pictures on `POST /panel`); the stock time/date/weather firmware does not.
 ## How it works
 
 1. You design screens in the **Tube Display** sidebar panel: a live six-tube
-   preview, an entity picker, colour thresholds, icon autocomplete and your
-   own pictures. They're saved in `tube_display/screens.yaml` in your Home
+   preview, an entity picker, colour thresholds, icon autocomplete, your
+   own pictures (any size: drag and zoom them into place) and a drag-and-drop
+   designer for tubes with your own layout. They're saved in `tube_display/screens.yaml` in your Home
    Assistant config folder, which you can also edit by hand. Each screen is
    either six widgets — one per tube, left to right — or one 810x240 "strip"
    picture across all tubes.

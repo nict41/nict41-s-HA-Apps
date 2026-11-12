@@ -134,3 +134,15 @@ def test_bad_clock_duration():
 
 def test_clock_entry_constant():
     assert CLOCK_ENTRY == "clock"
+
+
+def test_custom_widget_items_validated():
+    ok = [{"type": "blank"}] * 5 + [{"type": "custom", "items": [
+        {"type": "text", "text": "hi", "x": 10, "y": 20}, {"type": "ring", "value": "5"}]}]
+    assert parse_screens(_cfg(screens={"a": {"tubes": ok}})).errors == []
+    empty = [{"type": "blank"}] * 5 + [{"type": "custom"}]
+    assert parse_screens(_cfg(screens={"a": {"tubes": empty}})).errors == []
+    bad = [{"type": "blank"}] * 5 + [{"type": "custom", "items": [{"type": "sparkle"}]}]
+    assert any("item 0" in e and "sparkle" in e for e in parse_screens(_cfg(screens={"a": {"tubes": bad}})).errors)
+    not_list = [{"type": "blank"}] * 5 + [{"type": "custom", "items": "text"}]
+    assert any("must be a list" in e for e in parse_screens(_cfg(screens={"a": {"tubes": not_list}})).errors)
