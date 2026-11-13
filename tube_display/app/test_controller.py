@@ -1435,3 +1435,76 @@ def test_status_has_upload_format_and_bytes_per_minute(tmp_path):
     controller2._pusher = None
     s2 = controller2.status()
     assert s2["upload_format"] == "rgb565" and s2["bytes_per_minute"] == 0
+
+
+class FirmwareTransitionPusher(FakePusher):
+    """HA Tubes 2.5+: plays transitions itself from send_screen (None = can't, fall back)."""
+
+    def __init__(self, result=True):
+        super().__init__()
+        self.result = result
+        self.screens = []       # (kind, order, duration_ms, gap_ms, photo)
+
+    async def send_screen(self, tube_bytes, photo_tubes, kind, order, duration_ms=500, gap_ms=90):
+        self.screens.append((kind, list(order), duration_ms, gap_ms, set(photo_tubes or ())))
+        return self.result
+
+
+def _with_pusher(controller, pusher):
+    controller._pusher = pusher
+    return pusher
+
+
+def test_firmware_plays_the_transition_and_the_app_waits_for_it(tmp_path):
+    for t, kind, order, wait in (("wipe", "wipe", [0, 1, 2, 3, 4, 5], 0.4),
+                                 ("wipe_right", "wipe", [5, 4, 3, 2, 1, 0], 0.4),
+                                 ("wipe_center", "wipe", [2, 3, 1, 4, 0, 5], 0.4),
+                                 ("center_out", "cascade", [2, 3, 1, 4, 0, 5], 5 * 0.07)):
+        data = _transition_screens(t, delay=70)
+        data["screens"]["a"]["transition_duration"] = 400
+        controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+        p = _with_pusher(controller, FirmwareTransitionPusher())
+        t0 = time.t
+        asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+        assert p.screens == [(kind, order, 400, 70, set())]
+        assert p.tubes_sent == [] and p.rects == [] and p.sent == []   # nothing sent the old way
+        # the 0.5 s mode-switch pause, then waiting for the clock's transition to finish
+        assert time.t - t0 == pytest.approx(0.5 + wait, abs=0.01)
+
+
+def test_firmware_transition_wait_stops_on_an_interrupt(tmp_path):
+    data = _transition_screens("wipe")
+    data["screens"]["a"]["transition_duration"] = 2000
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    p = _with_pusher(controller, FirmwareTransitionPusher())
+    real_sleep = controller._sleep
+
+    async def sleep(s):
+        await real_sleep(s)
+        if time.t > 1.0 + t0:
+            controller._interrupted = True      # a button press half way
+    controller._sleep = sleep
+    t0 = time.t
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert len(p.screens) == 1 and time.t - t0 < 1.2
+
+
+def test_falls_back_to_the_app_when_the_clock_cant_play_it(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _transition_screens("wipe_right", delay=0))
+    p = _with_pusher(controller, FirmwareTransitionPusher(result=None))
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert len(p.screens) == 1
+    # the app's own staggered wipe, right to left
+    assert p.rect_batches[:3] == [[5], [5, 4], [5, 4, 3]]
+    assert len(p.rects) == 36
+
+
+def test_transition_duration_validation(tmp_path):
+    from screens import parse_screens as parse_screens_data
+    cfg = parse_screens_data({"rotation": ["a"], "screens": {"a": {
+        "transition": "wipe_center", "transition_duration": 50, "tubes": [{"type": "text", "text": "x"}] * 6}}})
+    assert [e for e in cfg.errors if "transition_duration" in e]
+    assert cfg.screens["a"].resolved_transition_duration() == 500   # still loads, with the default
+    cfg = parse_screens_data({"rotation": ["a"], "screens": {"a": {
+        "transition": "wipe_center", "transition_duration": 1200, "tubes": [{"type": "text", "text": "x"}] * 6}}})
+    assert not cfg.errors and cfg.screens["a"].resolved_transition_duration() == 1200

@@ -105,13 +105,16 @@ fitted to its space as before.
 `tube_display/fonts/`) are `file:<name>.ttf`. `weight: bold` uses the font's bold
 weight where it has one.
 
-**Transitions:** `transition: none|cascade|cascade_right|center_out|wipe` on a
-screen, or at the top level as the default, changes how a screen appears:
+**Transitions:** `transition: none|cascade|cascade_right|center_out|wipe|wipe_right|wipe_center`
+on a screen, or at the top level as the default, changes how a screen appears:
 `cascade` changes the tubes one after another from the left (`cascade_right`
 from the right, `center_out` from the middle), `wipe` draws the tubes from the
-top down, each starting a moment after the one to its left. `transition_delay`
-is the pause between tubes in ms (90); a wipe pauses a third of it between its
-steps. Only when a screen appears, never on a refresh.
+top down, each starting a moment after the one to its left (`wipe_right` from
+the right, `wipe_center` from the middle). `transition_delay` is the pause
+between tubes of a cascade in ms (90), and `transition_duration` how long a wipe
+takes in ms (500, 100 to 5000). Only when a screen appears, never on a refresh.
+On HA Tubes 2.5 the clock plays the transition itself, smoothly and exactly on
+time; with older firmware the app sends the tubes one after another.
 
 **Free design across all six tubes:** instead of `tubes` (or `strip`), a screen
 can have a `canvas` with `items` placed anywhere on the 810x240 picture, the same
@@ -518,9 +521,10 @@ and camera pictures when that's smaller. Older firmware still gets raw pixels.
 `GET /api/status` shows the `upload_format` per clock. The `gif` widget needs
 2.4 too.
 
-HA Tubes 2.5 also takes several pictures in one request, which saves most of
-the cost of each request for small pictures: a `wipe` takes about 0.9 s instead
-of 1.5 s.
+HA Tubes 2.5 takes a whole screen in one request and draws it from memory: the
+six tubes change in about a quarter of a second, about twice as fast as with
+2.4, and transitions are played by the clock itself, so a wipe is smooth and
+takes exactly its `transition_duration`.
 
 For a clock used only through Home Assistant, set the `firmware_variant`
 option to `ipstube_ha`: the HA-only build leaves out the clock's own weather,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- **Transitions played by the clock** (HA Tubes 2.5): the app sends a new screen in one request and the clock plays the transition itself, smoothly and exactly on time, whatever the Wi-Fi is doing. Older firmware gets the app's own transitions as before.
+- **New transitions:** `wipe_right` and `wipe_center`, and `transition_duration` (ms, default 500) for how long a wipe takes.
+- **Faster updates:** on HA Tubes 2.5 a whole screen goes in one request and the six tubes change in about a quarter of a second, twice as fast as before. Photo tubes go as JPEG in the same request.
+- Pictures are converted to and from the clock's pixel format about 20 times faster (about 0.6 ms a tube instead of 11 to 15 ms).
+
 ## 1.0.2
 
 - **Faster wipe:** the tubes now wipe down together, each starting a moment after the one to its left, with shorter pauses: about 0.9 s instead of about 4 s.

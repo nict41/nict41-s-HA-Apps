@@ -29,21 +29,28 @@ def rgb565_bytes(r: int, g: int, b: int) -> bytes:
     return bytes(((v >> 8) & 0xFF, v & 0xFF))
 
 
+# Per-channel lookup tables for the conversions below. Each RGB565 byte, and each channel
+# rebuilt from them, is two channels' bits that don't overlap, so ImageChops.add (which
+# clips at 255, never reached here) combines them like a bitwise or: whole images at C speed
+# instead of a Python loop per pixel.
+_HI_R = [v & 0xF8 for v in range(256)]                      # red's top 5 bits
+_HI_G = [v >> 5 for v in range(256)]                        # green's top 3 bits
+_LO_G = [(v & 0x1C) << 3 for v in range(256)]               # green's next 3 bits
+_LO_B = [v >> 3 for v in range(256)]                        # blue's top 5 bits
+_R_HI = [(v & 0xF8) | (v >> 5) for v in range(256)]         # red, bit-replicated, from hi
+_G_HI = [((v & 7) << 5) | ((v & 7) >> 1) for v in range(256)]  # green's bits from hi
+_G_LO = [(v >> 5) << 2 for v in range(256)]                 # green's bits from lo
+_B_LO = [((v & 0x1F) << 3) | ((v & 0x1F) >> 2) for v in range(256)]  # blue, bit-replicated
+
+
 def image_to_rgb565(img) -> bytes:
     """Convert an RGB(A) image to raw RGB565 big-endian bytes."""
     _require_pil()
-    img = img.convert("RGB")
-    out = bytearray(img.width * img.height * 2)
-    px = img.load()
-    i = 0
-    for y in range(img.height):
-        for x in range(img.width):
-            r, g, b = px[x, y][:3]
-            v = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
-            out[i] = (v >> 8) & 0xFF
-            out[i + 1] = v & 0xFF
-            i += 2
-    return bytes(out)
+    from PIL import ImageChops
+    r, g, b = img.convert("RGB").split()
+    hi = ImageChops.add(r.point(_HI_R), g.point(_HI_G))
+    lo = ImageChops.add(g.point(_LO_G), b.point(_LO_B))
+    return Image.merge("LA", (hi, lo)).tobytes()            # hi, lo, hi, lo, ...
 
 
 def rgb565_to_image(data: bytes, width: int, height: int):
@@ -51,20 +58,14 @@ def rgb565_to_image(data: bytes, width: int, height: int):
     image_to_rgb565: each channel is expanded back with bit replication, so
     converting the result again gives the same bytes - round-trip exact)."""
     _require_pil()
+    from PIL import ImageChops
     if len(data) != width * height * 2:
         raise ValueError(f"rgb565 body must be {width * height * 2} bytes, got {len(data)}")
-    img = Image.new("RGB", (width, height))
-    px = img.load()
-    i = 0
-    for y in range(height):
-        for x in range(width):
-            v = (data[i] << 8) | data[i + 1]
-            r = ((v >> 8) & 0xF8) | ((v >> 13) & 0x07)
-            g = ((v >> 3) & 0xFC) | ((v >> 9) & 0x03)
-            b = ((v & 0x1F) << 3) | ((v >> 2) & 0x07)
-            px[x, y] = (r, g, b)
-            i += 2
-    return img
+    hi, lo = Image.frombytes("LA", (width, height), bytes(data)).split()
+    r = hi.point(_R_HI)
+    g = ImageChops.add(hi.point(_G_HI), lo.point(_G_LO))
+    b = lo.point(_B_LO)
+    return Image.merge("RGB", (r, g, b))
 
 
 def strip_to_tiles(strip) -> list:
