@@ -394,8 +394,11 @@ class FakeClock:
     """A fake HA Tubes clock: /panel (old or new firmware), /gif endpoints.
     Records every request; `panel_statuses` queues non-200 answers for POST /panel."""
 
-    def __init__(self, new_firmware=True):
+    def __init__(self, new_firmware=True, batch=False):
         self.new = new_firmware
+        self.batch = batch       # HA Tubes 2.5+: POST /panel/batch
+        self.batches = []        # list of [(tube, fmt, x, y, w, h, picture)] per batch POST
+        self.batch_statuses = []  # statuses to answer POST /panel/batch with, in order
         self.posts = []          # (path, params, content_type, body)
         self.gif_posts = []      # (path, params, body)
         self.gif_files = {}      # name -> bytes
@@ -405,6 +408,8 @@ class FakeClock:
         self.app = web.Application()
         self.app.router.add_get("/panel", self.get_panel)
         self.app.router.add_post("/panel", self.post_panel)
+        if batch:
+            self.app.router.add_post("/panel/batch", self.post_batch)
         if new_firmware:
             # HA Tubes 2.4+ has the /gif endpoints; old firmware does not
             self.app.router.add_get("/gif", self.get_gif)
@@ -416,7 +421,29 @@ class FakeClock:
     async def get_panel(self, req):
         info = dict(NEW_PANEL if self.new else OLD_PANEL)
         info["playing"] = sorted(self.playing)
+        if self.batch:
+            info["batch"] = True
         return web.json_response(info)
+
+    async def post_batch(self, req):
+        import struct
+        body = await req.read()
+        assert req.headers.get("Content-Type") == "application/octet-stream"
+        records, off = [], 0
+        while off < len(body):
+            tube, fmt, x, y, w, h, n = struct.unpack_from("<BBHHHHI", body, off)
+            off += 14
+            records.append((tube, fmt, x, y, w, h, body[off:off + n]))
+            off += n
+        assert off == len(body)
+        self.batches.append(records)
+        if self.batch_statuses:
+            status = self.batch_statuses.pop(0)
+            if status != 200:
+                return web.Response(status=status, text="fake clock answer")
+        for r in records:
+            self.playing.discard(r[0])
+        return web.Response(status=200, text="ok")
 
     async def post_panel(self, req):
         body = await req.read()
@@ -714,3 +741,128 @@ def test_rgb565_to_image_round_trips_exactly():
     assert image_to_rgb565(decoded) == data
     with pytest.raises(ValueError):
         rgb565_to_image(b"\x00" * 10, TUBE_W, TUBE_H)
+
+
+# ======================================================================
+# batch uploads (HA Tubes 2.5+: POST /panel/batch)
+# ======================================================================
+
+def _decode_record(rec):
+    """RGB565 bytes of one batch record's picture."""
+    tube, fmt, x, y, w, h, pic = rec
+    if fmt == 0:
+        assert len(pic) == w * h * 2
+        return pic
+    from PIL import Image
+    assert fmt == 1 and pic[:4] == b"qoif"
+    img = Image.open(io.BytesIO(pic)).convert("RGB")
+    assert img.size == (w, h)
+    return image_to_rgb565(img)
+
+
+@pytestmark_pil
+def test_send_tubes_uses_one_batch_when_advertised():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        assert pusher.batch_supported is True
+        assert clock.posts == []
+        # bodies of at most BATCH_MAX_BYTES: these flat tubes are ~0.5 KB each, so 5 + 1
+        assert [len(b) for b in clock.batches] == [5, 1]
+        recs = [r for b in clock.batches for r in b]
+        assert [r[0] for r in recs] == list(range(TUBE_COUNT))
+        for r in recs:
+            assert r[1] == 1 and r[2:6] == (0, 0, TUBE_W, TUBE_H)
+            assert _decode_record(r) == payloads[r[0]]
+        # hashes recorded: nothing re-sent; one changed tube goes on its own (no batch of one)
+        assert await pusher.send_tubes(payloads) == []
+        payloads[3] = _flat_payload(99)
+        assert await pusher.send_tubes(payloads) == [3]
+        assert len(clock.batches) == 2 and len(clock.posts) == 1
+    _run(_with_fake_clock(FakeClock(batch=True), check))
+
+
+@pytestmark_pil
+def test_photo_tubes_go_on_their_own_beside_the_batch():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        payloads[2] = _photo_payload()
+        sent = await pusher.send_tubes(payloads, photo_tubes={2})
+        assert sorted(sent) == list(range(TUBE_COUNT))
+        assert [r[0] for r in clock.batches[0]] == [0, 1, 3, 4, 5]
+        assert [p["tube"] for _, p, _, _ in clock.posts] == ["2"]
+        assert clock.posts[0][1]["format"] == "jpeg"
+    _run(_with_fake_clock(FakeClock(batch=True), check))
+
+
+@pytestmark_pil
+def test_no_batch_without_the_capability():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        assert pusher.batch_supported is False and len(clock.posts) == TUBE_COUNT
+        ok = await pusher.send_rects([(t, 0, 0, TUBE_W, 40, payloads[t][:TUBE_W * 40 * 2])
+                                      for t in range(3)])
+        assert ok and len(clock.posts) == TUBE_COUNT + 3
+    _run(_with_fake_clock(FakeClock(batch=False), check))
+
+
+@pytestmark_pil
+def test_send_rects_batches_and_patches_hashes():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        await pusher.send_tubes(payloads)
+        new = _flat_payload(77)
+        band = new[40 * TUBE_W * 2:80 * TUBE_W * 2]
+        assert await pusher.send_rects([(t, 0, 40, TUBE_W, 40, band) for t in (0, 1)])
+        recs = clock.batches[-1]
+        assert [(r[0], r[2:6]) for r in recs] == [(0, (0, 40, TUBE_W, 40)), (1, (0, 40, TUBE_W, 40))]
+        assert all(_decode_record(r) == band for r in recs)
+        # the band was patched into tubes 0 and 1: sending that exact picture is a no-op
+        patched = bytearray(payloads[0])
+        patched[40 * TUBE_W * 2:80 * TUBE_W * 2] = band
+        assert 0 not in pusher.tubes_to_send([bytes(patched)] + payloads[1:])
+    _run(_with_fake_clock(FakeClock(batch=True), check))
+
+
+@pytestmark_pil
+def test_batch_retries_503_and_falls_back_to_raw_on_qoi_400():
+    async def check(pusher, clock):
+        clock.batch_statuses = [503, 400]
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        # 503 -> retried; 400 to QOI -> the rest goes raw, in one body (raw doesn't stall)
+        assert len(clock.batches) == 4
+        assert all(r[1] == 1 for r in clock.batches[1])        # QOI, answered 400
+        raw = clock.batches[2] + clock.batches[3]
+        assert all(r[1] == 0 for r in raw) and [r[0] for r in raw] == list(range(TUBE_COUNT))
+        assert all(_decode_record(r) == payloads[r[0]] for r in raw)
+        assert pusher.upload_format == "rgb565"
+    _run(_with_fake_clock(FakeClock(batch=True), check))
+
+
+@pytestmark_pil
+def test_batch_other_error_falls_back_to_single_uploads():
+    async def check(pusher, clock):
+        clock.batch_statuses = [500]
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        assert len(clock.batches) == 1 and len(clock.posts) == TUBE_COUNT
+    _run(_with_fake_clock(FakeClock(batch=True), check))
+
+
+def test_batch_bodies_stay_under_the_limit():
+    from clock import BATCH_MAX_BYTES
+    import aiohttp
+
+    async def go():
+        async with aiohttp.ClientSession() as session:
+            p = ClockPusher(session, "http://x")
+            rects = [(t, 0, 0, TUBE_W, 40, bytes([t * 40 + i % 7 for i in range(TUBE_W * 80)]))
+                     for t in range(6)]
+            chunks = p._batch_chunks(rects, "rgb565")   # 10.8 KB each: one per body
+            assert [len(c) for c, _ in chunks] == [1] * 6
+            small = [(t, 0, 0, 10, 10, bytes(200)) for t in range(6)]
+            chunks = p._batch_chunks(small, "rgb565")   # 214 bytes each: all in one
+            assert len(chunks) == 1 and len(chunks[0][1]) == 6 * 214 <= BATCH_MAX_BYTES
+    asyncio.run(go())
