@@ -274,3 +274,55 @@ def test_night_block_errors_go_to_cfg_errors():
     assert cfg.night is None
     assert any("brightness_day" in e for e in cfg.errors)
     assert any("quiet.from" in e for e in cfg.errors)
+
+
+# ----------------------------------------------------------------------
+# transition / transition_delay fields
+# ----------------------------------------------------------------------
+
+def test_transition_defaults_to_none():
+    cfg = parse_screens(_cfg())
+    assert cfg.transition == "none"
+    assert cfg.screens["a"].transition is None
+    assert cfg.screens["a"].resolved_transition(cfg.transition) == "none"
+    assert cfg.screens["a"].resolved_transition_delay() == 90
+
+
+def test_transition_per_screen_and_top_level():
+    cfg = parse_screens(_cfg(
+        transition="cascade",
+        screens={"a": {"transition": "wipe", "transition_delay": 200,
+                       "tubes": [{"type": "blank"}] * 6},
+                 "b": {"tubes": [{"type": "blank"}] * 6}}))
+    assert cfg.errors == []
+    assert cfg.transition == "cascade"
+    assert cfg.screens["a"].resolved_transition(cfg.transition) == "wipe"
+    assert cfg.screens["a"].resolved_transition_delay() == 200
+    assert cfg.screens["b"].resolved_transition(cfg.transition) == "cascade"  # top-level default
+    assert cfg.screens["b"].resolved_transition_delay() == 90
+
+
+def test_transition_unknown_value_is_error_but_screen_loads_with_none():
+    cfg = parse_screens(_cfg(screens={"a": {"transition": "teleport",
+                                            "tubes": [{"type": "blank"}] * 6}}))
+    assert "a" in cfg.screens                       # the screen still loads
+    assert cfg.screens["a"].transition is None      # ... with none
+    assert cfg.screens["a"].resolved_transition("cascade") == "cascade"  # falls back to default
+    assert any("transition" in e and "teleport" in e for e in cfg.errors)
+
+
+def test_transition_unknown_top_level_is_error_and_default_none():
+    cfg = parse_screens(_cfg(transition="zoom"))
+    assert cfg.transition == "none"
+    assert any("transition" in e and "zoom" in e for e in cfg.errors)
+
+
+def test_transition_delay_validated():
+    cfg = parse_screens(_cfg(screens={"a": {"transition_delay": 1500,
+                                            "tubes": [{"type": "blank"}] * 6}}))
+    assert any("transition_delay" in e for e in cfg.errors)
+    assert cfg.screens["a"].transition_delay is None
+    cfg = parse_screens(_cfg(screens={"a": {"transition_delay": 0,
+                                            "tubes": [{"type": "blank"}] * 6}}))
+    assert cfg.errors == []
+    assert cfg.screens["a"].resolved_transition_delay() == 0

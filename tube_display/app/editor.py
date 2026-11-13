@@ -20,6 +20,8 @@ everything at the root of its own site.
 - POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
 - GET  api/clocks            {"clocks": [{"name", "host", "online", "rotation_enabled"}]}
 - GET  api/status            {"clocks": {name: controller.status()}}
+- POST api/mirror            {"screen": {...}, "clock"?, "seconds"?} -> show on a clock
+- DELETE api/mirror          {"clock"?} -> stop mirroring (POST api/mirror/end is an alias)
 
 The 8098 API (api.py) is untouched and has no write routes.
 
@@ -731,6 +733,82 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     app.router.add_get("/api/clocks", api_clocks)
     app.router.add_get("/api/status", api_status)
+
+    # ------------------------------------------------------------------
+    # live mirror: show the editor's current screen on a clock ("Show on clock")
+    # ------------------------------------------------------------------
+
+    def _mirror_controller(body) -> tuple[web.Response | None, object]:
+        """Pick the controller for a mirror request: the "clock" name if given
+        (unknown -> 404), else the first one. Returns (error_response, controller)."""
+        name = body.get("clock") if isinstance(body, dict) else None
+        controllers = app["controllers"]
+        if name is not None:
+            ctl = controllers.get(str(name))
+            if ctl is None:
+                return web.json_response(
+                    {"error": f"unknown clock {name!r}", "clocks": sorted(controllers)},
+                    status=404), None
+            return None, ctl
+        if not controllers:
+            return web.json_response({"error": "no clock configured"}, status=404), None
+        first = next(iter(controllers.values()))
+        return None, first
+
+    async def api_mirror(request: web.Request) -> web.Response:
+        """POST {"screen": {...raw screen dict, as api/preview takes...}, "clock"?,
+        "seconds"?} -> parse the screen like api/preview (errors -> 400) and show it
+        on that clock (default the first; unknown -> 404) for `seconds`
+        (default 120, max 600). Each call replaces the mirrored screen."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            from screens import _parse_screen
+
+            raw = body.get("screen") if isinstance(body, dict) else None
+            if not isinstance(raw, dict):
+                return web.json_response({"error": "body needs a 'screen' mapping"}, status=400)
+            errors: list[str] = []
+            screen = _parse_screen("__mirror__", raw, errors)
+            if screen is None:
+                return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
+            if errors:
+                # a screen with (non-fatal) errors is still shown, but reported
+                _LOG.warning("Mirror screen has errors: %s", errors)
+            seconds = body.get("seconds", 120)
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
+                return web.json_response({"error": "'seconds' must be a positive number"}, status=400)
+            seconds = min(float(seconds), 600.0)     # cap at 600 s
+            err, ctl = _mirror_controller(body)
+            if err is not None:
+                return err
+            ctl.mirror(screen, seconds=seconds)
+            return web.json_response({"ok": True, "clock": getattr(ctl, "name", "main"),
+                                      "seconds": seconds})
+        return await ingress_only(request, handler)
+
+    async def api_mirror_end(request: web.Request) -> web.Response:
+        """DELETE (or POST api/mirror/end, for sendBeacon which cannot DELETE):
+        {"clock"?} -> end the mirror on that clock (default the first)."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        async def handler(req: web.Request) -> web.Response:
+            err, ctl = _mirror_controller(body if isinstance(body, dict) else {})
+            if err is not None:
+                return err
+            ctl.end_mirror()
+            return web.json_response({"ok": True, "clock": getattr(ctl, "name", "main")})
+        return await ingress_only(request, handler)
+
+    app.router.add_post("/api/mirror", api_mirror)
+    app.router.add_delete("/api/mirror", api_mirror_end)
+    app.router.add_post("/api/mirror/end", api_mirror_end)
 
     async def api_icons(request: web.Request) -> web.Response:
         """GET ?q=<text>: up to 60 Material Design Icon names ("mdi:...") containing the text,

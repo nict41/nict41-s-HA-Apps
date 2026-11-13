@@ -17,7 +17,7 @@ from typing import Awaitable, Callable
 
 import aiohttp
 
-from rgb565 import TUBE_COUNT
+from rgb565 import TUBE_COUNT, TUBE_H, TUBE_W
 
 _LOG = logging.getLogger(__name__)
 
@@ -129,11 +129,63 @@ class ClockPusher:
 
     async def _send_one(self, tube: int, data: bytes) -> tuple[bool, bool]:
         """Upload one tube. Returns (ok, connection_lost)."""
+        ok, connection_lost = await self._post_panel({"tube": tube}, data)
+        if ok:
+            h = self._hash(data)
+            self._last_hash[tube] = h
+            self._last_bytes[tube] = data
+        return ok, connection_lost
+
+    async def send_tube(self, tube: int, data: bytes) -> bool:
+        """Upload one whole tube unconditionally, even if its bytes are unchanged
+        (used by screen transitions). Returns True on success."""
+        ok, connection_lost = await self._send_one(tube, data)
+        if connection_lost:
+            self.reachable = False
+        return ok
+
+    async def send_rect(self, tube: int, x: int, y: int, w: int, h: int, data: bytes) -> bool:
+        """Upload a rectangular region of one tube (POST /panel?tube=N&x=X&y=Y&w=W&h=H,
+        raw RGB565 big-endian body of w*h*2 bytes). On success the region is patched
+        into the tube's last bytes (when known) and its hash recomputed, so a later
+        full refresh only resends the tube if the whole picture really differs.
+        Returns True on success."""
+        if not (0 <= tube < TUBE_COUNT):
+            raise ValueError(f"tube must be 0..{TUBE_COUNT - 1}, got {tube}")
+        if not (0 <= x and 0 <= y and x + w <= TUBE_W and y + h <= TUBE_H and w > 0 and h > 0):
+            raise ValueError(f"rect ({x},{y},{w},{h}) outside the {TUBE_W}x{TUBE_H} tube")
+        if len(data) != w * h * 2:
+            raise ValueError(f"rect body must be {w * h * 2} bytes (w*h*2), got {len(data)}")
+        ok, connection_lost = await self._post_panel(
+            {"tube": tube, "x": x, "y": y, "w": w, "h": h}, data)
+        if connection_lost:
+            self.reachable = False
+        if not ok:
+            return False
+        last = self._last_bytes[tube]
+        if last is None or len(last) != TUBE_W * TUBE_H * 2:
+            # the tube's full picture is unknown: a later full refresh must compare
+            # against nothing, so its hash is unknown too
+            self._last_hash[tube] = None
+        else:
+            row_bytes = TUBE_W * 2
+            patched = bytearray(last)
+            for row in range(h):
+                off = ((y + row) * TUBE_W + x) * 2
+                patched[off:off + w * 2] = data[row * w * 2:(row + 1) * w * 2]
+            self._last_bytes[tube] = bytes(patched)
+            self._last_hash[tube] = self._hash(self._last_bytes[tube])
+        return True
+
+    async def _post_panel(self, params: dict, data: bytes) -> tuple[bool, bool]:
+        """POST /panel with the given query params and body, with the shared
+        retry/409/503/unreachable handling. Returns (ok, connection_lost)."""
+        tube = params.get("tube")
         async with self._lock:
             for attempt in range(6):
                 try:
                     async with self._session.post(
-                        f"{self._base}/panel", params={"tube": tube},
+                        f"{self._base}/panel", params=params,
                         data=data, auth=self._auth,
                         headers={"Content-Type": "application/octet-stream"},
                         timeout=aiohttp.ClientTimeout(total=30),
@@ -142,13 +194,10 @@ class ClockPusher:
                             self._backoff = 1.0
                             self.last_error = None
                             self.reachable = True
-                            h = self._hash(data)
-                            self._last_hash[tube] = h
-                            self._last_bytes[tube] = data
                             return True, False
                         if resp.status == 409:
                             # clock not in a panel mode: re-publish display=4 once, retry
-                            _LOG.warning("Clock returned 409 (not a panel tube) on tube %d - "
+                            _LOG.warning("Clock returned 409 (not a panel tube) on tube %s - "
                                          "re-publishing display=4", tube)
                             if self._publish_display is not None:
                                 try:
@@ -158,19 +207,19 @@ class ClockPusher:
                             await self._sleep(1.0)
                             continue
                         if resp.status == 503:
-                            _LOG.debug("Clock busy (503) on tube %d - retrying", tube)
+                            _LOG.debug("Clock busy (503) on tube %s - retrying", tube)
                             await self._sleep(self._backoff)
                             self._backoff = min(self._backoff * 2, MAX_BACKOFF)
                             continue
                         body = await resp.text()
                         self.last_error = f"tube {tube}: HTTP {resp.status}: {body[:120]}"
-                        _LOG.warning("POST /panel tube %d -> %d %s", tube, resp.status, body[:120])
+                        _LOG.warning("POST /panel tube %s -> %d %s", tube, resp.status, body[:120])
                         return False, False
                 except (aiohttp.ClientError, asyncio.TimeoutError) as err:
                     self.last_error = f"tube {tube}: {err}"
-                    _LOG.debug("POST /panel tube %d failed: %s - retrying", tube, err)
+                    _LOG.debug("POST /panel tube %s failed: %s - retrying", tube, err)
                     await self._sleep(self._backoff)
                     self._backoff = min(self._backoff * 2, MAX_BACKOFF)
             self.last_error = f"tube {tube}: giving up after retries ({self.last_error})"
-            _LOG.error("Could not send tube %d to the clock: %s", tube, self.last_error)
+            _LOG.error("Could not send tube %s to the clock: %s", tube, self.last_error)
             return False, True

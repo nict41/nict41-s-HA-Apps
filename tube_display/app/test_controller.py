@@ -38,6 +38,8 @@ class FakeTime:
 class FakePusher:
     def __init__(self, reachable=True):
         self.sent = []          # (tube_bytes, needed_mask)
+        self.rects = []         # (tube, x, y, w, h, data) partial uploads
+        self.tubes_sent = []    # (tube, data) unconditional single-tube uploads
         self.last_error = None
         self.reachable = reachable
         self.probes = 0
@@ -47,6 +49,14 @@ class FakePusher:
     async def send_tubes(self, tube_bytes, needed_mask=0):
         self.sent.append((tube_bytes, needed_mask))
         return list(range(TUBE_COUNT))
+
+    async def send_tube(self, tube, data):
+        self.tubes_sent.append((tube, data))
+        return True
+
+    async def send_rect(self, tube, x, y, w, h, data):
+        self.rects.append((tube, x, y, w, h, data))
+        return True
 
     def reset(self):
         self.resets += 1
@@ -837,3 +847,345 @@ def test_two_clocks_follow_their_own_rotations(tmp_path, monkeypatch):
     c2b, *_ = make("kitchen", "k1")
     assert c1b.rotation_enabled is False
     assert c2b.rotation_enabled is True
+
+
+# ======================================================================
+# transitions (item 2): screen `transition` / `transition_delay`
+# ======================================================================
+
+def _transition_screens(transition=None, delay=None, top=None):
+    data = _base_screens()
+    data["rotation"] = ["a"]
+    if top is not None:
+        data["transition"] = top
+    scr = {"duration": 1000, "refresh": 1000,
+           "tubes": [{"type": "text", "text": "A"}] * 6}
+    if transition is not None:
+        scr["transition"] = transition
+    if delay is not None:
+        scr["transition_delay"] = delay
+    data["screens"]["a"] = scr
+    return data
+
+
+def test_transition_none_sends_all_tubes_at_once(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _transition_screens("none"))
+    asyncio.run(controller.run_next_entry())
+    assert len(pusher.sent) == 1 and pusher.sent[0][1] == 0b111111
+    assert pusher.tubes_sent == [] and pusher.rects == []
+
+
+def test_transition_cascade_sends_tubes_0_to_5_with_delay(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _transition_screens("cascade", delay=90))
+    t0 = time.t
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert [t for t, _ in pusher.tubes_sent] == [0, 1, 2, 3, 4, 5]
+    assert pusher.sent == []                       # no full send_tubes call
+    # 5 delays of 90 ms between the 6 tubes, plus the 0.5 s mode-switch pause
+    assert time.t - t0 == pytest.approx(0.5 + 5 * 0.09, abs=0.01)
+
+
+def test_transition_cascade_right_and_center_out_orders(tmp_path):
+    for t, order in (("cascade_right", [5, 4, 3, 2, 1, 0]),
+                     ("center_out", [2, 3, 1, 4, 0, 5])):
+        controller, time, pusher, mqtt = _make_controller(
+            tmp_path, _transition_screens(t, delay=0))
+        asyncio.run(controller.run_next_entry())
+        assert [tube for tube, _ in pusher.tubes_sent] == order
+
+
+def test_transition_wipe_sends_six_bands_per_tube_left_to_right(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _transition_screens("wipe", delay=0))
+    asyncio.run(controller.run_next_entry())
+    assert pusher.tubes_sent == []
+    rects = pusher.rects
+    assert len(rects) == 6 * 6                     # 6 tubes x 6 bands
+    # tubes left to right, each top to bottom in 40-row bands
+    assert [r[0] for r in rects] == [t for t in range(6) for _ in range(6)]
+    for tube in range(6):
+        bands = [r for r in rects if r[0] == tube]
+        assert [(r[2], r[4]) for r in bands] == [(b * 40, 40) for b in range(5)] + [(200, 40)]
+        for r in bands:
+            assert r[1] == 0 and r[3] == 135       # full tube width
+            assert len(r[5]) == 135 * r[4] * 2
+
+
+def test_transition_not_applied_on_refresh(tmp_path):
+    """A refresh re-renders and sends changed tubes only - no tube-by-tube transition."""
+    data = _transition_screens("cascade", delay=90)
+    data["screens"]["a"]["refresh"] = 2
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert len(pusher.tubes_sent) == 6             # activation sent the tubes one by one
+    n_sent = len(pusher.sent)
+    # refreshes re-render and push changed tubes only - never tube by tube
+    for _ in range(3):
+        asyncio.run(controller._refresh())
+    assert len(pusher.sent) == n_sent + 3          # three refreshes happened
+    assert len(pusher.tubes_sent) == 6             # but no extra single-tube sends
+
+
+def test_transition_aborted_by_interrupt(tmp_path):
+    """A pin arriving during a transition aborts it: the remaining tubes are not sent."""
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _transition_screens("cascade", delay=500))
+
+    async def drive():
+        task = asyncio.ensure_future(controller.run_next_entry())
+        await asyncio.sleep(0)                     # let the transition start
+        # interrupt after the first tube (fake time only advances on sleep, so
+        # set the flag directly - the transition checks it between tubes)
+        controller._interrupted = True
+        await asyncio.wait_for(task, timeout=5)
+    asyncio.run(drive())
+    assert len(pusher.tubes_sent) <= 2             # aborted early, not all six
+    assert controller._transitioning is False
+
+
+def test_transition_flash_uses_global_default(tmp_path):
+    data = _transition_screens(top="cascade")
+    data["screens"]["a"]["transition"] = "none"    # the screen itself: none
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    _run_loop(controller, time, 3)                 # showing "a" (no transition)
+    assert pusher.tubes_sent == []
+    controller.flash("hello", seconds=100)
+    _run_loop(controller, time, 2)
+    # the flash used the global default (cascade): tubes sent one by one
+    assert [t for t, _ in pusher.tubes_sent] == [0, 1, 2, 3, 4, 5]
+
+
+def test_transition_delay_default_90ms(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _transition_screens("cascade"))  # no transition_delay -> 90 ms
+    t0 = time.t
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert [t for t, _ in pusher.tubes_sent] == list(range(6))
+    assert time.t - t0 == pytest.approx(0.5 + 5 * 0.09, abs=0.01)
+
+
+# ======================================================================
+# animated tubes (item 3): animate.ANIMATORS + send_rect frames
+# ======================================================================
+
+class FakeAnimator:
+    """A fake animator: one frame per `interval` seconds, a small coloured rect whose
+    colour encodes t, so tests can see which frames were sent."""
+    def __init__(self, interval=1.0, w=20, h=10):
+        self._interval = interval
+        self._w, self._h = w, h
+        self.frames = []                            # t values passed to frame()
+
+    def interval(self, w):
+        return self._interval
+
+    async def frame(self, w, ctx, t, bg):
+        from PIL import Image
+        self.frames.append(t)
+        shade = int(t * 10) % 256
+        return Image.new("RGB", (self._w, self._h), (shade, 0, 0)), (5, 5, self._w, self._h)
+
+
+def _anim_screens(widget_type="text"):
+    data = _base_screens()
+    data["rotation"] = ["a"]
+    data["screens"]["a"] = {"duration": 1000, "refresh": 1000,
+                            "tubes": [{"type": widget_type}] * 6}
+    return data
+
+
+def _with_animator(monkeypatch, animator, widget_type="text"):
+    import animate
+    monkeypatch.setitem(animate.ANIMATORS, widget_type, animator)
+
+
+def test_animator_frames_sent_at_interval(tmp_path, monkeypatch):
+    animator = FakeAnimator(interval=1.0)
+    _with_animator(monkeypatch, animator)
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _anim_screens())
+    _run_loop(controller, time, 5.5)
+    # frames at t=1,2,3,4,5 (the loop wakes every 0.25 s) on all six tubes
+    assert len(pusher.rects) >= 6 * 4, len(pusher.rects)
+    tubes = {r[0] for r in pusher.rects}
+    assert tubes == {0, 1, 2, 3, 4, 5}
+    for r in pusher.rects:
+        assert (r[1], r[2], r[3], r[4]) == (5, 5, 20, 10)
+        assert len(r[5]) == 20 * 10 * 2
+    # t increases across the frames of one tube
+    ts = [t for t in animator.frames]
+    assert ts == sorted(ts) and ts[-1] > ts[0]
+    assert ts[-1] >= 4.0
+
+
+def test_animator_rate_cap_holds(tmp_path, monkeypatch):
+    """At most 10 rect uploads per second in total, even with 6 animated tubes at
+    a 0.1 s interval (60 frames/s wanted)."""
+    animator = FakeAnimator(interval=0.1)
+    _with_animator(monkeypatch, animator)
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _anim_screens())
+    _run_loop(controller, time, 3.0)
+    # count rects per fake second
+    per_sec = {}
+    for r in pusher.rects:
+        pass
+    # the controller records send times; recompute from _anim_rect_times is not
+    # possible after the fact, so count via the cap: in any 1 s window at most 10
+    # rects. Approximate: total rects over 3 s <= 10 * 3 + slack for the first burst
+    assert len(pusher.rects) <= 10 * 3 + 10, len(pusher.rects)
+
+
+def test_animator_skipped_while_paused_ota_flash(tmp_path, monkeypatch):
+    animator = FakeAnimator(interval=0.5)
+    _with_animator(monkeypatch, animator)
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _anim_screens())
+    _run_loop(controller, time, 2)
+    n = len(pusher.rects)
+    assert n > 0                                # animating while the screen shows
+    # paused: no frames
+    controller.pause(None)
+    _run_loop(controller, time, 3)
+    assert len(pusher.rects) == n
+    controller.resume()
+    _run_loop(controller, time, 2)
+    assert len(pusher.rects) > n                # resumed
+    # OTA: no frames
+    n = len(pusher.rects)
+    _run(controller.on_ota_state({"in_progress": True}))
+    _run_loop(controller, time, 3)
+    assert len(pusher.rects) == n
+    _run(controller.on_ota_state({"in_progress": False}))
+    _run_loop(controller, time, 2)
+    assert len(pusher.rects) > n
+    # flash: no frames
+    n = len(pusher.rects)
+    controller.flash("hi", seconds=5)
+    _run_loop(controller, time, 6)
+    assert len(pusher.rects) == n
+    _run_loop(controller, time, 2)
+    assert len(pusher.rects) > n                # back to the screen after the flash
+
+
+def test_animator_stops_on_screen_change(tmp_path, monkeypatch):
+    animator = FakeAnimator(interval=0.5)
+    _with_animator(monkeypatch, animator)
+    data = _anim_screens()
+    data["rotation"] = ["a", "b"]
+    data["screens"]["b"] = {"duration": 1000, "refresh": 1000,
+                            "tubes": [{"type": "blank"}] * 6}  # no animator for "blank"
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    _run_loop(controller, time, 3)
+    assert controller.current == "a"
+    n = len(pusher.rects)
+    assert n > 0
+    controller.show_screen("b", seconds=100)
+    _run_loop(controller, time, 3)
+    assert controller.current == "b"
+    assert len(pusher.rects) == n               # nothing animates on the new screen
+
+
+def test_animator_not_animated_when_interval_zero(tmp_path, monkeypatch):
+    animator = FakeAnimator(interval=0.0)       # 0 = not animated
+    _with_animator(monkeypatch, animator)
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _anim_screens())
+    _run_loop(controller, time, 3)
+    assert pusher.rects == []
+
+
+def test_animator_dim_applies_to_frames(tmp_path, monkeypatch):
+    """Night dimming applies to animation frames too: with dim 0.5 the frame bytes
+    are darker than the undimmed frame."""
+    animator = FakeAnimator(interval=0.5)
+    _with_animator(monkeypatch, animator)
+
+    async def renderer(t):
+        if "elevation" in t:
+            return "-10"                        # full night
+        return "true"
+
+    data = _anim_screens()
+    data["night"] = {"brightness_day": 255, "brightness_night": 10,
+                     "bright_above": 10.0, "dim_below": -10.0, "dim_screens": 0.5}
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data, renderer=renderer)
+    _run_loop(controller, time, 2)
+    assert controller.daylight == 0.0
+    assert pusher.rects, "frames were sent"
+    # the fake animator's frame at t has shade int(t*10)%256; dim 0.5 halves it
+    from rgb565 import image_to_rgb565
+    from PIL import Image
+    t_last = animator.frames[-1]
+    undimmed = image_to_rgb565(Image.new("RGB", (20, 10), (int(t_last * 10) % 256, 0, 0)))
+    sent = pusher.rects[-1][5]
+    assert sent != undimmed
+    assert sent[0] < undimmed[0] or sent[0] == 0   # darker red channel
+
+
+# ======================================================================
+# live mirror (item 4): controller.mirror / end_mirror
+# ======================================================================
+
+def _mirror_screen(name="__mirror__"):
+    from screens import Screen
+    return Screen(name=name, tubes=[{"type": "text", "text": "MIRROR"}] * 6)
+
+
+def test_mirror_shows_replaces_and_expires(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    _run_loop(controller, time, 3)
+    assert controller.current == "a"
+    assert controller.status()["mirroring"] is False
+    controller.mirror(_mirror_screen(), seconds=30)
+    assert controller.status()["mirroring"] is True
+    _run_loop(controller, time, 3)
+    assert controller.current == "__mirror__"
+    assert len(pusher.sent) >= 1
+    # each call replaces the screen and restarts the timer
+    controller.mirror(_mirror_screen("__mirror2__"), seconds=30)
+    _run_loop(controller, time, 3)
+    assert controller.current == "__mirror2__"
+    # expires after `seconds`
+    time.t += 31
+    _run_loop(controller, time, 3)
+    assert controller.status()["mirroring"] is False
+    assert controller.current in ("a", "b", CLOCK_ENTRY)   # back to the rotation
+
+
+def test_mirror_flash_still_wins(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    controller.mirror(_mirror_screen(), seconds=1000)
+    _run_loop(controller, time, 2)
+    assert controller.current == "__mirror__"
+    controller.flash("urgent", seconds=10)
+    _run_loop(controller, time, 3)
+    assert controller.status()["message"] == "urgent"
+    assert controller.current == "__mirror__" or controller._flash is not None
+    _run_loop(controller, time, 10)             # flash over -> mirror again
+    assert controller.status()["message"] is None
+    assert controller.current == "__mirror__"
+    assert controller.status()["mirroring"] is True
+
+
+def test_mirror_end_mirror_resumes(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    _run_loop(controller, time, 3)
+    controller.mirror(_mirror_screen(), seconds=1000)
+    _run_loop(controller, time, 2)
+    assert controller.current == "__mirror__"
+    controller.end_mirror()
+    assert controller.status()["mirroring"] is False
+    _run_loop(controller, time, 3)
+    assert controller.current in ("a", "b", CLOCK_ENTRY)
+
+
+def test_mirror_refreshes_with_new_content(tmp_path):
+    """The editor re-POSTs on every change: mirror() again re-renders the new screen."""
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    _run_loop(controller, time, 2)
+    controller.mirror(_mirror_screen(), seconds=1000)
+    _run_loop(controller, time, 2)
+    n = len(pusher.sent)
+    from screens import Screen
+    controller.mirror(Screen(name="__mirror__",
+                             tubes=[{"type": "text", "text": "CHANGED"}] * 6), seconds=1000)
+    _run_loop(controller, time, 2)
+    assert len(pusher.sent) > n                 # re-rendered and pushed

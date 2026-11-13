@@ -36,9 +36,11 @@ from PIL import Image
 
 import night as night_mod
 import render as render_mod
+import animate as animate_mod
 from clock import DISPLAY_CLOCK, DISPLAY_PANELS, ClockPusher
-from rgb565 import STRIP_H, STRIP_W, strip_to_tube_bytes
-from screens import CLOCK_ENTRY, Screen, ScreensConfig, ScreensError, load_screens
+from rgb565 import STRIP_H, STRIP_W, TUBE_COUNT, TUBE_H, TUBE_W, image_to_rgb565, strip_to_tube_bytes
+from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY, Screen,
+                     ScreensConfig, ScreensError, load_screens)
 from settings import ClockSettings
 
 _LOG = logging.getLogger(__name__)
@@ -48,6 +50,17 @@ NIGHT_TICK = 60.0          # seconds between night-mode (brightness) updates
 OTA_TIMEOUT = 600.0        # an OTA that never reports "done" is given up after 10 min
 PROBE_BACKOFF = (5.0, 10.0, 20.0, 40.0, 60.0)   # then 60 s forever
 SUN_ELEVATION_TEMPLATE = "{{ state_attr('sun.sun','elevation') }}"
+# tube order of each transition (tubes are sent one at a time, ~218 ms each)
+TRANSITION_ORDERS = {
+    "cascade": [0, 1, 2, 3, 4, 5],
+    "cascade_right": [5, 4, 3, 2, 1, 0],
+    "center_out": [2, 3, 1, 4, 0, 5],
+}
+WIPE_BANDS = 6             # a wipe draws each tube top to bottom in this many bands
+WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
+ANIM_MAX_RECTS_PER_SEC = 10         # cap on partial (send_rect) uploads per second
+MIRROR_DEFAULT_SECONDS = 120.0
+MIRROR_MAX_SECONDS = 600.0
 
 
 class Controller:
@@ -110,6 +123,18 @@ class Controller:
         self.live_min_interval = 1.0
         self._live_dirty = False
         self._last_live = -1e9
+
+        # live mirror (the editor's "Show on clock"): an in-memory screen shown like a
+        # pinned one, just below a flash; each mirror() call replaces it and restarts
+        self._mirror: tuple[Screen, float] | None = None   # (screen, expiry)
+
+        # per-screen-show state: resolved tube widgets (for animators) and the
+        # transition currently running (None when idle)
+        self._tubes: list[dict | None] | None = None       # resolved widgets of the showing screen
+        self._screen_since = 0.0                           # when the showing screen became active
+        self._anim_next: dict[int, float] = {}             # tube -> next frame due (monotonic)
+        self._anim_rect_times: list[float] = []            # recent send_rect times (rate cap)
+        self._transitioning = False
 
     @property
     def mqtt_id(self) -> str:
@@ -263,6 +288,30 @@ class Controller:
         _LOG.info("Flash ended - back to %s",
                   pin[0] if pin else ("pause" if self._paused else self._reshow))
 
+    # ------------------------------------------------------------------
+    # live mirror (the editor's "Show on clock"): an in-memory screen shown
+    # like a pinned one, with priority just below a flash
+    # ------------------------------------------------------------------
+
+    def mirror(self, screen: Screen, seconds: float = MIRROR_DEFAULT_SECONDS) -> None:
+        """Show this in-memory screen (not from the screens file) like a pinned
+        screen, with priority just below a flash. Each call replaces the screen and
+        restarts the timer. The normal refresh keeps it up to date."""
+        seconds = max(1.0, min(float(seconds), MIRROR_MAX_SECONDS))
+        self._mirror = (screen, self._now() + seconds)
+        self._interrupted = True
+        self._publish_state()
+        _LOG.info("Mirroring screen '%s' for %gs", screen.name, seconds)
+
+    def end_mirror(self) -> None:
+        """End the mirror; the rotation/pin/pause resumes."""
+        if self._mirror is None:
+            return
+        self._mirror = None
+        self._interrupted = True
+        self._publish_state()
+        _LOG.info("Mirror ended")
+
     def set_rotation_enabled(self, enabled: bool) -> None:
         self.rotation_enabled = enabled
         self._interrupted = True
@@ -373,6 +422,8 @@ class Controller:
             "ota_busy": self._ota_busy(),
             "brightness": self._brightness,
             "live": bool(self.live),
+            "mirroring": self._mirror is not None
+                          and self._now() < self._mirror[1],
         }
 
     async def render_preview(self, name: str) -> Image.Image:
@@ -530,8 +581,14 @@ class Controller:
         if self._mqtt is not None:
             await self._mqtt.publish_display(self.mqtt_id, mode)
 
-    async def _activate_screen(self, screen: Screen) -> None:
-        """Publish display=4 if needed, render, and send all six tubes."""
+    async def _activate_screen(self, screen: Screen, transition: str | None = None) -> None:
+        """Publish display=4 if needed, render, and send all six tubes.
+
+        `transition` (None = the screen's own resolved one) controls how the tubes
+        appear when the screen BECOMES active: "none" sends 0..5 straight away,
+        the others send tube by tube (or band by band for "wipe") with
+        transition_delay ms between steps. An interrupt (button, pin, flash, ...)
+        aborts a running transition."""
         if self._pusher is None or self._ota_busy():
             return      # during an OTA nothing is sent at all
         if not await self._ensure_reachable():
@@ -541,19 +598,143 @@ class Controller:
             await self._sleep(0.5)  # give the clock a moment to switch mode
         strip = self._dim(await render_mod.render_screen(screen, self._ctx))
         self.last_strip = strip
+        self._screen_since = self._now()
+        await self._cache_tubes(screen)
         tube_bytes = strip_to_tube_bytes(strip)
-        await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+        cfg = self._config
+        default_t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
+        t = transition if transition is not None else screen.resolved_transition(default_t)
+        delay_ms = screen.resolved_transition_delay(DEFAULT_TRANSITION_DELAY)
+        if t == "none" or self._interrupted or self._stop:
+            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+        else:
+            await self._run_transition(t, tube_bytes, delay_ms)
         self.current = screen.name
         self._publish_state()
+
+    async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int) -> None:
+        """Send the tubes one by one (or band by band for a wipe), aborting as soon
+        as an interrupt/stop/OTA/unreachable arrives. All sends still go through the
+        pusher's lock, so only one upload runs at a time."""
+        p = self._pusher
+        if p is None:
+            return
+        self._transitioning = True
+        try:
+            delay = delay_ms / 1000.0
+
+            def aborted() -> bool:
+                return (self._interrupted or self._stop or self._ota_busy()
+                        or not getattr(p, "reachable", True))
+
+            if t == "wipe":
+                for tube in range(TUBE_COUNT):          # tubes left to right
+                    if aborted():
+                        return
+                    data = tube_bytes[tube]
+                    for band in range(WIPE_BANDS):      # top to bottom in 6 bands
+                        if aborted():
+                            return
+                        y = band * WIPE_BAND_H
+                        h = WIPE_BAND_H if band < WIPE_BANDS - 1 else TUBE_H - y
+                        ok = await p.send_rect(tube, 0, y, TUBE_W, h,
+                                               data[y * TUBE_W * 2:(y + h) * TUBE_W * 2])
+                        if not ok:
+                            return
+                        if band < WIPE_BANDS - 1 and delay > 0 and not aborted():
+                            await self._sleep(delay)
+            else:
+                order = TRANSITION_ORDERS.get(t, TRANSITION_ORDERS["cascade"])
+                for i, tube in enumerate(order):
+                    if aborted():
+                        return
+                    ok = await p.send_tube(tube, tube_bytes[tube])
+                    if not ok:
+                        return
+                    if i < len(order) - 1 and delay > 0 and not aborted():
+                        await self._sleep(delay)
+        finally:
+            self._transitioning = False
+
+    async def _cache_tubes(self, screen: Screen) -> None:
+        """Re-resolve the showing screen's six tube widgets (templates resolved the
+        same way render_screen does it) so animators can look at their types."""
+        self._tubes = await render_mod.resolved_tubes(screen, self._ctx)
+        self._anim_next = {}
+        now = self._now()
+        for i, w in enumerate(self._tubes or []):
+            if w is None:
+                continue
+            animator = animate_mod.ANIMATORS.get(str(w.get("type")))
+            if animator is not None:
+                interval = animator.interval(w)
+                if interval and interval > 0:
+                    self._anim_next[i] = now + interval
+
+    def _anim_blocked(self) -> bool:
+        """Nothing animates while OTA is busy, the pusher is unreachable, paused,
+        quiet, a flash shows, or during a transition."""
+        return (self._ota_busy() or self._transitioning or self._flash is not None
+                or self._is_paused() or self._quiet_now()
+                or self._pusher is None or not getattr(self._pusher, "reachable", True))
+
+    async def _anim_tick(self) -> None:
+        """Render and send the next due frame of every animated tube (send_rect).
+        Frames are skipped (not queued) when late; at most ANIM_MAX_RECTS_PER_SEC
+        rect uploads per second in total."""
+        if self._anim_blocked() or not self._anim_next or self._tubes is None:
+            return
+        now = self._now()
+        # rate cap: drop rect timestamps older than 1 s
+        self._anim_rect_times = [t for t in self._anim_rect_times if now - t < 1.0]
+        if len(self._anim_rect_times) >= ANIM_MAX_RECTS_PER_SEC:
+            return
+        t = now - self._screen_since
+        for tube, due in sorted(self._anim_next.items()):
+            if now < due:
+                continue
+            w = self._tubes[tube] if tube < len(self._tubes) else None
+            if w is None:
+                continue
+            animator = animate_mod.ANIMATORS.get(str(w.get("type")))
+            if animator is None:
+                continue
+            interval = animator.interval(w)
+            if not interval or interval <= 0:
+                continue
+            # skip (not queue) when late: the next frame is due one interval after now
+            self._anim_next[tube] = now + interval
+            try:
+                result = await animator.frame(w, self._ctx, t, None)
+            except Exception as err:
+                _LOG.debug("Animator for tube %d failed: %s", tube, err)
+                continue
+            if result is None:
+                continue
+            img, (x, y, w_, h_) = result
+            if img is None or w_ <= 0 or h_ <= 0:
+                continue
+            if img.size != (w_, h_):
+                img = img.resize((w_, h_))
+            img = self._dim(img)
+            if len(self._anim_rect_times) >= ANIM_MAX_RECTS_PER_SEC:
+                break
+            ok = await self._pusher.send_rect(tube, x, y, w_, h_, image_to_rgb565(img))
+            self._anim_rect_times.append(self._now())
+            if not ok:
+                break
 
     async def _activate_clock(self) -> None:
         await self._publish_display(DISPLAY_CLOCK)
         self.current = CLOCK_ENTRY
         self.last_strip = None
+        self._tubes = None
+        self._anim_next = {}
         self._publish_state()
 
     async def _show_flash(self) -> None:
-        """Render and send the flash message once (all six tubes)."""
+        """Render and send the flash message once (all six tubes), with the global
+        default transition."""
         f = self._flash
         if f is None or self._pusher is None or self._ota_busy():
             return
@@ -565,7 +746,15 @@ class Controller:
         strip = self._dim(render_mod.render_message(f["message"], self._ctx,
                                                     icon=f.get("icon"), color=f.get("color")))
         self.last_strip = strip
-        await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=ALL_TUBES_MASK)
+        self._tubes = None          # a message has no per-tube widgets to animate
+        self._anim_next = {}
+        tube_bytes = strip_to_tube_bytes(strip)
+        cfg = self._config
+        t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
+        if t == "none" or self._interrupted or self._stop:
+            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+        else:
+            await self._run_transition(t, tube_bytes, DEFAULT_TRANSITION_DELAY)
         self._publish_state()
 
     async def _show_paused(self) -> None:
@@ -618,11 +807,12 @@ class Controller:
             return
         if not await self._ensure_reachable():
             return
-        screen = self._config.screens.get(self.current)
+        screen = self._mirror[0] if self._mirror_active() else self._config.screens.get(self.current)
         if screen is None:
             return
         strip = self._dim(await render_mod.render_screen(screen, self._ctx))
         self.last_strip = strip
+        await self._cache_tubes(screen)      # re-resolve the widgets after every full render
         needed = self.clock_state.get("panels_needed") or 0
         if isinstance(needed, str):
             try:
@@ -632,6 +822,9 @@ class Controller:
         sent = await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=needed)
         if sent:
             _LOG.debug("Refreshed screen '%s', sent tubes %s", self.current, sent)
+
+    def _mirror_active(self) -> bool:
+        return self._mirror is not None and self._now() < self._mirror[1]
 
     def _publish_state(self) -> None:
         if self._mqtt is None:
@@ -693,6 +886,7 @@ class Controller:
             if self._interrupted:
                 break
             await self._night_tick()      # brightness follows the sun while a screen shows
+            await self._anim_tick()       # animated tubes send their next frame when due
             next_refresh = await self._live_refresh(next_refresh, refresh)
             if self._now() >= next_refresh - 1e-9:
                 await self._refresh()
@@ -768,14 +962,23 @@ class Controller:
                     if self._now() >= self._flash["expiry"]:
                         self._end_flash()
                         continue
-                    await self._show_flash()
                     self._interrupted = False
+                    await self._show_flash()
                     while (self._flash is not None and not self._interrupted
                            and self._now() < self._flash["expiry"]):
                         await self._sleep(min(0.25, self._flash["expiry"] - self._now()))
                         await self._night_tick()   # brightness follows the sun during a flash
                     if self._flash is not None and self._now() >= self._flash["expiry"]:
                         self._end_flash()
+                    continue
+                if self._mirror is not None:
+                    screen, expiry = self._mirror
+                    if self._now() >= expiry:
+                        _LOG.info("Mirror expired - resuming")
+                        self._mirror = None
+                        continue
+                    self._interrupted = False
+                    await self._show_screen(screen, expiry - self._now())
                     continue
                 if self._pin is not None:
                     entry, expiry = self._pin
@@ -829,6 +1032,7 @@ class Controller:
                     while self._now() < end and not self._interrupted:
                         await self._sleep(min(0.25, end - self._now()))
                         await self._night_tick()   # brightness follows the sun with rotation off
+                        await self._anim_tick()    # animated tubes keep moving here too
                         if self._now() < end and not self._interrupted:
                             end = await self._live_refresh(end, refresh)
                     if not self._interrupted:

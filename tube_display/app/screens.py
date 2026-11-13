@@ -23,6 +23,9 @@ WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline
                 "progress", "analog_clock", "weather", "ticker", "custom", "blank")
 ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
+TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe")
+DEFAULT_TRANSITION = "none"
+DEFAULT_TRANSITION_DELAY = 90   # ms between tubes during a transition
 
 
 class ScreensError(Exception):
@@ -36,6 +39,8 @@ class Screen:
     refresh: int | None = None        # None -> default_refresh
     when: str | None = None           # HA template; skipped in rotation unless "true"
     background: str = "#000000"
+    transition: str | None = None     # None -> the top-level `transition` default
+    transition_delay: int | None = None   # ms between tubes, None -> 90
     tubes: list[dict] = field(default_factory=list)   # exactly 6 widgets
     strip: dict | None = None         # alternative: one 810x240 picture
 
@@ -44,6 +49,12 @@ class Screen:
 
     def resolved_refresh(self, default: int) -> int:
         return self.refresh if self.refresh is not None else default
+
+    def resolved_transition(self, default: str) -> str:
+        return self.transition if self.transition is not None else default
+
+    def resolved_transition_delay(self, default: int = DEFAULT_TRANSITION_DELAY) -> int:
+        return self.transition_delay if self.transition_delay is not None else default
 
 
 @dataclass
@@ -58,6 +69,7 @@ class ClockOverride:
 class ScreensConfig:
     rotation: list[str] = field(default_factory=list)
     clock_duration: int | None = None   # duration for the "clock" rotation entry
+    transition: str = DEFAULT_TRANSITION  # top-level default for screens' `transition`
     screens: dict[str, Screen] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)  # human-readable, per screen
     clock_overrides: dict[str, ClockOverride] = field(default_factory=dict)  # clock name -> override
@@ -175,6 +187,20 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
         _err(errors, name, f"'when' must be a template string, got {type(when).__name__}")
         return None
     screen.when = when
+    transition = raw.get("transition")
+    if transition is not None:
+        if transition not in TRANSITIONS:
+            # unknown value: report it, but the screen still loads (with "none")
+            _err(errors, name, f"unknown 'transition' {transition!r} (expected one of "
+                                f"{', '.join(TRANSITIONS)}) - using 'none'")
+        else:
+            screen.transition = transition
+    delay = raw.get("transition_delay")
+    if delay is not None:
+        if isinstance(delay, bool) or not isinstance(delay, (int, float)) or not 0 <= delay <= 1000:
+            _err(errors, name, f"'transition_delay' must be a number of ms in 0..1000, got {delay!r}")
+        else:
+            screen.transition_delay = int(delay)
     bg = raw.get("background", "#000000")
     if not isinstance(bg, str):
         _err(errors, name, f"'background' must be a string, got {type(bg).__name__}")
@@ -274,6 +300,14 @@ def parse_screens(data: object) -> ScreensConfig:
             raise ScreensError(f"'clock.duration' must be a positive number, got {dur!r}")
         cfg.clock_duration = int(dur) if dur is not None else None
 
+    transition = data.get("transition")
+    if transition is not None:
+        if transition not in TRANSITIONS:
+            cfg.errors.append(f"unknown top-level 'transition' {transition!r} (expected one of "
+                              f"{', '.join(TRANSITIONS)}) - using 'none'")
+        else:
+            cfg.transition = transition
+
     _parse_clock_overrides(data, cfg)
 
     night_cfg, night_errors = parse_night(data.get("night"))
@@ -324,6 +358,9 @@ def example_screens_yaml() -> str:
 # duration given under `clock:`.
 rotation: [claude, clock]
 clock: {duration: 60}
+# transition: cascade    # optional default for all screens: none | cascade |
+#                        # cascade_right | center_out | wipe (how a screen appears
+#                        # tube by tube when it becomes active; per screen too)
 
 screens:
   # A screen is either `tubes:` (exactly 6 widgets, left to right, one per
