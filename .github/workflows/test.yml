@@ -80,3 +80,30 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.app }}/app
         run: pytest -v
+
+  e2e:
+    name: Editor e2e tube_display
+    needs: select
+    if: contains(needs.select.outputs.test, 'tube_display')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        working-directory: tube_display/app
+        run: |
+          pip install -r requirements-dev.txt -r e2e/requirements-e2e.txt
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+      - name: Run editor e2e tests
+        working-directory: tube_display/app
+        run: python -m pytest e2e -v
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-screenshots
+          path: tube_display/app/e2e/artifacts/
+          if-no-files-found: ignore
