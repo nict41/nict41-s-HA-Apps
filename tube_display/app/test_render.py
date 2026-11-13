@@ -688,7 +688,7 @@ def test_ticker_band_and_cycle():
     w = {"type": "ticker", "text": long_text, "size": 28, "y": 120, "speed": 40}
     band, box = render.ticker_band(w, 0)
     assert band.size == (TUBE_W, 28 + 12)
-    assert box == (0, 120 - 20, TUBE_W, 120 + 20)
+    assert box == (0, 120 - 20, TUBE_W, 40)          # (x, y, width, height) like every animator rect
     cycle = render.ticker_cycle(w)
     assert cycle > 0
     # one full loop of the offset must give the same band again (seamless loop)
@@ -704,7 +704,7 @@ def test_ticker_band_and_cycle():
     _, box5 = render.ticker_band({"text": "hi", "size": 28, "y": 5}, 0)
     assert box5[1] == 0
     _, box6 = render.ticker_band({"text": "hi", "size": 28, "y": 239}, 0)
-    assert box6[3] == TUBE_H
+    assert box6[1] + box6[3] == TUBE_H
 
 
 def test_ticker_draw_static():
@@ -776,3 +776,26 @@ def test_resolved_tubes_strip_screen_is_six_nones():
     ctx = _ctx()
     screen = Screen(name="s", strip={"source": "camera:x"})
     assert asyncio.run(render.resolved_tubes(screen, ctx)) == [None] * 6
+
+
+
+def test_ticker_and_clock_animators_registered_and_sized():
+    """The animation engine uploads exactly the (x, y, w, h) an animator returns."""
+    import asyncio
+    import animate
+    from render import ticker_band
+    w = {"type": "ticker", "text": "A long headline that certainly does not fit one tube", "size": 28, "y": 120}
+    band, (x, y, bw, bh) = ticker_band(w, 0)
+    assert (bw, bh) == band.size == (135, 40)
+    assert y == 100
+    ticker = animate.ANIMATORS["ticker"]
+    assert ticker.interval(w) > 0
+    assert ticker.interval({"type": "ticker", "text": "hi"}) == 0
+    img, rect = asyncio.run(ticker.frame(w, None, 1.0, (10, 20, 30)))
+    assert img.size == (rect[2], rect[3])
+    assert img.getpixel((134, 0)) == (10, 20, 30)          # band takes the screen background
+    clk = animate.ANIMATORS["analog_clock"]
+    assert clk.interval({"type": "analog_clock"}) == 1.0
+    assert clk.interval({"type": "analog_clock", "seconds": False}) == 30.0
+    img, rect = asyncio.run(clk.frame({"type": "analog_clock"}, None, 0, None))
+    assert img.size == (135, 240) and rect == (0, 0, 135, 240)

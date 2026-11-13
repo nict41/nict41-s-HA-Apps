@@ -660,6 +660,10 @@ class Controller:
         """Re-resolve the showing screen's six tube widgets (templates resolved the
         same way render_screen does it) so animators can look at their types."""
         self._tubes = await render_mod.resolved_tubes(screen, self._ctx)
+        # the screen's background, for animators whose regions show it (e.g. the ticker band);
+        # a templated background is left to the animator's own default
+        self._anim_bg = render_mod.parse_color(screen.background, (0, 0, 0)) \
+            if isinstance(screen.background, str) and "{" not in screen.background else None
         self._anim_next = {}
         now = self._now()
         for i, w in enumerate(self._tubes or []):
@@ -705,7 +709,7 @@ class Controller:
             # skip (not queue) when late: the next frame is due one interval after now
             self._anim_next[tube] = now + interval
             try:
-                result = await animator.frame(w, self._ctx, t, None)
+                result = await animator.frame(w, self._ctx, t, getattr(self, "_anim_bg", None))
             except Exception as err:
                 _LOG.debug("Animator for tube %d failed: %s", tube, err)
                 continue

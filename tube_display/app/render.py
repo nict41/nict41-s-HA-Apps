@@ -1246,7 +1246,7 @@ def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, in
     font = fonts.load_font(size, bold=True)
     tw = _text_size(draw, text, font)[0] if text else 0
     if not text:
-        return band, (0, top, TUBE_W, top + band_h)
+        return band, (0, top, TUBE_W, band_h)
     if tw <= TUBE_W:
         _draw_centered(draw, TUBE_W / 2, band_h / 2, text, font, color)
     else:
@@ -1257,7 +1257,7 @@ def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, in
         while x < TUBE_W:
             draw.text((x, 0), text, font=font, fill=color)
             x += cycle
-    return band, (0, top, TUBE_W, top + band_h)
+    return band, (0, top, TUBE_W, band_h)
 
 
 def ticker_cycle(w: dict) -> float:
@@ -1451,3 +1451,51 @@ async def resolved_tubes(screen: Screen, ctx: RenderContext) -> list[dict | None
         return [None] * 6
     resolved = await resolve_templates(screen, ctx)
     return [_resolved_widget(w, resolved) for w in screen.tubes]
+
+
+# ---------------------------------------------------------------------------
+# animators (animate.py): the parts of a tube that move between full renders
+# ---------------------------------------------------------------------------
+
+import animate as _animate  # noqa: E402  (registers below; animate.py imports nothing from here)
+
+
+def _bg_hex(bg) -> str | None:
+    if bg is None:
+        return None
+    return "#%02X%02X%02X" % tuple(max(0, min(255, int(c))) for c in tuple(bg)[:3])
+
+
+class _TickerAnimator:
+    """Scrolls the ticker band about 10 times a second (a 135 x (size+12) band is ~11 KB,
+    ~53 ms to upload raw). Not animated when the text fits the tube."""
+
+    FRAME = 0.1
+
+    def interval(self, w: dict) -> float:
+        return self.FRAME if ticker_cycle(w) > 0 else 0.0
+
+    async def frame(self, w: dict, ctx, t: float, bg):
+        w = dict(w)
+        if w.get("background") is None and bg is not None:
+            w["background"] = _bg_hex(bg)
+        speed = _num(w.get("speed"), 40.0)
+        return ticker_band(w, t * speed)
+
+
+class _AnalogClockAnimator:
+    """Redraws the clock face once a second when it has a seconds hand, else twice a
+    minute (one full tube upload, ~218 ms raw)."""
+
+    def interval(self, w: dict) -> float:
+        seconds = w.get("seconds", True)
+        if isinstance(seconds, str):
+            seconds = seconds.strip().lower() not in ("false", "0", "no", "off")
+        return 1.0 if seconds else 30.0
+
+    async def frame(self, w: dict, ctx, t: float, bg):
+        return draw_analog_clock(w, ctx, bg if bg is not None else (0, 0, 0)), (0, 0, TUBE_W, TUBE_H)
+
+
+_animate.register("ticker", _TickerAnimator())
+_animate.register("analog_clock", _AnalogClockAnimator())
