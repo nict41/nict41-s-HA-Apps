@@ -18,7 +18,8 @@
 Entities per clock: select <prefix>_screen, switch <prefix>_rotation,
 sensor <prefix>_current, sensor <prefix>_last_error,
 binary_sensor <prefix>_clock_online, switch <prefix>_pause,
-text <prefix>_message, button <prefix>_next.
+text <prefix>_message, button <prefix>_next, and the diagnostic sensors
+sensor <prefix>_firmware, sensor <prefix>_last_draw, sensor <prefix>_data_rate.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 
 import aiomqtt
 
@@ -45,6 +47,7 @@ CLOCK = "Clock"
 
 MAX_ERROR_LEN = 250
 MAX_FLASH_SECONDS = 3600
+DIAG_INTERVAL = 30.0     # diagnostic sensors re-published at most this often (s)
 _COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 _DEVICE = {
@@ -76,6 +79,9 @@ class _ClockTopics:
         self.current_state = f"{BASE_TOPIC}/current/state" if first else f"{BASE_TOPIC}/{name}/current/state"
         self.last_error_state = f"{BASE_TOPIC}/last_error/state" if first else f"{BASE_TOPIC}/{name}/last_error/state"
         self.online_state = f"{BASE_TOPIC}/clock_online/state" if first else f"{BASE_TOPIC}/{name}/clock_online/state"
+        self.firmware_state = f"{BASE_TOPIC}/firmware/state" if first else f"{BASE_TOPIC}/{name}/firmware/state"
+        self.last_draw_state = f"{BASE_TOPIC}/last_draw/state" if first else f"{BASE_TOPIC}/{name}/last_draw/state"
+        self.data_rate_state = f"{BASE_TOPIC}/data_rate/state" if first else f"{BASE_TOPIC}/{name}/data_rate/state"
         self.pause_state = f"{BASE_TOPIC}/pause/state" if first else f"{BASE_TOPIC}/{name}/pause/state"
         self.pause_command = f"{BASE_TOPIC}/pause/set" if first else f"{BASE_TOPIC}/{name}/pause/set"
         self.message_state = f"{BASE_TOPIC}/message/state" if first else f"{BASE_TOPIC}/{name}/message/state"
@@ -134,6 +140,10 @@ class MqttBridge:
         self._client: aiomqtt.Client | None = None
         self._task: asyncio.Task | None = None
         self._stop = False
+        # diagnostic sensors (firmware / last draw / data rate) are re-published when
+        # their value changes or at most every DIAG_INTERVAL s
+        self._diag_last: dict[int, float] = {}
+        self._diag_values: dict[int, tuple] = {}
         # set after a successful connect, cleared on disconnect: lets other tasks
         # (e.g. the firmware publisher) wait for MQTT before their first publish
         self.connected = asyncio.Event()
@@ -367,7 +377,31 @@ class MqttBridge:
         await self._client.publish(t.online_state, "on" if status.get("online", True) else "off", retain=True)
         await self._client.publish(t.pause_state, "on" if status.get("paused") else "off", retain=True)
         await self._client.publish(t.message_state, status.get("message") or "", retain=True)
+        await self._publish_diagnostics(t, status)
         await self._client.publish(t.state_topic, json.dumps(status), retain=True)
+
+    async def _publish_diagnostics(self, t: _ClockTopics, status: dict) -> None:
+        """The three diagnostic sensors of one clock (firmware, last draw, data rate),
+        published when their value changed or at most every DIAG_INTERVAL s."""
+        if self._client is None:
+            return
+        ci = status.get("clock_info") if isinstance(status.get("clock_info"), dict) else {}
+        values = (
+            ("firmware", ci.get("firmware") if ci.get("firmware") is not None else "unknown"),
+            ("last_draw", ci.get("last_draw_ms") if ci.get("last_draw_ms") is not None else "unknown"),
+            ("data_rate", int(ci.get("bytes_per_minute") or 0)),
+        )
+        idx = id(t)
+        now = time.monotonic()
+        last = self._diag_last.get(idx, -1e9)
+        prev = self._diag_values.get(idx)
+        if prev is not None and prev == values and now - last < DIAG_INTERVAL:
+            return          # unchanged and recently published
+        self._diag_last[idx] = now
+        self._diag_values[idx] = values
+        topics = (t.firmware_state, t.last_draw_state, t.data_rate_state)
+        for topic, (_key, value) in zip(topics, values):
+            await self._client.publish(topic, str(value), retain=True)
 
     async def publish_discovery(self) -> None:
         """(Re)publish HA discovery configs for every clock; called again when screens change."""
@@ -464,6 +498,39 @@ class MqttBridge:
                 "availability_topic": t.availability_topic,
                 "device": t.device,
             }
+            firmware_cfg = {
+                "unique_id": f"{t.prefix}_firmware",
+                "object_id": f"{t.prefix}_firmware",
+                "name": "Firmware",
+                "entity_category": "diagnostic",
+                "icon": "mdi:package-variant",
+                "state_topic": t.firmware_state,
+                "availability_topic": t.availability_topic,
+                "device": t.device,
+            }
+            last_draw_cfg = {
+                "unique_id": f"{t.prefix}_last_draw",
+                "object_id": f"{t.prefix}_last_draw",
+                "name": "Last draw",
+                "entity_category": "diagnostic",
+                "icon": "mdi:timer-outline",
+                "unit_of_measurement": "ms",
+                "state_topic": t.last_draw_state,
+                "availability_topic": t.availability_topic,
+                "device": t.device,
+            }
+            data_rate_cfg = {
+                "unique_id": f"{t.prefix}_data_rate",
+                "object_id": f"{t.prefix}_data_rate",
+                "name": "Data rate",
+                "entity_category": "diagnostic",
+                "icon": "mdi:chart-line",
+                "unit_of_measurement": "B/min",
+                "state_class": "measurement",
+                "state_topic": t.data_rate_state,
+                "availability_topic": t.availability_topic,
+                "device": t.device,
+            }
             configs = [
                 ("select", f"{t.prefix}_screen", select_cfg),
                 ("switch", f"{t.prefix}_rotation", switch_cfg),
@@ -473,6 +540,9 @@ class MqttBridge:
                 ("switch", f"{t.prefix}_pause", pause_cfg),
                 ("text", f"{t.prefix}_message", message_cfg),
                 ("button", f"{t.prefix}_next", next_cfg),
+                ("sensor", f"{t.prefix}_firmware", firmware_cfg),
+                ("sensor", f"{t.prefix}_last_draw", last_draw_cfg),
+                ("sensor", f"{t.prefix}_data_rate", data_rate_cfg),
             ]
             for component, uid, cfg in configs:
                 await self._client.publish(

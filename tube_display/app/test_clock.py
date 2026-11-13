@@ -953,3 +953,76 @@ def test_busy_drawing_503_waits_as_told():
         assert slept == [0.24] and len(clock.batches) == 2
         assert pusher._backoff == 1.0                              # no backoff for a busy clock
     _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["wipe"]), check))
+
+
+# ======================================================================
+# encoded batch-record cache: an unchanged tube is not encoded again
+# ======================================================================
+
+@pytestmark_pil
+def test_batch_record_cache_hit_avoids_a_second_encode(monkeypatch):
+    """_batch_record results are cached: the same (tube, bytes, geometry, format, held)
+    is not QOI-encoded again; reset() clears the cache."""
+    session = FakeSession()
+    p = _pusher(session)
+    p.formats = {"rgb565", "qoi", "jpeg"}
+    p._caps_known = True
+    calls = []
+    real_encode = p._encode_body
+
+    def counting_encode(fmt, data, w, h):
+        calls.append(fmt)
+        return real_encode(fmt, data, w, h)
+
+    monkeypatch.setattr(p, "_encode_body", counting_encode)
+    rect = (0, 0, 0, TUBE_W, TUBE_H, _flat_payload(7))
+    r1 = p._batch_record(rect, "qoi", held=True)
+    r2 = p._batch_record(rect, "qoi", held=True)
+    assert r1 == r2 and calls == ["qoi"]              # encoded once, served from the cache
+    # a different tube with the same bytes is a different record (its own encode)
+    r3 = p._batch_record((1, 0, 0, TUBE_W, TUBE_H, _flat_payload(7)), "qoi", held=True)
+    assert r3 != r1 and calls == ["qoi", "qoi"]
+    assert r3[0] == 1 and r1[0] == 0
+    # a different geometry / format / held is a different record too
+    p._batch_record((0, 0, 40, TUBE_W, 40, _flat_payload(7)[:TUBE_W * 40 * 2]), "qoi", held=True)
+    p._batch_record(rect, "rgb565", held=True)
+    p._batch_record(rect, "qoi", held=False)
+    assert calls == ["qoi", "qoi", "qoi", "rgb565", "qoi"]
+    # the cache is small: at most BATCH_RECORD_CACHE_MAX entries
+    for i in range(40):
+        p._batch_record((0, 0, 0, TUBE_W, TUBE_H, _flat_payload(100 + i)), "qoi", held=True)
+    assert len(p._record_cache) <= 24
+    # reset() clears it: the same rect is encoded again
+    n = len(calls)
+    p.reset()
+    assert p._record_cache == {}
+    p.formats = {"rgb565", "qoi", "jpeg"}
+    p._caps_known = True
+    p._batch_record(rect, "qoi", held=True)
+    assert len(calls) == n + 1
+
+
+@pytestmark_pil
+def test_batch_upload_uses_the_record_cache(tmp_path):
+    """A full send of unchanged tubes through /panel/batch does not re-encode them
+    (the records come from the cache), and the clock still gets the right bodies."""
+    async def check(pusher, clock, monkeypatch):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        calls = []
+        real_encode = pusher._encode_body
+
+        def counting_encode(fmt, data, w, h):
+            calls.append(fmt)
+            return real_encode(fmt, data, w, h)
+
+        monkeypatch.setattr(pusher, "_encode_body", counting_encode)
+        # same tubes again, but forced through the batch path (send_rects of full tubes)
+        assert await pusher.send_rects([(t, 0, 0, TUBE_W, TUBE_H, payloads[t])
+                                        for t in range(TUBE_COUNT)])
+        assert calls == []                            # all six records came from the cache
+        recs = [r for b in clock.batches for r in b]
+        assert [r[0] for r in recs[-6:]] == list(range(TUBE_COUNT))
+        assert all(_decode_record(r) == payloads[r[0]] for r in recs[-6:])
+    import pytest as _pytest
+    _run(_with_fake_clock(FakeClock(batch=True), lambda p, c: check(p, c, _pytest.MonkeyPatch())))

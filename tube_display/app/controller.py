@@ -78,6 +78,22 @@ ANIM_MAX_RECTS_PER_SEC = 10         # cap on partial (send_rect) uploads per sec
 MIRROR_DEFAULT_SECONDS = 120.0
 MIRROR_MAX_SECONDS = 600.0
 GIF_CLEANUP_INTERVAL = 3600.0       # delete unused td-*.gif files from the clock at most hourly
+# Pre-render of the next screen (item: instant screen changes): the rotation loop renders
+# the next screen this many seconds before the current one ends, and _activate_screen uses
+# the result when it is at most this old and the config has not been reloaded since.
+PRERENDER_LEAD = 1.0
+PRERENDER_MAX_AGE = 2.0
+# notices in status()["clock_info"]["notices"] for features the screens use that this
+# clock's firmware cannot do
+NOTICE_GIF = "gif_needs_2_4"
+NOTICE_TRANSITIONS = "transitions_need_2_5"
+NOTICE_MESSAGES = {
+    NOTICE_GIF: "A screen uses a gif tube, but this clock's firmware cannot play GIFs "
+                "(needs HA Tubes 2.4 or newer) - the first frame is shown instead.",
+    NOTICE_TRANSITIONS: "A screen uses a transition, but this clock's firmware cannot play "
+                        "transitions itself (needs HA Tubes 2.5 or newer) - the app plays a "
+                        "simpler one instead.",
+}
 
 
 class Controller:
@@ -146,6 +162,9 @@ class Controller:
         # live mirror (the editor's "Show on clock"): an in-memory screen shown like a
         # pinned one, just below a flash; each mirror() call replaces it and restarts
         self._mirror: tuple[Screen, float] | None = None   # (screen, expiry)
+        # the mirror request's transition (name, delay ms, duration ms), played once when
+        # the mirrored screen is activated; later refreshes of the same mirror are plain
+        self._mirror_transition: tuple[str, int, int] | None = None
 
         # per-screen-show state: resolved tube widgets (for animators) and the
         # transition currently running (None when idle)
@@ -158,6 +177,11 @@ class Controller:
         self._gif_tubes: dict[int, dict] = {}
         self._gif_played = False                          # the showing screen's GIFs were started
         self._last_gif_cleanup = -1e9                      # monotonic time of the last td- cleanup
+
+        # pre-rendered next screen (see PRERENDER_LEAD): (name, config generation, monotonic
+        # time, tube_bytes, last_strip); used by _activate_screen when fresh and unchanged
+        self._prerender: tuple[str, int, float, list[bytes], Image.Image] | None = None
+        self._config_generation = 0                        # bumped on every config (re)load
 
     @property
     def mqtt_id(self) -> str:
@@ -192,6 +216,8 @@ class Controller:
             return self._config
         self._config = cfg
         self._ctx.default_font = cfg.font
+        self._config_generation += 1
+        self._prerender = None          # a reloaded config invalidates the pre-render
         self.config_errors = list(cfg.errors)
         self.config_warnings = list(cfg.warnings)
         for e in cfg.errors:
@@ -322,21 +348,39 @@ class Controller:
     # like a pinned one, with priority just below a flash
     # ------------------------------------------------------------------
 
-    def mirror(self, screen: Screen, seconds: float = MIRROR_DEFAULT_SECONDS) -> None:
+    def mirror(self, screen: Screen, seconds: float = MIRROR_DEFAULT_SECONDS,
+               play_transition: bool = False, transition: str | None = None,
+               transition_delay: int | None = None,
+               transition_duration: int | None = None) -> None:
         """Show this in-memory screen (not from the screens file) like a pinned
         screen, with priority just below a flash. Each call replaces the screen and
-        restarts the timer. The normal refresh keeps it up to date."""
+        restarts the timer. The normal refresh keeps it up to date.
+
+        With `play_transition`, the mirrored screen is shown ONCE with the given
+        transition (the editor's "Play on clock" button): the next activation of the
+        mirrored screen runs _run_transition with these settings instead of a plain
+        send; later mirror refreshes stay plain sends."""
         seconds = max(1.0, min(float(seconds), MIRROR_MAX_SECONDS))
         self._mirror = (screen, self._now() + seconds)
+        if play_transition and transition:
+            self._mirror_transition = (
+                str(transition),
+                int(transition_delay) if transition_delay is not None else DEFAULT_TRANSITION_DELAY,
+                int(transition_duration) if transition_duration is not None else DEFAULT_TRANSITION_DURATION,
+            )
+        else:
+            self._mirror_transition = None
         self._interrupted = True
         self._publish_state()
-        _LOG.info("Mirroring screen '%s' for %gs", screen.name, seconds)
+        _LOG.info("Mirroring screen '%s' for %gs%s", screen.name, seconds,
+                  f" with transition {transition}" if self._mirror_transition else "")
 
     def end_mirror(self) -> None:
         """End the mirror; the rotation/pin/pause resumes."""
         if self._mirror is None:
             return
         self._mirror = None
+        self._mirror_transition = None
         self._interrupted = True
         self._publish_state()
         _LOG.info("Mirror ended")
@@ -432,6 +476,62 @@ class Controller:
             await self._activate_screen(screen)
             return
 
+    def _clock_info(self) -> dict:
+        """What the clock itself reports (last GET /panel), for status() and the
+        editor's status panel / MQTT diagnostic sensors. Keys are None/empty when
+        unknown (no pusher, or the clock offline and its capabilities not learned)."""
+        p = self._pusher
+        info: dict = {
+            "firmware": None,
+            "upload_format": (p.upload_format if p is not None
+                              and hasattr(p, "upload_format") else "rgb565"),
+            "bytes_per_minute": (p.bytes_per_minute() if p is not None
+                                 and hasattr(p, "bytes_per_minute") else 0),
+            "batch_buffer": getattr(p, "batch_buffer", 0) if p is not None else 0,
+            "transitions": sorted(getattr(p, "transitions", set()) or set())
+            if p is not None else [],
+            "last_draw_ms": None,
+            "gif": bool(getattr(p, "gif_supported", False)) if p is not None else False,
+            "notices": [],
+        }
+        last = getattr(p, "last_status", None) if p is not None else None
+        if isinstance(last, dict):
+            fw = last.get("firmware")
+            info["firmware"] = str(fw) if fw is not None else None
+            draw = last.get("last_draw_ms")
+            if isinstance(draw, (int, float)) and not isinstance(draw, bool):
+                info["last_draw_ms"] = int(draw)
+        info["notices"] = self._notices()
+        return info
+
+    def _notices(self) -> list[dict]:
+        """Features the screens use that this clock's firmware cannot do, as
+        {code, message} - only when the clock is online and its capabilities are
+        known (an offline clock gets no notices)."""
+        if not self._online():
+            return []
+        p = self._pusher
+        if p is None or not getattr(p, "_caps_known", False):
+            return []          # capabilities not learned yet: don't warn blindly
+        cfg = self._config
+        if cfg is None:
+            return []
+        notices: list[dict] = []
+        if not getattr(p, "gif_supported", False):
+            for screen in cfg.screens.values():
+                if any(isinstance(w, dict) and w.get("type") == "gif" for w in screen.tubes):
+                    notices.append({"code": NOTICE_GIF, "message": NOTICE_MESSAGES[NOTICE_GIF]})
+                    break
+        if not getattr(p, "transitions", None):
+            default_t = cfg.transition
+            uses = default_t != "none" or any(
+                (s.transition if s.transition is not None else default_t) != "none"
+                for s in cfg.screens.values())
+            if uses:
+                notices.append({"code": NOTICE_TRANSITIONS,
+                                "message": NOTICE_MESSAGES[NOTICE_TRANSITIONS]})
+        return notices
+
     def status(self) -> dict:
         cfg = self._config
         paused = self._is_paused()
@@ -462,6 +562,7 @@ class Controller:
                               and hasattr(self._pusher, "upload_format") else "rgb565"),
             "bytes_per_minute": (self._pusher.bytes_per_minute() if self._pusher is not None
                                  and hasattr(self._pusher, "bytes_per_minute") else 0),
+            "clock_info": self._clock_info(),
         }
 
     async def render_preview(self, name: str) -> Image.Image:
@@ -619,6 +720,35 @@ class Controller:
         if self._mqtt is not None:
             await self._mqtt.publish_display(self.mqtt_id, mode)
 
+    def _take_prerender(self, screen: Screen) -> tuple[list[bytes], Image.Image] | None:
+        """The pre-rendered (tube_bytes, strip) for `screen` when it is usable: the same
+        screen, rendered at most PRERENDER_MAX_AGE s ago, with no config reload since.
+        Any mismatch discards it (a different screen, a stale render, a reloaded config,
+        a screen whose `when` skipped it)."""
+        pre = self._prerender
+        if pre is None:
+            return None
+        name, generation, at, tube_bytes, strip = pre
+        if name != screen.name or generation != self._config_generation:
+            self._prerender = None
+            return None
+        if self._now() - at > PRERENDER_MAX_AGE:
+            self._prerender = None
+            return None
+        self._prerender = None          # used once
+        return tube_bytes, strip
+
+    async def _prerender_screen(self, screen: Screen) -> None:
+        """Render `screen` in the background and keep the result for _activate_screen
+        (render + dim + strip_to_tube_bytes), keyed by name and config generation."""
+        try:
+            strip = self._dim(await render_mod.render_screen(screen, self._ctx))
+        except Exception as err:
+            _LOG.debug("Pre-render of '%s' failed: %s", screen.name, err)
+            return
+        self._prerender = (screen.name, self._config_generation, self._now(),
+                           strip_to_tube_bytes(strip), strip)
+
     async def _activate_screen(self, screen: Screen, transition: str | None = None) -> None:
         """Publish display=4 if needed, render, and send all six tubes.
 
@@ -626,7 +756,10 @@ class Controller:
         appear when the screen BECOMES active: "none" sends 0..5 straight away,
         the others send tube by tube (or band by band for "wipe") with
         transition_delay ms between steps. An interrupt (button, pin, flash, ...)
-        aborts a running transition."""
+        aborts a running transition.
+
+        When the rotation pre-rendered this very screen (same name, fresh, config not
+        reloaded since), that render is used instead of rendering again."""
         if self._pusher is None or self._ota_busy():
             return      # during an OTA nothing is sent at all
         if not await self._ensure_reachable():
@@ -634,16 +767,26 @@ class Controller:
         if self.clock_state.get("display") != DISPLAY_PANELS:
             await self._publish_display(DISPLAY_PANELS)
             await self._sleep(0.5)  # give the clock a moment to switch mode
-        strip = self._dim(await render_mod.render_screen(screen, self._ctx))
+        pre = self._take_prerender(screen)
+        if pre is not None:
+            tube_bytes, strip = pre
+        else:
+            strip = self._dim(await render_mod.render_screen(screen, self._ctx))
+            tube_bytes = strip_to_tube_bytes(strip)
         self.last_strip = strip
         self._screen_since = self._now()
         await self._cache_tubes(screen)
-        tube_bytes = strip_to_tube_bytes(strip)
         cfg = self._config
         default_t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
         t = transition if transition is not None else screen.resolved_transition(default_t)
         delay_ms = screen.resolved_transition_delay(DEFAULT_TRANSITION_DELAY)
         duration_ms = screen.resolved_transition_duration(DEFAULT_TRANSITION_DURATION)
+        # the editor's "Play on clock": the mirrored screen is shown once with the
+        # requested transition; later mirror refreshes are plain sends
+        if (self._mirror_active() and self._mirror is not None
+                and self._mirror[0] is screen and self._mirror_transition is not None):
+            t, delay_ms, duration_ms = self._mirror_transition
+            self._mirror_transition = None
         if t == "none" or self._interrupted or self._stop:
             await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK,
                                           photo_tubes=render_mod.photo_tubes(screen, self._tubes))
@@ -1075,6 +1218,25 @@ class Controller:
             return self._now() + refresh
         return next_refresh
 
+    async def _peek_next_screen(self) -> Screen | None:
+        """The screen the rotation will show next (skipping `when`-false entries and the
+        clock entry), without advancing the rotation index - used to pre-render it."""
+        cfg = self._config
+        rotation = self._rotation()
+        if cfg is None or not rotation:
+            return None
+        for k in range(1, len(rotation) + 1):
+            entry = rotation[(self._rotation_index + k) % len(rotation)]
+            if entry == CLOCK_ENTRY:
+                return None          # the clock entry is not a screen to pre-render
+            screen = cfg.screens.get(entry)
+            if screen is None:
+                continue
+            if not await render_mod.screen_when_true(screen, self._ctx):
+                continue
+            return screen
+        return None
+
     async def _show_screen(self, screen: Screen, duration: float) -> None:
         # Counted from the start, so the time spent switching the clock's mode and sending the
         # first picture is part of the screen's duration
@@ -1082,6 +1244,7 @@ class Controller:
         await self._activate_screen(screen)
         refresh = screen.resolved_refresh(self.settings.default_refresh)
         next_refresh = self._now() + refresh
+        prerendered = False
         while True:
             now = self._now()
             if now >= end or self._interrupted:
@@ -1099,6 +1262,13 @@ class Controller:
             if self._now() >= next_refresh - 1e-9:
                 await self._refresh()
                 next_refresh = self._now() + refresh
+            if not prerendered and end - self._now() <= PRERENDER_LEAD:
+                # the current screen is about to end: render the next one now, so its
+                # activation is instant (used only when it really is the next one)
+                prerendered = True
+                nxt = await self._peek_next_screen()
+                if nxt is not None and not self._interrupted and not self._stop:
+                    await self._prerender_screen(nxt)
 
     async def _show_clock(self, duration: float) -> None:
         await self._activate_clock()

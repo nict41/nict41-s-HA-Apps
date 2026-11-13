@@ -715,11 +715,13 @@ class MirrorController:
         self.name = name
         self.clock = FakeClock("clock-" + name + ".local")
         self.rotation_enabled = True
-        self.mirrors = []       # (screen, seconds)
+        self.mirrors = []       # (screen, seconds, play_transition, transition, delay, duration)
         self.ends = 0
 
-    def mirror(self, screen, seconds=120):
-        self.mirrors.append((screen, seconds))
+    def mirror(self, screen, seconds=120, play_transition=False, transition=None,
+               transition_delay=None, transition_duration=None):
+        self.mirrors.append((screen, seconds, play_transition, transition,
+                             transition_delay, transition_duration))
 
     def end_mirror(self):
         self.ends += 1
@@ -750,7 +752,7 @@ def test_api_mirror_post_shows_screen_on_default_clock(tmp_path):
             assert body["ok"] is True and body["clock"] == "main" and body["seconds"] == 120
             ctl = controllers["main"]
             assert len(ctl.mirrors) == 1
-            screen, seconds = ctl.mirrors[0]
+            screen, seconds = ctl.mirrors[0][:2]
             assert screen.name == "__mirror__" and seconds == 120.0
             assert screen.tubes[0]["text"] == "hi"
             # each call replaces the screen and restarts the timer
@@ -1342,3 +1344,91 @@ def test_rotation_falls_back_to_first_clock_and_handles_no_clock(tmp_path):
             assert (resp.status, await resp.json()) == (200, {"enabled": True, "no_clock": True})
 
     asyncio.run(check())
+
+
+# ----------------------------------------------------------------------
+# api/mirror with play_transition ("Play on clock" in the editor)
+# ----------------------------------------------------------------------
+
+def test_api_mirror_play_transition_reaches_the_controller(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN,
+                "play_transition": True,
+                "transition": "wipe",
+                "transition_delay": 120,
+                "transition_duration": 900,
+            })
+            assert resp.status == 200, await resp.text()
+            ctl = controllers["main"]
+            assert len(ctl.mirrors) == 1
+            screen, seconds, play, t, delay, duration = ctl.mirrors[0]
+            assert play is True and t == "wipe" and delay == 120 and duration == 900
+            assert screen.tubes[0]["text"] == "hi"
+            # a plain mirror POST (the editor's refreshes) sends no transition
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            assert resp.status == 200
+            assert ctl.mirrors[-1][2:] == (False, None, None, None)
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_play_transition_defaults_and_validation(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            # delay/duration optional: None -> the controller's defaults
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "cascade"})
+            assert resp.status == 200
+            assert controllers["main"].mirrors[-1][2:] == (True, "cascade", None, None)
+            # "none" is not a transition to play
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "none"})
+            assert resp.status == 400
+            # unknown transition
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "spin"})
+            assert resp.status == 400
+            # missing transition with play_transition
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True})
+            assert resp.status == 400
+            # out-of-range delay / duration
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "wipe",
+                "transition_delay": 1001})
+            assert resp.status == 400
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "wipe",
+                "transition_duration": 50})
+            assert resp.status == 400
+            # boundary values are fine
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "play_transition": True, "transition": "wipe",
+                "transition_delay": 0, "transition_duration": 5000})
+            assert resp.status == 200
+            assert controllers["main"].mirrors[-1][2:] == (True, "wipe", 0, 5000)
+            # without play_transition the transition fields are ignored
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "transition": "wipe"})
+            assert resp.status == 200
+            assert controllers["main"].mirrors[-1][2:] == (False, None, None, None)
+            # nothing invalid was mirrored
+            assert all(m[2] is False or m[3] in ("wipe", "cascade") for m in controllers["main"].mirrors)
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_play_transition_named_clock(tmp_path):
+    async def wrapper():
+        controllers = {"main": MirrorController("main"), "kitchen": MirrorController("kitchen")}
+        client, screens_file, controllers = _mirror_client(tmp_path, controllers)
+        async with client:
+            resp = await client.post("/api/mirror", json={
+                "screen": GOOD_SCREEN, "clock": "kitchen",
+                "play_transition": True, "transition": "center_out"})
+            assert resp.status == 200 and (await resp.json())["clock"] == "kitchen"
+            assert controllers["kitchen"].mirrors[-1][2:] == (True, "center_out", None, None)
+            assert not controllers["main"].mirrors
+    asyncio.run(wrapper())

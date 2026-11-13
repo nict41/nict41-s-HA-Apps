@@ -299,7 +299,15 @@ logs them once per load. At start it logs one line, e.g.
   choice.
 - The **Night mode** card writes the `night:` block (see [Night mode](#night-mode)).
 - The line at the top right shows what each clock is showing, whether it's
-  live, and its brightness.
+  live, and its brightness. Next to it, a diagnostics line shows each clock's
+  firmware, upload format, how long its last screen took to draw, how big a
+  screen it can hold and how much data the app sends it a minute; it turns
+  amber with a warning when a screen uses something the clock's firmware
+  can't do (see [Clock warnings](#clock-warnings-in-repairs)).
+- Next to a screen's **transition**, **delay** (for cascades) and **duration**
+  (for wipes) set `transition_delay` and `transition_duration`, and **Play on
+  clock** plays the screen as it is in the editor, saved or not, on the clock
+  with its transition, once, then the rotation carries on.
 
 ### How it works
 
@@ -512,7 +520,7 @@ still work during quiet hours. Use the **Night mode** card in the editor
 instead of writing this by hand. If you had an automation that set the clock's
 brightness, turn it off, or the two will fight.
 
-## Faster pictures and GIFs (HA Tubes 2.4)
+## Faster pictures, GIFs and transitions (HA Tubes 2.4 and 2.5)
 
 On a clock with HA Tubes 2.4 or later the app sends compressed pictures:
 lossless QOI for dashboards (a typical tube is 1 to 3 KB instead of 64.8 KB, so
@@ -525,6 +533,10 @@ HA Tubes 2.5 takes a whole screen in one request and draws it from memory: the
 six tubes change in about a quarter of a second, about twice as fast as with
 2.4, and transitions are played by the clock itself, so a wipe is smooth and
 takes exactly its `transition_duration`.
+
+The app also renders the next screen of the rotation a moment before it's
+due, so a screen change (or a press of the clock's button) starts straight
+away instead of after the render.
 
 For a clock used only through Home Assistant, set the `firmware_variant`
 option to `ipstube_ha`: the HA-only build leaves out the clock's own weather,
@@ -552,6 +564,20 @@ shows the release on its **Firmware** update entity in Home Assistant, and
 it from GitHub. While the clock installs, the app sends nothing (see
 [Pushing to the clock](#pushing-to-the-clock)).
 
+## Clock warnings in Repairs
+
+When a screen uses something the clock's firmware can't do, Home Assistant
+shows a warning in **Settings > System > Repairs** (through the Tube Display
+integration), until the clock is updated or the screen changed:
+
+- **"Clock … cannot play GIFs"**: a `gif` tube on firmware older than HA
+  Tubes 2.4, which shows only the first frame.
+- **"Clock … cannot play transitions itself"**: a transition on firmware older
+  than HA Tubes 2.5, where the app plays a simpler one.
+
+Update the clock from its **Firmware** update entity (see [Clock firmware
+updates](#clock-firmware-updates)). The integration checks every 10 minutes.
+
 ## MQTT entities (device "Tube Display")
 
 Published via MQTT discovery, using the broker credentials the Supervisor
@@ -572,6 +598,9 @@ injects (no passwords in the app):
 - **binary sensor "Tube Display Clock Online"** — the clock answers over MQTT
   and HTTP.
 - **sensor "Tube Display Last Error"** (diagnostic).
+- **sensors "Firmware", "Last draw" (ms) and "Data rate" (bytes a minute)**
+  (diagnostic): the clock's firmware version, how long its last screen took to
+  draw, and how much the app sends it.
 
 With several clocks every clock has its own set (see [Several clocks](#several-clocks)).
 All of them go unavailable when the app stops.

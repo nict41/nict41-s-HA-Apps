@@ -115,5 +115,15 @@
         }
       }
     }
+  },
+  "issues": {
+    "gif_needs_2_4": {
+      "title": "Clock {clock} cannot play GIFs",
+      "description": "A screen uses a gif tube, but this clock's firmware cannot play GIFs, so only the first frame is shown. Update the clock to HA Tubes 2.4 or newer (Settings > Devices > the clock's Firmware update)."
+    },
+    "transitions_need_2_5": {
+      "title": "Clock {clock} cannot play transitions itself",
+      "description": "A screen uses a transition, but this clock's firmware cannot play transitions itself, so the app plays a simpler one instead. Update the clock to HA Tubes 2.5 or newer (Settings > Devices > the clock's Firmware update)."
+    }
   }
 }

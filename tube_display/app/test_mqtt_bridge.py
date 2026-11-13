@@ -488,3 +488,98 @@ def test_connected_event_set_and_cleared():
     assert b.connected.is_set()
     _run(b.stop())
     assert not b.connected.is_set()
+
+
+# ----------------------------------------------------------------------
+# diagnostic sensors: firmware / last draw / data rate (entity_category diagnostic)
+# ----------------------------------------------------------------------
+
+def test_discovery_has_the_three_diagnostic_sensors():
+    ctl = FakeController("main", "abc")
+    b = _bridge(ctl)
+    _run(b.publish_discovery())
+    disc = {p[0]: json.loads(p[1]) for p in b._client.published if p[0].startswith("homeassistant/")}
+    fw = disc["homeassistant/sensor/tube_display_firmware/config"]
+    assert fw["unique_id"] == "tube_display_firmware"
+    assert fw["name"] == "Firmware"                      # no device prefix (has_entity_name style)
+    assert fw["entity_category"] == "diagnostic"
+    assert fw["state_topic"] == "tube_display/firmware/state"
+    assert fw["availability_topic"] == "tube_display/availability"
+    assert fw["device"] == LEGACY_DEVICE
+    draw = disc["homeassistant/sensor/tube_display_last_draw/config"]
+    assert draw["name"] == "Last draw"
+    assert draw["entity_category"] == "diagnostic"
+    assert draw["unit_of_measurement"] == "ms"
+    assert draw["state_topic"] == "tube_display/last_draw/state"
+    rate = disc["homeassistant/sensor/tube_display_data_rate/config"]
+    assert rate["name"] == "Data rate"
+    assert rate["entity_category"] == "diagnostic"
+    assert rate["unit_of_measurement"] == "B/min"
+    assert rate["state_class"] == "measurement"
+    assert rate["state_topic"] == "tube_display/data_rate/state"
+    # second clock: prefixed, same shape
+    c2 = FakeController("kitchen", "k1")
+    b2 = _bridge(ctl, c2)
+    _run(b2.publish_discovery())
+    disc2 = {p[0]: json.loads(p[1]) for p in b2._client.published if p[0].startswith("homeassistant/")}
+    fw2 = disc2["homeassistant/sensor/tube_display_kitchen_firmware/config"]
+    assert fw2["unique_id"] == "tube_display_kitchen_firmware"
+    assert fw2["name"] == "Firmware"
+    assert fw2["entity_category"] == "diagnostic"
+    assert fw2["state_topic"] == "tube_display/kitchen/firmware/state"
+    assert "homeassistant/sensor/tube_display_kitchen_last_draw/config" in disc2
+    assert "homeassistant/sensor/tube_display_kitchen_data_rate/config" in disc2
+    assert disc2["homeassistant/sensor/tube_display_kitchen_data_rate/config"]["state_class"] == "measurement"
+
+
+def test_publish_state_publishes_diagnostics_on_change_and_at_most_every_30s(monkeypatch):
+    ctl = FakeController("main", "abc")
+    ctl._status["clock_info"] = {"firmware": "2.5.0", "last_draw_ms": 211,
+                                 "bytes_per_minute": 12345, "notices": []}
+    b = _bridge(ctl)
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert pub["tube_display/firmware/state"] == "2.5.0"
+    assert pub["tube_display/last_draw/state"] == "211"
+    assert pub["tube_display/data_rate/state"] == "12345"
+    assert all(p[2] is True for p in b._client.published
+               if p[0].endswith(("firmware/state", "last_draw/state", "data_rate/state")))
+    # unchanged values within 30 s: not re-published
+    b._client.published.clear()
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert "tube_display/firmware/state" not in pub
+    # a changed value is published right away
+    ctl._status["clock_info"] = {"firmware": "2.5.1", "last_draw_ms": 90,
+                                 "bytes_per_minute": 0, "notices": []}
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert pub["tube_display/firmware/state"] == "2.5.1"
+    assert pub["tube_display/last_draw/state"] == "90"
+    # after 30 s the same values are published again (heartbeat)
+    import mqtt_bridge as mb
+    t = [mb.time.monotonic()]
+    monkeypatch.setattr(mb.time, "monotonic", lambda: t[0])
+    b._client.published.clear()
+    t[0] += 31.0
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert pub["tube_display/firmware/state"] == "2.5.1"
+    # unknown values still publish something sane
+    ctl._status["clock_info"] = {"firmware": None, "last_draw_ms": None, "bytes_per_minute": 0}
+    b._client.published.clear()
+    t[0] += 31.0
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert pub["tube_display/firmware/state"] == "unknown"
+    assert pub["tube_display/last_draw/state"] == "unknown"
+    assert pub["tube_display/data_rate/state"] == "0"
+
+
+def test_publish_state_without_clock_info_publishes_unknown_once():
+    ctl = FakeController("main", "abc")     # no clock_info key at all
+    b = _bridge(ctl)
+    _run(b.publish_state(ctl))
+    pub = {p[0]: p[1] for p in b._client.published}
+    assert pub["tube_display/firmware/state"] == "unknown"
+    assert pub["tube_display/data_rate/state"] == "0"

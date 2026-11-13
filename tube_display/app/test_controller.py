@@ -1508,3 +1508,306 @@ def test_transition_duration_validation(tmp_path):
     cfg = parse_screens_data({"rotation": ["a"], "screens": {"a": {
         "transition": "wipe_center", "transition_duration": 1200, "tubes": [{"type": "text", "text": "x"}] * 6}}})
     assert not cfg.errors and cfg.screens["a"].resolved_transition_duration() == 1200
+
+
+# ======================================================================
+# "Play on clock": api/mirror with play_transition runs the transition once
+# ======================================================================
+
+def test_mirror_play_transition_runs_the_transition_once(tmp_path):
+    """A mirror request with play_transition shows the mirrored screen through
+    _run_transition (FirmwareTransitionPusher records send_screen); a later plain
+    mirror refresh of the same screen is a plain send_tubes."""
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    p = _with_pusher(controller, FirmwareTransitionPusher())
+    controller.mirror(_mirror_screen(), seconds=1000, play_transition=True,
+                      transition="wipe", transition_delay=70, transition_duration=400)
+    assert controller._mirror_transition == ("wipe", 70, 400)
+    controller._interrupted = False       # run() clears it before showing an entry
+    asyncio.run(controller._activate_screen(controller._mirror[0]))
+    assert p.screens == [("wipe", [0, 1, 2, 3, 4, 5], 400, 70, set())]
+    assert p.sent == [] and p.tubes_sent == []      # not a plain send
+    assert controller._mirror_transition is None    # played once only
+    # a later mirror refresh (plain mirror() call) is a plain send
+    controller.mirror(_mirror_screen(), seconds=1000)
+    assert controller._mirror_transition is None
+    controller._interrupted = False
+    asyncio.run(controller._activate_screen(controller._mirror[0]))
+    assert len(p.screens) == 1                       # no second transition
+    assert len(p.sent) == 1 and p.sent[0][1] == 0b111111
+
+
+def test_mirror_play_transition_app_transition_when_clock_cant(tmp_path):
+    """Without firmware transitions the play_transition mirror still runs the app's
+    own transition (tubes one by one), not a plain send."""
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    controller.mirror(_mirror_screen(), seconds=1000, play_transition=True,
+                      transition="cascade", transition_delay=0)
+    controller._interrupted = False
+    asyncio.run(controller._activate_screen(controller._mirror[0]))
+    assert [t for t, _ in pusher.tubes_sent] == [0, 1, 2, 3, 4, 5]
+    assert pusher.sent == []
+
+
+def test_mirror_plain_refresh_stays_plain(tmp_path):
+    """A mirror request WITHOUT play_transition never runs a transition."""
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens())
+    p = _with_pusher(controller, FirmwareTransitionPusher())
+    controller.mirror(_mirror_screen(), seconds=1000)
+    asyncio.run(controller._activate_screen(controller._mirror[0]))
+    assert p.screens == [] and p.tubes_sent == []
+    assert len(p.sent) == 1
+
+
+# ======================================================================
+# pre-render of the next screen (instant screen changes)
+# ======================================================================
+
+def _prerender_screens():
+    data = _base_screens()
+    data["rotation"] = ["a", "b"]
+    data["screens"]["a"] = {"duration": 10, "refresh": 1000,
+                            "tubes": [{"type": "text", "text": "A"}] * 6}
+    data["screens"]["b"] = {"duration": 10, "refresh": 1000,
+                            "tubes": [{"type": "text", "text": "B"}] * 6}
+    return data
+
+
+def test_prerender_used_when_fresh_and_same_screen(tmp_path, monkeypatch):
+    """The rotation pre-renders the next screen 1 s before the current one ends, and
+    _activate_screen uses it instead of rendering again."""
+    import render as render_mod
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _prerender_screens())
+    renders = []
+    real_render = render_mod.render_screen
+
+    async def counting_render(screen, ctx):
+        renders.append(screen.name)
+        return await real_render(screen, ctx)
+
+    monkeypatch.setattr(render_mod, "render_screen", counting_render)
+    asyncio.run(controller.run_next_entry())          # shows "a" for 10 s
+    assert renders == ["a", "b"]                      # "a" rendered, "b" pre-rendered
+    assert controller._prerender is not None
+    assert controller._prerender[0] == "b"            # "b" was pre-rendered
+    renders.clear()
+    asyncio.run(controller.run_next_entry())          # shows "b" - uses the pre-render
+    assert "b" not in renders                         # "b" was NOT rendered again
+    assert controller.current == "b"
+    assert pusher.sent and pusher.sent[-1][1] == 0b111111
+
+
+def test_prerender_not_used_when_stale(tmp_path, monkeypatch):
+    import render as render_mod
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _prerender_screens())
+    renders = []
+    real_render = render_mod.render_screen
+
+    async def counting_render(screen, ctx):
+        renders.append(screen.name)
+        return await real_render(screen, ctx)
+
+    monkeypatch.setattr(render_mod, "render_screen", counting_render)
+    asyncio.run(controller.run_next_entry())          # "a", pre-renders "b"
+    assert renders == ["a", "b"]
+    time.t += 3.0                                     # the pre-render is now > 2 s old
+    renders.clear()
+    asyncio.run(controller._activate_screen(controller._config.screens["b"]))
+    assert renders == ["b"]                           # rendered again
+    assert controller._prerender is None
+
+
+def test_prerender_not_used_for_a_different_screen(tmp_path, monkeypatch):
+    import render as render_mod
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _prerender_screens())
+    renders = []
+    real_render = render_mod.render_screen
+
+    async def counting_render(screen, ctx):
+        renders.append(screen.name)
+        return await real_render(screen, ctx)
+
+    monkeypatch.setattr(render_mod, "render_screen", counting_render)
+    asyncio.run(controller.run_next_entry())          # "a", pre-renders "b"
+    assert renders == ["a", "b"]
+    renders.clear()
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert renders == ["a"]                           # "a" is rendered, not the "b" pre-render
+    assert controller._prerender is None              # discarded on the mismatch
+
+
+def test_prerender_not_used_after_config_reload(tmp_path, monkeypatch):
+    import os
+    import render as render_mod
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _prerender_screens())
+    renders = []
+    real_render = render_mod.render_screen
+
+    async def counting_render(screen, ctx):
+        renders.append(screen.name)
+        return await real_render(screen, ctx)
+
+    monkeypatch.setattr(render_mod, "render_screen", counting_render)
+    asyncio.run(controller.run_next_entry())          # "a", pre-renders "b"
+    assert controller._prerender is not None
+    # the screens file changes -> reload -> the pre-render is invalid
+    data = _prerender_screens()
+    data["screens"]["b"]["tubes"] = [{"type": "text", "text": "B2"}] * 6
+    _write_screens(tmp_path / "screens.yaml", data)
+    os.utime(tmp_path / "screens.yaml", (time.t + 5, time.t + 5))
+    asyncio.run(controller._reload_if_changed())
+    assert controller._prerender is None
+    renders.clear()
+    asyncio.run(controller._activate_screen(controller._config.screens["b"]))
+    assert renders == ["b"]
+
+
+def test_prerender_used_on_a_button_press(tmp_path, monkeypatch):
+    """next_screen() (the clock's button) also benefits when it lands on the
+    pre-rendered screen."""
+    import render as render_mod
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _prerender_screens())
+    renders = []
+    real_render = render_mod.render_screen
+
+    async def counting_render(screen, ctx):
+        renders.append(screen.name)
+        return await real_render(screen, ctx)
+
+    monkeypatch.setattr(render_mod, "render_screen", counting_render)
+    controller.rotation_enabled = False
+    controller.current = "a"
+    controller._rotation_index = 0                   # "a" is the current rotation entry
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    # pre-render "b" by hand, as the rotation loop would 1 s before "a" ends
+    asyncio.run(controller._prerender_screen(controller._config.screens["b"]))
+    renders.clear()
+    controller.next_screen()
+    asyncio.run(controller._manual_step())
+    assert controller.current == "b"
+    assert renders == []                              # the button press used the pre-render
+
+
+def test_prerender_skipped_when_next_is_the_clock_entry(tmp_path):
+    data = _prerender_screens()
+    data["rotation"] = ["a", "clock"]
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    asyncio.run(controller.run_next_entry())          # "a" for 10 s; next is "clock"
+    assert controller._prerender is None              # nothing pre-rendered
+
+
+# ======================================================================
+# status(): clock_info and notices
+# ======================================================================
+
+class CapsPusher(FakePusher):
+    """A FakePusher with learned capabilities and a last GET /panel answer, like a
+    real ClockPusher after talking to the clock."""
+
+    def __init__(self, panel, reachable=True):
+        super().__init__(reachable=reachable)
+        self.last_status = panel
+        self._caps_known = True
+        self.formats = {str(f) for f in panel.get("formats", [])}
+        self.gif_supported = bool(panel.get("gif"))
+        self.batch_supported = bool(panel.get("batch"))
+        self.batch_buffer = panel.get("batch_buffer", 0) or 0
+        self.transitions = {str(t) for t in panel.get("transitions", [])}
+        self.upload_format = "qoi" if "qoi" in self.formats else "rgb565"
+
+
+PANEL_23 = {"tubes": [0, 1, 2, 3, 4, 5], "needed": [], "width": 135, "height": 240}
+PANEL_24 = dict(PANEL_23, formats=["rgb565", "qoi", "jpeg"], gif=True, gif_free=1769472,
+                firmware="2.4.0")
+PANEL_25 = dict(PANEL_24, batch=True, batch_buffer=37516, transitions=["wipe", "cascade"],
+                drawing=False, last_draw_ms=211, firmware="2.5.0")
+
+
+def _caps_screens(gif=False, transition=None, top=None):
+    data = _base_screens()
+    data["rotation"] = ["a"]
+    scr = {"duration": 1000, "refresh": 1000,
+           "tubes": [{"type": "text", "text": "A"}] * 6}
+    if gif:
+        scr["tubes"][0] = {"type": "gif", "source": "file:anim.gif"}
+    if transition is not None:
+        scr["transition"] = transition
+    data["screens"]["a"] = scr
+    if top is not None:
+        data["transition"] = top
+    return data
+
+
+def test_status_clock_info_25(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(), pusher=CapsPusher(PANEL_25))
+    info = controller.status()["clock_info"]
+    assert info["firmware"] == "2.5.0"
+    assert info["upload_format"] == "qoi"
+    assert info["batch_buffer"] == 37516
+    assert info["transitions"] == ["cascade", "wipe"]
+    assert info["last_draw_ms"] == 211
+    assert info["gif"] is True
+    assert info["notices"] == []
+    assert info["bytes_per_minute"] == 0
+    # the old top-level keys are still there
+    status = controller.status()
+    assert status["upload_format"] == "qoi" and status["bytes_per_minute"] == 0
+
+
+def test_status_clock_info_24_no_transitions_capability(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(transition="wipe"), pusher=CapsPusher(PANEL_24))
+    info = controller.status()["clock_info"]
+    assert info["firmware"] == "2.4.0"
+    assert info["transitions"] == [] and info["batch_buffer"] == 0
+    assert info["last_draw_ms"] is None
+    codes = [n["code"] for n in info["notices"]]
+    assert codes == ["transitions_need_2_5"]         # wipe on 2.4 -> notice
+    assert all(n["message"] for n in info["notices"])
+
+
+def test_status_notice_gif_on_23(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(gif=True), pusher=CapsPusher(PANEL_23))
+    info = controller.status()["clock_info"]
+    assert info["firmware"] is None and info["gif"] is False
+    assert [n["code"] for n in info["notices"]] == ["gif_needs_2_4"]
+
+
+def test_status_notices_gif_and_transitions_on_23(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(gif=True, transition="cascade"), pusher=CapsPusher(PANEL_23))
+    codes = [n["code"] for n in controller.status()["clock_info"]["notices"]]
+    assert codes == ["gif_needs_2_4", "transitions_need_2_5"]
+
+
+def test_status_notice_transitions_from_top_level_default(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(top="cascade"), pusher=CapsPusher(PANEL_24))
+    codes = [n["code"] for n in controller.status()["clock_info"]["notices"]]
+    assert codes == ["transitions_need_2_5"]         # the top-level default counts too
+
+
+def test_status_no_notices_on_25_and_none_when_nothing_used(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(), pusher=CapsPusher(PANEL_25))
+    assert controller.status()["clock_info"]["notices"] == []
+    # 2.4 with no gif screen and no transition: no notices either
+    controller2, *_ = _make_controller(tmp_path, _caps_screens(), pusher=CapsPusher(PANEL_24))
+    assert controller2.status()["clock_info"]["notices"] == []
+
+
+def test_status_no_notices_when_offline_or_caps_unknown(tmp_path):
+    # offline clock: no notices even though a gif screen exists
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _caps_screens(gif=True, transition="wipe"),
+        pusher=CapsPusher(PANEL_23, reachable=False))
+    controller._clock_online = False
+    assert controller.status()["clock_info"]["notices"] == []
+    # online but capabilities never learned: no notices either
+    p = FakePusher()
+    controller2, *_ = _make_controller(tmp_path, _caps_screens(gif=True, transition="wipe"),
+                                      pusher=p)
+    assert controller2.status()["clock_info"]["notices"] == []
+    assert controller2.status()["clock_info"]["firmware"] is None

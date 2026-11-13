@@ -9,6 +9,13 @@ between "screens" you design in a visual editor in the Home Assistant sidebar
 The clock must run **[HA Tubes](https://github.com/nict41/HA-Tubes)**, the **panels firmware** (the firmware that accepts pushed
 pictures on `POST /panel`); the stock time/date/weather firmware does not.
 
+![An IPSTube clock showing a Claude usage dashboard made with Tube Display](docs/clock-claude.webp)
+
+![The same clock showing two GPUs' load and memory](docs/clock-gpu.webp)
+
+*Two screens on a real clock: Claude usage, and two GPUs' load and memory. Below, the editor they
+were made in.*
+
 ![The screen editor](docs/editor-desktop.webp)
 
 ## How it works

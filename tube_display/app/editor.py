@@ -26,7 +26,10 @@ everything at the root of its own site.
 - POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
 - GET  api/clocks            {"clocks": [{"name", "host", "online", "rotation_enabled"}]}
 - GET  api/status            {"clocks": {name: controller.status()}}
-- POST api/mirror            {"screen": {...}, "clock"?, "seconds"?} -> show on a clock
+- POST api/mirror            {"screen": {...}, "clock"?, "seconds"?, "play_transition"?,
+                              "transition"?, "transition_delay"?, "transition_duration"?}
+                              -> show on a clock (play_transition: show it once with that
+                              transition, like the editor's "Play on clock" button)
 - DELETE api/mirror          {"clock"?} -> stop mirroring (POST api/mirror/end is an alias)
 
 The 8098 API (api.py) is untouched and has no write routes.
@@ -1127,16 +1130,21 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     async def api_mirror(request: web.Request) -> web.Response:
         """POST {"screen": {...raw screen dict, as api/preview takes...}, "clock"?,
-        "seconds"?} -> parse the screen like api/preview (errors -> 400) and show it
-        on that clock (default the first; unknown -> 404) for `seconds`
-        (default 120, max 600). Each call replaces the mirrored screen."""
+        "seconds"?, "play_transition"?, "transition"?, "transition_delay"?,
+        "transition_duration"?} -> parse the screen like api/preview (errors -> 400)
+        and show it on that clock (default the first; unknown -> 404) for `seconds`
+        (default 120, max 600). Each call replaces the mirrored screen.
+
+        With "play_transition": true the mirrored screen is shown once with the given
+        transition (the editor's "Play on clock" button); later mirror refreshes are
+        plain sends. The transition fields are validated like a screen's own."""
         try:
             body = await request.json()
         except Exception:
             return web.json_response({"error": "body must be JSON"}, status=400)
 
         async def handler(req: web.Request) -> web.Response:
-            from screens import _parse_screen
+            from screens import _parse_screen, TRANSITIONS
 
             raw = body.get("screen") if isinstance(body, dict) else None
             if not isinstance(raw, dict):
@@ -1152,10 +1160,33 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
                 return web.json_response({"error": "'seconds' must be a positive number"}, status=400)
             seconds = min(float(seconds), 600.0)     # cap at 600 s
+            play_transition = bool(body.get("play_transition"))
+            transition = body.get("transition")
+            delay = body.get("transition_delay")
+            duration = body.get("transition_duration")
+            if play_transition:
+                if not isinstance(transition, str) or transition not in TRANSITIONS or transition == "none":
+                    return web.json_response(
+                        {"error": "'play_transition' needs a 'transition' other than none "
+                                  f"(one of {', '.join(t for t in TRANSITIONS if t != 'none')})"},
+                        status=400)
+                for key, val, lo, hi in (("transition_delay", delay, 0, 1000),
+                                         ("transition_duration", duration, 100, 5000)):
+                    if val is not None and (isinstance(val, bool)
+                                            or not isinstance(val, (int, float))
+                                            or not lo <= val <= hi):
+                        return web.json_response(
+                            {"error": f"'{key}' must be a number of ms in {lo}..{hi}, got {val!r}"},
+                            status=400)
             err, ctl = _mirror_controller(body)
             if err is not None:
                 return err
-            ctl.mirror(screen, seconds=seconds)
+            ctl.mirror(screen, seconds=seconds, play_transition=play_transition,
+                       transition=transition if play_transition else None,
+                       transition_delay=int(delay) if isinstance(delay, (int, float)) \
+                           and not isinstance(delay, bool) else None,
+                       transition_duration=int(duration) if isinstance(duration, (int, float)) \
+                           and not isinstance(duration, bool) else None)
             return web.json_response({"ok": True, "clock": getattr(ctl, "name", "main"),
                                       "seconds": seconds})
         return await ingress_only(request, handler)
