@@ -61,6 +61,12 @@ TRANSITION_ORDERS = {
 }
 WIPE_BANDS = 6             # a wipe draws each tube top to bottom in this many bands
 WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
+# A wipe runs in steps: each tube starts one step after the tube to its left, and every step
+# draws the next band of each tube that has started (one batch upload on HA Tubes 2.5+).
+# The pause between steps is this fraction of transition_delay, as a wipe has 11 steps where
+# the other transitions have 6.
+WIPE_STEPS = TUBE_COUNT + WIPE_BANDS - 1
+WIPE_DELAY_FACTOR = 1 / 3
 ANIM_MAX_RECTS_PER_SEC = 10         # cap on partial (send_rect) uploads per second
 MIRROR_DEFAULT_SECONDS = 120.0
 MIRROR_MAX_SECONDS = 600.0
@@ -642,7 +648,7 @@ class Controller:
 
     async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int,
                               photo_tubes: set[int] | None = None) -> None:
-        """Send the tubes one by one (or band by band for a wipe), aborting as soon
+        """Send the tubes one by one (or in staggered bands for a wipe), aborting as soon
         as an interrupt/stop/OTA/unreachable arrives. All sends still go through the
         pusher's lock, so only one upload runs at a time."""
         p = self._pusher
@@ -658,22 +664,24 @@ class Controller:
                         or not getattr(p, "reachable", True))
 
             if t == "wipe":
-                for tube in range(TUBE_COUNT):          # tubes left to right
+                step_delay = delay * WIPE_DELAY_FACTOR
+                for step in range(WIPE_STEPS):
                     if aborted():
                         return
-                    data = tube_bytes[tube]
-                    for band in range(WIPE_BANDS):      # top to bottom in 6 bands
-                        if aborted():
-                            return
+                    rects = []
+                    for tube in range(TUBE_COUNT):      # left to right, staggered by a step
+                        band = step - tube
+                        if not 0 <= band < WIPE_BANDS:
+                            continue
                         y = band * WIPE_BAND_H
                         h = WIPE_BAND_H if band < WIPE_BANDS - 1 else TUBE_H - y
-                        ok = await p.send_rect(tube, 0, y, TUBE_W, h,
-                                               data[y * TUBE_W * 2:(y + h) * TUBE_W * 2],
-                                               photo=tube in photo)
-                        if not ok:
-                            return
-                        if band < WIPE_BANDS - 1 and delay > 0 and not aborted():
-                            await self._sleep(delay)
+                        data = tube_bytes[tube]
+                        rects.append((tube, 0, y, TUBE_W, h,
+                                      data[y * TUBE_W * 2:(y + h) * TUBE_W * 2], tube in photo))
+                    if not await p.send_rects(rects):
+                        return
+                    if step < WIPE_STEPS - 1 and step_delay > 0 and not aborted():
+                        await self._sleep(step_delay)
             else:
                 order = TRANSITION_ORDERS.get(t, TRANSITION_ORDERS["cascade"])
                 for i, tube in enumerate(order):

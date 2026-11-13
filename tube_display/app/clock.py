@@ -23,6 +23,7 @@ import hashlib
 import io
 import logging
 import re
+import struct
 import time
 from typing import Awaitable, Callable
 
@@ -40,6 +41,9 @@ _LOG = logging.getLogger(__name__)
 DISPLAY_PANELS = 4
 DISPLAY_CLOCK = 0
 MAX_BACKOFF = 10.0
+# Largest POST /panel/batch body. The clock takes about 5.7 KB before it must answer, and decoding
+# QOI is slow per byte, so a bigger body stalls the upload for 0.4 s or more (measured on the clock).
+BATCH_MAX_BYTES = 3000
 JPEG_QUALITY = 88
 GIF_MAX_BYTES = 600 * 1024
 GIF_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,36}\.gif$")   # at most 40 chars incl. ".gif"
@@ -98,6 +102,7 @@ class ClockPusher:
         # capabilities learned from GET /panel (HA Tubes 2.4+ advertises them)
         self.formats: set[str] = set()       # e.g. {"rgb565", "qoi", "jpeg"}
         self.gif_supported = False           # "gif": true in GET /panel
+        self.batch_supported = False         # "batch": true (HA Tubes 2.5+: POST /panel/batch)
         self._caps_known = False
         self._qoi_ok = True                  # False after a 400 on a QOI upload
         self._qoi_400_logged = False
@@ -113,6 +118,7 @@ class ClockPusher:
         self._caps_known = False
         self.formats = set()
         self.gif_supported = False
+        self.batch_supported = False
         self._qoi_ok = True
         self._playing = set()
 
@@ -126,6 +132,7 @@ class ClockPusher:
             fmts = info.get("formats")
             self.formats = {str(f) for f in fmts} if isinstance(fmts, list) else set()
             self.gif_supported = bool(info.get("gif"))
+            self.batch_supported = bool(info.get("batch"))
             playing = info.get("playing")
             if isinstance(playing, list):
                 self._playing = {int(t) for t in playing
@@ -133,6 +140,7 @@ class ClockPusher:
         else:
             self.formats = set()
             self.gif_supported = False
+            self.batch_supported = False
 
     async def _fetch_caps(self) -> None:
         """GET /panel once and cache the clock's capabilities (formats, gif)."""
@@ -259,10 +267,23 @@ class ClockPusher:
         await self._ensure_caps()
         todo = self.tubes_to_send(tube_bytes, needed_mask)
         photo = photo_tubes or ()
+        todo = [i for i in todo if not (i in self._playing and not (needed_mask & (1 << i)))]
         sent: list[int] = []
+        batched = [i for i in todo if i not in photo]
+        if self.batch_supported and len(batched) > 1:
+            # one request for all of them (HA Tubes 2.5+); photo tubes may go as JPEG, on their own
+            ok, connection_lost = await self._batch_upload(
+                [(i, 0, 0, TUBE_W, TUBE_H, tube_bytes[i]) for i in batched])
+            if ok:
+                sent.extend(batched)
+                todo = [i for i in todo if i in photo]
+            elif connection_lost:
+                self.reachable = False
+                _LOG.warning("Clock unreachable while sending %d tube(s) - skipping the rest of this send",
+                             len(batched))
+                return sent
+            # any other failure: try the tubes one by one below
         for i in todo:
-            if i in self._playing and not (needed_mask & (1 << i)):
-                continue
             ok, connection_lost = await self._send_one(i, tube_bytes[i], photo=i in photo)
             if ok:
                 sent.append(i)
@@ -315,6 +336,15 @@ class ClockPusher:
             self.reachable = False
         if not ok:
             return False
+        self._record_rect(tube, x, y, w, h, data)
+        return True
+
+    def _record_rect(self, tube: int, x: int, y: int, w: int, h: int, data: bytes) -> None:
+        """Note that a rectangle of a tube now shows `data` (for change detection)."""
+        if x == 0 and y == 0 and w == TUBE_W and h == TUBE_H:
+            self._last_bytes[tube] = data
+            self._last_hash[tube] = self._hash(data)
+            return
         last = self._last_bytes[tube]
         if last is None or len(last) != TUBE_W * TUBE_H * 2:
             # the tube's full picture is unknown: a later full refresh must compare
@@ -328,7 +358,143 @@ class ClockPusher:
                 patched[off:off + w * 2] = data[row * w * 2:(row + 1) * w * 2]
             self._last_bytes[tube] = bytes(patched)
             self._last_hash[tube] = self._hash(self._last_bytes[tube])
+
+    async def send_rects(self, rects) -> bool:
+        """Upload several rectangles: (tube, x, y, w, h, data[, photo]) each, `data` being
+        w*h*2 RGB565 bytes. On HA Tubes 2.5+ the non-photo ones go in one POST /panel/batch
+        (much less per-request overhead), else, and for photo rects (which may go as JPEG),
+        one send_rect each. Returns True when all of them were drawn."""
+        items = []
+        for r in rects:
+            tube, x, y, w, h, data = r[:6]
+            if not (0 <= tube < TUBE_COUNT):
+                raise ValueError(f"tube must be 0..{TUBE_COUNT - 1}, got {tube}")
+            if not (0 <= x and 0 <= y and x + w <= TUBE_W and y + h <= TUBE_H and w > 0 and h > 0):
+                raise ValueError(f"rect ({x},{y},{w},{h}) outside the {TUBE_W}x{TUBE_H} tube")
+            if len(data) != w * h * 2:
+                raise ValueError(f"rect body must be {w * h * 2} bytes (w*h*2), got {len(data)}")
+            items.append((tube, x, y, w, h, data, bool(r[6]) if len(r) > 6 else False))
+        await self._ensure_caps()
+        batched = [i[:6] for i in items if not i[6]]
+        single = items if not (self.batch_supported and len(batched) > 1) else [i for i in items if i[6]]
+        if single is not items:
+            ok, connection_lost = await self._batch_upload(batched)
+            if connection_lost:
+                self.reachable = False
+                return False
+            if not ok:
+                single = items      # any other failure: try them one by one
+        for tube, x, y, w, h, data, photo in single:
+            if not await self.send_rect(tube, x, y, w, h, data, photo=photo):
+                return False
         return True
+
+    def _batch_record(self, rect, fmt: str) -> bytes:
+        """One POST /panel/batch record: a 14-byte little-endian header (tube, format
+        0=rgb565/1=qoi, x, y, w, h, length) and then the picture."""
+        tube, x, y, w, h, data = rect
+        pic, use_fmt = self._encode_body(fmt, data, w, h)
+        return struct.pack("<BBHHHHI", tube, 1 if use_fmt == "qoi" else 0, x, y, w, h, len(pic)) + pic
+
+    @staticmethod
+    def _chunk_ends(records: list[bytes], start: int = 0) -> int:
+        """Index after the last record that fits a body of at most BATCH_MAX_BYTES
+        starting at `start` (always at least one record)."""
+        end, size = start, 0
+        while end < len(records) and (end == start or size + len(records[end]) <= BATCH_MAX_BYTES):
+            size += len(records[end])
+            end += 1
+        return end
+
+    def _batch_chunks(self, rects, fmt: str) -> list[tuple[list, bytes]]:
+        """The rects encoded and packed into bodies of at most BATCH_MAX_BYTES (a rect
+        bigger than that goes in a body of its own). Returns [(rects, body)]."""
+        records = [self._batch_record(r, fmt) for r in rects]
+        chunks, i = [], 0
+        while i < len(records):
+            j = self._chunk_ends(records, i)
+            chunks.append((list(rects[i:j]), b"".join(records[i:j])))
+            i = j
+        return chunks
+
+    async def _batch_upload(self, rects) -> tuple[bool, bool]:
+        """Send (tube, x, y, w, h, data) rects with POST /panel/batch, in bodies of at most
+        BATCH_MAX_BYTES, each picture encoded once. Returns (ok, connection_lost); rects
+        of bodies that went through are recorded even when a later one fails."""
+        rects = list(rects)
+        fmt = self.upload_format
+        records = [self._batch_record(r, fmt) for r in rects]
+        i = 0
+        while i < len(rects):
+            if self.upload_format != fmt:       # a QOI 400 switched the rest to raw
+                fmt = self.upload_format
+                records[i:] = [self._batch_record(r, fmt) for r in rects[i:]]
+            j = self._chunk_ends(records, i)
+            ok, connection_lost = await self._post_batch(rects[i:j], b"".join(records[i:j]))
+            if not ok:
+                return False, connection_lost
+            i = j
+        return True, False
+
+    async def _post_batch(self, rects, body: bytes) -> tuple[bool, bool]:
+        """One POST /panel/batch, with the same retry / 409 / 503 / QOI-400 handling as
+        single uploads. Returns (ok, connection_lost)."""
+        tubes = sorted({r[0] for r in rects})
+        fmt = self.upload_format
+        async with self._lock:
+            for attempt in range(6):
+                try:
+                    async with self._session.post(
+                        f"{self._base}/panel/batch", data=body, auth=self._auth,
+                        headers={"Content-Type": "application/octet-stream"},
+                        timeout=aiohttp.ClientTimeout(total=30),
+                    ) as resp:
+                        self._sent_log.append((time.monotonic(), len(body)))
+                        if resp.status == 200:
+                            self._backoff = 1.0
+                            self.last_error = None
+                            self.reachable = True
+                            for r in rects:
+                                self._record_rect(*r)
+                                self._playing.discard(r[0])  # an upload stops the tube's GIF
+                            return True, False
+                        if resp.status == 409:
+                            _LOG.warning("Clock returned 409 (not a panel tube) on a batch to tubes %s - "
+                                         "re-publishing display=4", tubes)
+                            if self._publish_display is not None:
+                                try:
+                                    await self._publish_display(DISPLAY_PANELS)
+                                except Exception as err:
+                                    _LOG.warning("Could not publish display=4: %s", err)
+                            await self._sleep(1.0)
+                            continue
+                        if resp.status == 503:
+                            _LOG.debug("Clock busy (503) on a batch to tubes %s - retrying", tubes)
+                            await self._sleep(self._backoff)
+                            self._backoff = min(self._backoff * 2, MAX_BACKOFF)
+                            continue
+                        if resp.status == 400 and fmt == "qoi":
+                            if not self._qoi_400_logged:
+                                self._qoi_400_logged = True
+                                _LOG.warning("Clock answered 400 to a QOI batch (tubes %s) - "
+                                             "using raw RGB565 until the next reset()", tubes)
+                            self._qoi_ok = False
+                            fmt = "rgb565"
+                            # raw bodies don't stall the clock, so this one isn't split
+                            body = b"".join(b for _, b in self._batch_chunks(rects, fmt))
+                            continue
+                        body_text = await resp.text()
+                        self.last_error = f"tubes {tubes}: HTTP {resp.status}: {body_text[:120]}"
+                        _LOG.warning("POST /panel/batch tubes %s -> %d %s", tubes, resp.status, body_text[:120])
+                        return False, False
+                except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+                    self.last_error = f"tubes {tubes}: {err}"
+                    _LOG.debug("POST /panel/batch tubes %s failed: %s - retrying", tubes, err)
+                    await self._sleep(self._backoff)
+                    self._backoff = min(self._backoff * 2, MAX_BACKOFF)
+            self.last_error = f"tubes {tubes}: giving up after retries ({self.last_error})"
+            _LOG.error("Could not send tubes %s to the clock: %s", tubes, self.last_error)
+            return False, True
 
     async def _upload(self, params: dict, data: bytes, w: int, h: int,
                       photo: bool = False) -> tuple[bool, bool]:

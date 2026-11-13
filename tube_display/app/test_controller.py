@@ -39,6 +39,7 @@ class FakePusher:
     def __init__(self, reachable=True):
         self.sent = []          # (tube_bytes, needed_mask)
         self.rects = []         # (tube, x, y, w, h, data) partial uploads
+        self.rect_batches = []  # tubes of each send_rects call
         self.tubes_sent = []    # (tube, data) unconditional single-tube uploads
         self.photo_tubes = []   # photo_tubes kwarg of each send_tubes call
         self.last_error = None
@@ -65,6 +66,12 @@ class FakePusher:
 
     async def send_rect(self, tube, x, y, w, h, data, photo=False):
         self.rects.append((tube, x, y, w, h, data))
+        return True
+
+    async def send_rects(self, rects):
+        self.rect_batches.append([r[0] for r in rects])
+        for r in rects:
+            self.rects.append(tuple(r[:6]))
         return True
 
     def reset(self):
@@ -944,21 +951,30 @@ def test_transition_runs_on_a_button_press_in_button_only_mode(tmp_path):
     assert pusher.sent == []                       # not one plain send of all six
 
 
-def test_transition_wipe_sends_six_bands_per_tube_left_to_right(tmp_path):
+def test_transition_wipe_sends_six_bands_per_tube_staggered_left_to_right(tmp_path):
     controller, time, pusher, mqtt = _make_controller(
         tmp_path, _transition_screens("wipe", delay=0))
     asyncio.run(controller.run_next_entry())
     assert pusher.tubes_sent == []
     rects = pusher.rects
     assert len(rects) == 6 * 6                     # 6 tubes x 6 bands
-    # tubes left to right, each top to bottom in 40-row bands
-    assert [r[0] for r in rects] == [t for t in range(6) for _ in range(6)]
+    # 11 steps: each tube starts a step after the one to its left
+    assert pusher.rect_batches == [list(range(max(0, s - 5), min(s, 5) + 1)) for s in range(11)]
     for tube in range(6):
         bands = [r for r in rects if r[0] == tube]
         assert [(r[2], r[4]) for r in bands] == [(b * 40, 40) for b in range(5)] + [(200, 40)]
         for r in bands:
             assert r[1] == 0 and r[3] == 135       # full tube width
             assert len(r[5]) == 135 * r[4] * 2
+
+
+def test_transition_wipe_pauses_a_third_of_the_delay_between_steps(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _transition_screens("wipe", delay=90))
+    t0 = time.t
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    # 10 pauses of 30 ms between the 11 steps, plus the 0.5 s mode-switch pause
+    assert time.t - t0 == pytest.approx(0.5 + 10 * 0.03, abs=0.01)
 
 
 def test_transition_not_applied_on_refresh(tmp_path):

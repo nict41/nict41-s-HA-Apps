@@ -55,7 +55,7 @@ the MQTT entities and an example automation.
 ## Requirements
 
 - An IPSTube (or EleksTube-style) clock on the network running
-  [HA Tubes](https://github.com/nict41/HA-Tubes) 2.3.0 or later (2.4.0 for faster pictures and GIFs), and its MQTT id
+  [HA Tubes](https://github.com/nict41/HA-Tubes) 2.3.0 or later (2.4.0 for faster pictures and GIFs, 2.5.0 for faster wipes), and its MQTT id
   (shown on the clock's Info and MQTT pages).
 - The MQTT broker service enabled in Home Assistant (the app uses the
   broker the Supervisor injects; no credentials are stored in the app).

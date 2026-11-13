@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- **Faster wipe:** the tubes now wipe down together, each starting a moment after the one to its left, with shorter pauses: about 0.9 s instead of about 4 s.
+- On HA Tubes 2.5 the app sends several pictures in one request (the clock's new batch upload), which makes small updates such as a wipe's bands much quicker. Older firmware works as before.
+
 ## 1.0.1
 
 - Transitions now play when the clock's button changes the screen in button-only mode (*Cycle automatically* off); the button press used to make the new screen skip its transition.

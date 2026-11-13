@@ -108,9 +108,10 @@ weight where it has one.
 **Transitions:** `transition: none|cascade|cascade_right|center_out|wipe` on a
 screen, or at the top level as the default, changes how a screen appears:
 `cascade` changes the tubes one after another from the left (`cascade_right`
-from the right, `center_out` from the middle), `wipe` draws each tube from the
-top down. `transition_delay` is the pause between tubes in ms (90). Only when a
-screen appears, never on a refresh.
+from the right, `center_out` from the middle), `wipe` draws the tubes from the
+top down, each starting a moment after the one to its left. `transition_delay`
+is the pause between tubes in ms (90); a wipe pauses a third of it between its
+steps. Only when a screen appears, never on a refresh.
 
 **Free design across all six tubes:** instead of `tubes` (or `strip`), a screen
 can have a `canvas` with `items` placed anywhere on the 810x240 picture, the same
@@ -516,6 +517,10 @@ all six change in about half a second instead of 1.3 s) and JPEG for photos
 and camera pictures when that's smaller. Older firmware still gets raw pixels.
 `GET /api/status` shows the `upload_format` per clock. The `gif` widget needs
 2.4 too.
+
+HA Tubes 2.5 also takes several pictures in one request, which saves most of
+the cost of each request for small pictures: a `wipe` takes about 0.9 s instead
+of 1.5 s.
 
 For a clock used only through Home Assistant, set the `firmware_variant`
 option to `ipstube_ha`: the HA-only build leaves out the clock's own weather,

@@ -11,6 +11,7 @@ import asyncio
 import io
 import os
 
+import pytest
 import yaml
 from aiohttp.test_utils import TestClient, TestServer
 
