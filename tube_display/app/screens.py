@@ -7,6 +7,7 @@ rendered later, at render time.
 
 from __future__ import annotations
 
+import difflib
 import logging
 from dataclasses import dataclass, field
 
@@ -30,6 +31,80 @@ DEFAULT_TRANSITION_DELAY = 90   # ms between tubes during a transition
 
 class ScreensError(Exception):
     """The whole screens file is unusable (not a mapping, bad YAML, ...)."""
+
+
+# ---------------------------------------------------------------------------
+# Known fields per mapping, for "did you mean" warnings on unknown keys.
+# Built from what render.py actually reads (see its draw_* / _item_* functions);
+# the editor's FIELDS / MORE / ITEM_FIELDS tables must all be covered (a test
+# parses editor.js and checks this).
+# ---------------------------------------------------------------------------
+
+# fields every widget that draws text also takes
+_TEXT_COMMON = ("font",)
+
+KNOWN_FIELDS: dict[str, frozenset[str]] = {
+    # screen level
+    "screen": frozenset({"duration", "refresh", "when", "background", "transition",
+                         "transition_delay", "tubes", "strip", "canvas"}),
+    # strip (one picture across all six tubes): the image placement fields
+    "strip": frozenset({"source", "fit", "zoom", "offset_x", "offset_y", "rotate", "background"}),
+    # canvas (free design across all six tubes)
+    "canvas": frozenset({"background", "items"}),
+    # widget types
+    "text": frozenset({"type", "text", "size", "align", "valign", "weight", "color", *_TEXT_COMMON}),
+    "big_number": frozenset({"type", "value", "unit", "label", "unit_newline", "color",
+                             "value_size", "unit_size", "label_size", "value_color", "unit_color",
+                             "label_color", *_TEXT_COMMON}),
+    "ring": frozenset({"type", "value", "max", "label", "unit", "unit_newline", "color",
+                       "radius", "thickness", "value_size", "unit_size", "label_size",
+                       "value_color", "unit_color", "label_color", *_TEXT_COMMON}),
+    "bar": frozenset({"type", "value", "max", "label", "unit", "color", "value_size",
+                      "label_size", "value_color", "label_color", *_TEXT_COMMON}),
+    "icon": frozenset({"type", "icon", "text", "color", "icon_size", "text_size", "text_color",
+                       *_TEXT_COMMON}),
+    "image": frozenset({"type", "source", "fit", "zoom", "offset_x", "offset_y", "rotate",
+                        "background"}),
+    "sparkline": frozenset({"type", "entity", "hours", "unit", "color", *_TEXT_COMMON}),
+    "graph": frozenset({"type", "entity", "hours", "style", "label", "unit", "show_value",
+                        "min", "max", "points", "color", "value_size", "value_color",
+                        "label_color", *_TEXT_COMMON}),
+    "progress": frozenset({"type", "value", "max", "label", "finish", "eta_format", "color",
+                           "track", "value_size", "value_color", "label_size", "label_color",
+                           "eta_color", *_TEXT_COMMON}),
+    "analog_clock": frozenset({"type", "tz", "seconds", "numerals", "label", "color", "accent",
+                               "face", "label_color", *_TEXT_COMMON}),
+    "weather": frozenset({"type", "entity", "label", "show", "color", "icon_color",
+                          "temp_size", "hl_color", "label_color", *_TEXT_COMMON}),
+    "ticker": frozenset({"type", "text", "size", "color", "background", "y", "speed", "label",
+                         "label_color", *_TEXT_COMMON}),
+    "custom": frozenset({"type", "items", "background"}),
+    "blank": frozenset({"type"}),
+    # item types (a custom widget's / canvas's items)
+    "item:text": frozenset({"type", "text", "x", "y", "size", "weight", "align", "color",
+                            "width", "height", "font"}),
+    "item:ring": frozenset({"type", "value", "max", "x", "y", "radius", "thickness", "color",
+                            "track", "start", "sweep"}),
+    "item:bar": frozenset({"type", "value", "max", "x", "y", "width", "height", "direction",
+                           "radius", "color", "track"}),
+    "item:icon": frozenset({"type", "icon", "x", "y", "size", "color"}),
+    "item:image": frozenset({"type", "source", "x", "y", "width", "height", "fit", "zoom",
+                             "offset_x", "offset_y", "rotate", "background"}),
+    "item:rect": frozenset({"type", "x", "y", "width", "height", "radius", "color"}),
+}
+
+
+def _did_you_mean(key: str, known: frozenset[str]) -> str:
+    """' — did you mean 'color'?' for an unknown key, or '' when nothing is close."""
+    matches = difflib.get_close_matches(key, sorted(known), n=1, cutoff=0.6)
+    return f" — did you mean '{matches[0]}'?" if matches else ""
+
+
+def _warn_unknown_keys(warnings: list[str], where: str, mapping: dict, known: frozenset[str]) -> None:
+    """One warning per key of `mapping` that `known` doesn't list (the mapping still loads)."""
+    for key in mapping:
+        if isinstance(key, str) and key not in known:
+            warnings.append(f"{where}: unknown field '{key}'{_did_you_mean(key, known)}")
 
 
 @dataclass
@@ -82,6 +157,7 @@ class ScreensConfig:
     font: str | None = None              # top-level default `font:` for all widgets
     screens: dict[str, Screen] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)  # human-readable, per screen
+    warnings: list[str] = field(default_factory=list)  # unknown fields etc.; the file still loads
     clock_overrides: dict[str, ClockOverride] = field(default_factory=dict)  # clock name -> override
     night: NightConfig | None = None     # the `night:` block, None when absent
 
@@ -108,12 +184,18 @@ def _err(errors: list[str], screen: str, msg: str) -> None:
     errors.append(f"screen '{screen}': {msg}")
 
 
-def _check_item(errors: list[str], where: str, n: int, it: object) -> bool:
+def _check_item(errors: list[str], where: str, n: int, it: object,
+                warnings: list[str] | None = None) -> bool:
     """One item of a custom widget / canvas (ITEM_TYPES), validated the same way in both."""
     if not isinstance(it, dict) or it.get("type") not in ITEM_TYPES:
         kind = it.get("type") if isinstance(it, dict) else type(it).__name__
-        errors.append(f"{where} item {n}: unknown item type {kind!r} (expected one of {', '.join(ITEM_TYPES)})")
+        suggestion = _did_you_mean(str(kind), frozenset(ITEM_TYPES))
+        errors.append(f"{where} item {n}: unknown item type {kind!r}{suggestion} "
+                      f"(expected one of {', '.join(ITEM_TYPES)})")
         return False
+    if warnings is not None:
+        _warn_unknown_keys(warnings, f"{where} item {n} ({it['type']})", it,
+                           KNOWN_FIELDS.get(f"item:{it['type']}", frozenset()))
     if it["type"] == "image" and it.get("fit", "contain") not in FITS:
         errors.append(f"{where} item {n}: image 'fit' must be one of {', '.join(FITS)}")
         return False
@@ -125,15 +207,20 @@ def _check_item(errors: list[str], where: str, n: int, it: object) -> bool:
     return True
 
 
-def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
+def _check_widget(errors: list[str], screen: str, idx: int, w: object,
+                  warnings: list[str] | None = None) -> bool:
     where = f"screen '{screen}' tube {idx}"
     if not isinstance(w, dict):
         errors.append(f"{where}: widget must be a mapping, got {type(w).__name__}")
         return False
     wtype = w.get("type")
     if wtype not in WIDGET_TYPES:
-        errors.append(f"{where}: unknown widget type {wtype!r} (expected one of {', '.join(WIDGET_TYPES)})")
+        suggestion = _did_you_mean(str(wtype), frozenset(WIDGET_TYPES))
+        errors.append(f"{where}: unknown widget type {wtype!r}{suggestion} "
+                      f"(expected one of {', '.join(WIDGET_TYPES)})")
         return False
+    if warnings is not None:
+        _warn_unknown_keys(warnings, f"{where} ({wtype})", w, KNOWN_FIELDS.get(str(wtype), frozenset()))
     if wtype == "image":
         src = w.get("source")
         if not isinstance(src, str) or not src:
@@ -187,15 +274,18 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
             errors.append(f"{where}: custom widget 'items' must be a list")
             return False
         for n, it in enumerate(items):
-            if not _check_item(errors, where, n, it):
+            if not _check_item(errors, where, n, it, warnings):
                 return False
     return True
 
 
-def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
+def _parse_screen(name: str, raw: object, errors: list[str],
+                  warnings: list[str] | None = None) -> Screen | None:
     if not isinstance(raw, dict):
         _err(errors, name, "must be a mapping")
         return None
+    if warnings is not None:
+        _warn_unknown_keys(warnings, f"screen '{name}'", raw, KNOWN_FIELDS["screen"])
     screen = Screen(name=name)
     for key in ("duration", "refresh"):
         val = raw.get(key)
@@ -244,6 +334,8 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
         if not isinstance(strip, dict) or not isinstance(strip.get("source"), str) or not strip["source"]:
             _err(errors, name, "'strip' must be a mapping with a 'source' (camera:..., http(s)://..., ...)")
             return None
+        if warnings is not None:
+            _warn_unknown_keys(warnings, f"screen '{name}' strip", strip, KNOWN_FIELDS["strip"])
         fit = strip.get("fit", "cover")
         if fit not in FITS:
             _err(errors, name, f"strip 'fit' must be one of {', '.join(FITS)}, got {fit!r}")
@@ -254,13 +346,15 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
         if not isinstance(canvas, dict):
             _err(errors, name, "'canvas' must be a mapping with an 'items' list (text/ring/bar/icon/image/rect placed by x/y in 0..810 x 0..240)")
             return None
+        if warnings is not None:
+            _warn_unknown_keys(warnings, f"screen '{name}' canvas", canvas, KNOWN_FIELDS["canvas"])
         items = canvas.get("items", [])
         if not isinstance(items, list):
             _err(errors, name, "canvas 'items' must be a list")
             return None
         where = f"screen '{name}' canvas"
         for n, it in enumerate(items):
-            if not _check_item(errors, where, n, it):
+            if not _check_item(errors, where, n, it, warnings):
                 return None
         screen.canvas = canvas
     else:
@@ -270,7 +364,7 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
             _err(errors, name, f"'tubes' must be a list of exactly 6 widgets, got {n}")
             return None
         for i, w in enumerate(tubes):
-            if not _check_widget(errors, name, i, w):
+            if not _check_widget(errors, name, i, w, warnings):
                 return None
         screen.tubes = list(tubes)
     return screen
@@ -370,7 +464,7 @@ def parse_screens(data: object) -> ScreensConfig:
         if not isinstance(name, str) or not name:
             cfg.errors.append(f"screen name must be a non-empty string, got {name!r}")
             continue
-        screen = _parse_screen(name, raw, cfg.errors)
+        screen = _parse_screen(name, raw, cfg.errors, cfg.warnings)
         if screen is not None:
             cfg.screens[name] = screen
 

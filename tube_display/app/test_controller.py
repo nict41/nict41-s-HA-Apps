@@ -1189,3 +1189,31 @@ def test_mirror_refreshes_with_new_content(tmp_path):
                              tubes=[{"type": "text", "text": "CHANGED"}] * 6), seconds=1000)
     _run_loop(controller, time, 2)
     assert len(pusher.sent) > n                 # re-rendered and pushed
+
+
+def test_load_config_collects_warnings_and_status(tmp_path, caplog):
+    """Unknown fields become warnings: logged once at warning level, kept in
+    config_warnings and exposed in status(); the summary line counts them."""
+    import logging
+    data = _base_screens()
+    # fresh dicts: _base_screens repeats one dict object 6 times
+    data["screens"]["a"]["tubes"] = [{"type": "text", "text": "A", "colour": "#fff"}] + \
+        [{"type": "text", "text": "A"}] * 5
+    data["screens"]["a"]["durations"] = 5                    # unknown screen-level field
+    with caplog.at_level(logging.INFO, logger="controller"):
+        controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    assert controller.config_errors == []
+    assert len(controller.config_warnings) == 2
+    assert any("unknown field 'colour'" in w and "did you mean 'color'?" in w
+               for w in controller.config_warnings)
+    assert any("unknown field 'durations'" in w for w in controller.config_warnings)
+    status = controller.status()
+    assert status["config_warnings"] == controller.config_warnings
+    assert status["config_errors"] == []
+    # each warning logged once, at warning level; the summary line has the counts
+    warn_logs = [r for r in caplog.records if r.levelno == logging.WARNING
+                 and "unknown field" in r.getMessage()]
+    assert len(warn_logs) == 2
+    summary = [r for r in caplog.records if "Loaded" in r.getMessage() and "warnings" in r.getMessage()]
+    assert len(summary) == 1
+    assert "2 screens (0 errors, 2 warnings)" in summary[0].getMessage()

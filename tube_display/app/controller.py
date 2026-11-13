@@ -99,6 +99,7 @@ class Controller:
         self.last_error: str | None = None
         self.last_strip: Image.Image | None = None
         self.config_errors: list[str] = []
+        self.config_warnings: list[str] = []
         self.screens_loaded_at: float | None = None
 
         # pause / flash / health
@@ -166,17 +167,22 @@ class Controller:
         except (ScreensError, OSError) as err:
             _LOG.error("Could not load screens file %s: %s", path, err)
             self.config_errors = [str(err)]
+            self.config_warnings = []
             self.last_error = f"screens file: {err}"
             return self._config
         self._config = cfg
         self._ctx.default_font = cfg.font
         self.config_errors = list(cfg.errors)
+        self.config_warnings = list(cfg.warnings)
         for e in cfg.errors:
             _LOG.error("Screens file: %s (screen skipped)", e)
+        for w in cfg.warnings:
+            _LOG.warning("Screens file: %s", w)
         if cfg.errors:
             self.last_error = "; ".join(cfg.errors)
         self.screens_loaded_at = self._now()
-        _LOG.info("Loaded %d screen(s), rotation %s", len(cfg.screens), cfg.rotation)
+        _LOG.info("Loaded %d screens (%d errors, %d warnings), rotation %s",
+                  len(cfg.screens), len(cfg.errors), len(cfg.warnings), cfg.rotation)
         return cfg
 
     async def _reload_if_changed(self) -> None:
@@ -412,6 +418,7 @@ class Controller:
             "pinned": self._pin[0] if self._pin else None,
             "screens": sorted(cfg.screens) if cfg else [],
             "config_errors": self.config_errors,
+            "config_warnings": self.config_warnings,
             "last_error": self.last_error or (self._pusher.last_error if self._pusher else None),
             "clock_state": self.clock_state,
             "clock_host": self.clock.host if self.clock is not None else self.settings.clock_host,

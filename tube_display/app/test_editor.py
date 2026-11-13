@@ -135,12 +135,14 @@ def test_api_validate_ok_and_bad(tmp_path):
         resp = await client.post("/api/validate", json={"data": {
             "rotation": ["a"], "screens": {"a": {"tubes": [{"type": "blank"}] * 6}}}})
         assert resp.status == 200
-        assert (await resp.json()) == {"errors": []}
+        assert (await resp.json()) == {"errors": [], "warnings": []}
         resp = await client.post("/api/validate", json={"data": {
             "rotation": ["a"], "screens": {"a": {"tubes": [{"type": "nope"}] * 6}}}})
         assert resp.status == 200
-        errors = (await resp.json())["errors"]
+        body = await resp.json()
+        errors = body["errors"]
         assert errors and "unknown widget type" in errors[0]
+        assert body["warnings"] == []
         resp = await client.post("/api/validate", json={"data": ["not", "a", "map"]})
         assert resp.status == 200
         assert (await resp.json())["errors"]
@@ -1016,3 +1018,221 @@ def test_save_round_trip_keeps_font_and_canvas(tmp_path):
         assert resp.status == 200
         assert "font:" not in open(screens_file, encoding="utf-8").read().split("screens:")[0]
     _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# gallery / import / export / suggest / warnings / is_example
+# ----------------------------------------------------------------------
+
+def test_api_gallery_lists_templates(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/gallery")
+        assert resp.status == 200
+        body = await resp.json()
+        ids = [t["id"] for t in body["templates"]]
+        assert ids == ["clock", "weather", "now_playing", "printer", "energy",
+                       "next_event", "doorbell", "analog_clock"]
+        for t in body["templates"]:
+            assert set(t) == {"id", "name", "description", "inputs"}
+            assert "screen" not in t
+    _with_client(tmp_path, check)
+
+
+def test_api_gallery_build_returns_screen_not_saved(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.post("/api/gallery/build", json={
+            "id": "now_playing", "values": {"player": "media_player.spotify"}, "name": "Music"})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["name"] == "Music"
+        assert body["screen"]["tubes"][3]["source"] == "entity_picture:media_player.spotify"
+        # not saved: the file is unchanged
+        assert open(screens_file, encoding="utf-8").read() == USER_SCREENS_YAML
+        # a name that exists gets " 2"
+        resp = await client.post("/api/gallery/build", json={
+            "id": "clock", "values": {}, "name": "claude"})
+        assert resp.status == 200
+        assert (await resp.json())["name"] == "claude 2"
+        # missing input -> 400
+        resp = await client.post("/api/gallery/build", json={"id": "now_playing", "values": {}})
+        assert resp.status == 400
+        assert "missing input" in (await resp.json())["error"]
+        # bad entity id -> 400
+        resp = await client.post("/api/gallery/build", json={
+            "id": "now_playing", "values": {"player": "nope"}})
+        assert resp.status == 400
+        # unknown template -> 400
+        resp = await client.post("/api/gallery/build", json={"id": "nope", "values": {}})
+        assert resp.status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_gallery_preview_png(tmp_path):
+    async def check(client, screens_file):
+        # no values: placeholder entities are substituted, still a PNG
+        resp = await client.post("/api/gallery/preview", json={"id": "clock", "values": {}})
+        assert resp.status == 200
+        assert resp.content_type == "image/png"
+        png = await resp.read()
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        img = Image.open(io.BytesIO(png))
+        assert (img.width, img.height) == (STRIP_W, STRIP_H)
+        # with values
+        resp = await client.post("/api/gallery/preview", json={
+            "id": "doorbell", "values": {"camera": "camera.front"}})
+        assert resp.status == 200
+        # unknown template -> 400
+        resp = await client.post("/api/gallery/preview", json={"id": "nope"})
+        assert resp.status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_export_yaml_shape(tmp_path):
+    async def check(client, screens_file):
+        screen = {"background": "#000000", "tubes": [
+            {"type": "text", "text": "line one\nline two", "color": "#FFFFFF"},
+            {"type": "ring", "value": "{{ states('sensor.x') | float(0) }}", "max": 100},
+        ] + [{"type": "blank"}] * 4}
+        resp = await client.post("/api/export", json={"name": "my screen", "screen": screen})
+        assert resp.status == 200
+        text = (await resp.json())["yaml"]
+        assert text.startswith("my screen:\n")
+        assert "  tubes:" in text
+        loaded = yaml.safe_load(text)
+        assert loaded == {"my screen": screen}
+        # multi-line strings come out as a literal block, like the saver writes them
+        assert "|-" in text
+        # a time-of-day string stays quoted
+        resp = await client.post("/api/export", json={
+            "name": "t", "screen": {"tubes": [{"type": "text", "text": "23:00"}] + [{"type": "blank"}] * 5}})
+        assert '"23:00"' in (await resp.json())["yaml"]
+        # bad bodies -> 400
+        assert (await client.post("/api/export", json={"name": "x"})).status == 400
+        assert (await client.post("/api/export", json={"screen": {}})).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_import_single_and_full_file_and_dedup(tmp_path):
+    async def check(client, screens_file):
+        one = "my screen:\n  tubes:\n    - {type: blank}\n" + "    - {type: blank}\n" * 5
+        resp = await client.post("/api/import", json={"yaml": one})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["errors"] == []
+        assert list(body["screens"]) == ["my screen"]
+        assert body["screens"]["my screen"]["tubes"][0] == {"type": "blank"}
+        # a full screens file with `screens:` works too
+        full = "rotation: [x]\nscreens:\n  x:\n    tubes:\n" + "      - {type: blank}\n" * 6
+        resp = await client.post("/api/import", json={"yaml": full})
+        assert resp.status == 200
+        assert list((await resp.json())["screens"]) == ["x"]
+        # a name that already exists in the file gets " 2"
+        resp = await client.post("/api/import", json={"yaml": "claude:\n  tubes:\n" + "    - {type: blank}\n" * 6})
+        assert resp.status == 200
+        assert list((await resp.json())["screens"]) == ["claude 2"]
+        # invalid screen -> errors, not added
+        bad = "bad:\n  tubes:\n" + "    - {type: nope}\n" * 6
+        resp = await client.post("/api/import", json={"yaml": bad})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["screens"] == {}
+        assert body["errors"] and "unknown widget type" in body["errors"][0]
+        # broken YAML -> 400
+        assert (await client.post("/api/import", json={"yaml": "a: [unclosed"})).status == 400
+        assert (await client.post("/api/import", json={"yaml": "   "})).status == 400
+        assert (await client.post("/api/import", json={"yaml": "- just\n- a\n- list"})).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_suggest_from_stub_ha(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/suggest")
+        assert resp.status == 200
+        suggestions = (await resp.json())["suggestions"]
+        ids = [s["id"] for s in suggestions]
+        assert ids[0] == "clock"          # always suggested
+        assert "weather" not in ids       # StubHa has no weather entity
+        assert "now_playing" not in ids
+    _with_client(tmp_path, check)
+
+
+def test_api_suggest_no_ha_is_503(tmp_path):
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(StubController(), None, screens_file, test_allow_local=True)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/suggest")
+            assert resp.status == 503
+            resp = await client.get("/api/entities")
+            assert resp.status == 503
+    asyncio.run(wrapper())
+
+
+def test_api_config_warnings_and_is_example(tmp_path):
+    from screens import example_screens_yaml
+    warn_yaml = USER_SCREENS_YAML.replace(
+        '- {type: ring, value: "{{ states(\'sensor.claude_usage_nick_pro_session_usage\') | float(0) | round(0) | int }}",',
+        '- {type: ring, value: "1", colour: "#fff",')
+    assert warn_yaml != USER_SCREENS_YAML
+
+    async def check(client, screens_file):
+        resp = await client.get("/api/config")
+        body = await resp.json()
+        assert body["errors"] == []
+        assert len(body["warnings"]) == 1
+        assert "unknown field 'colour'" in body["warnings"][0]
+        assert "did you mean 'color'?" in body["warnings"][0]
+        assert body["is_example"] is False
+        # validate reports warnings too
+        resp = await client.post("/api/validate", json={"data": body["data"]})
+        vbody = await resp.json()
+        assert vbody["errors"] == []
+        assert len(vbody["warnings"]) == 1
+    _with_client(tmp_path, check, text=warn_yaml)
+
+    async def check_example(client, screens_file):
+        resp = await client.get("/api/config")
+        body = await resp.json()
+        assert body["is_example"] is True
+        assert body["errors"] == []
+    _with_client(tmp_path, check_example, text=example_screens_yaml())
+
+
+def test_api_entities_include_domain_and_device_class(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/entities?q=")
+        items = await resp.json()
+        by_id = {i["entity_id"]: i for i in items}
+        assert by_id["sensor.gpu_temp"]["domain"] == "sensor"
+        assert by_id["sensor.gpu_temp"]["device_class"] is None
+        assert by_id["light.living_room"]["domain"] == "light"
+    _with_client(tmp_path, check)
+
+
+def test_when_js_served_and_index_references_it(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/when.js")
+        assert resp.status == 200
+        assert resp.content_type == "text/javascript"
+        js = await resp.text()
+        assert "whenToTemplate" in js and "module.exports" in js
+        resp = await client.get("/")
+        html = await resp.text()
+        assert 'src="when.js?v=' in html
+        assert html.index("when.js") < html.index("editor.js")
+        assert "__VERSION__" not in html
+    _with_client(tmp_path, check)
+
+
+def test_new_routes_ingress_only(tmp_path):
+    async def wrapper():
+        client, screens_file = _make_client(tmp_path, allow_local=False)
+        async with client:
+            assert (await client.get("/api/gallery")).status == 403
+            assert (await client.post("/api/gallery/build", json={"id": "clock", "values": {}})).status == 403
+            assert (await client.post("/api/gallery/preview", json={"id": "clock"})).status == 403
+            assert (await client.post("/api/export", json={"name": "x", "screen": {}})).status == 403
+            assert (await client.post("/api/import", json={"yaml": "x: {}"})).status == 403
+            assert (await client.get("/api/suggest")).status == 403
+            assert (await client.get("/when.js")).status == 403
+    asyncio.run(wrapper())

@@ -415,3 +415,99 @@ def test_widget_font_field_accepted_on_text_widgets():
     assert cfg.errors == []
     assert cfg.screens["a"].tubes[0]["font"] == "orbitron"
     assert cfg.screens["a"].tubes[2]["items"][0]["font"] == "nunito"
+
+
+# ----------------------------------------------------------------------
+# warnings: unknown keys get a "did you mean" (the screen still loads)
+# ----------------------------------------------------------------------
+
+def test_unknown_widget_field_warns_did_you_mean():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [
+        {"type": "ring", "value": "1", "max": 100, "colour": "#fff"}] + [{"type": "blank"}] * 5}}))
+    assert cfg.errors == []                      # still loads
+    assert len(cfg.warnings) == 1
+    assert "screen 'a' tube 0 (ring): unknown field 'colour'" in cfg.warnings[0]
+    assert "did you mean 'color'?" in cfg.warnings[0]
+
+
+def test_unknown_screen_level_field_warns():
+    cfg = parse_screens(_cfg(screens={"a": {"durations": 10, "tubes": [{"type": "blank"}] * 6}}))
+    assert cfg.errors == []
+    assert any("screen 'a': unknown field 'durations'" in w and "did you mean 'duration'?" in w
+               for w in cfg.warnings)
+
+
+def test_unknown_strip_and_canvas_fields_warn():
+    cfg = parse_screens(_cfg(screens={"a": {"strip": {"source": "camera:x", "fits": "cover"}}}))
+    assert cfg.errors == []
+    assert any("strip" in w and "unknown field 'fits'" in w and "did you mean 'fit'?" in w
+               for w in cfg.warnings)
+    cfg = parse_screens(_cfg(screens={"a": {"canvas": {"background": "#000", "itemz": []}}}))
+    assert any("canvas" in w and "unknown field 'itemz'" in w for w in cfg.warnings)
+
+
+def test_unknown_item_field_warns():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [
+        {"type": "custom", "items": [{"type": "rect", "x": 1, "y": 2, "width": 3, "height": 4,
+                                       "colr": "#fff"}]}] + [{"type": "blank"}] * 5}}))
+    assert cfg.errors == []
+    assert any("item 0 (rect)" in w and "unknown field 'colr'" in w and "did you mean 'color'?" in w
+               for w in cfg.warnings)
+
+
+def test_unknown_field_without_close_match_warns_without_suggestion():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [
+        {"type": "text", "text": "x", "zzzzqqqq": 1}] + [{"type": "blank"}] * 5}}))
+    assert cfg.errors == []
+    assert any("unknown field 'zzzzqqqq'" in w and "did you mean" not in w for w in cfg.warnings)
+
+
+def test_unknown_widget_type_error_has_did_you_mean():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [{"type": "rign", "value": "1"}] + [{"type": "blank"}] * 5}}))
+    assert cfg.errors
+    assert any("unknown widget type 'rign'" in e and "did you mean 'ring'?" in e for e in cfg.errors)
+
+
+def test_unknown_item_type_error_has_did_you_mean():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [
+        {"type": "custom", "items": [{"type": "rec", "x": 1}]}] + [{"type": "blank"}] * 5}}))
+    assert cfg.errors
+    assert any("unknown item type 'rec'" in e and "did you mean 'rect'?" in e for e in cfg.errors)
+
+
+def test_known_fields_cover_every_editor_field():
+    """Every field the editor's FIELDS / MORE / ITEM_FIELDS tables offer must be in
+    KNOWN_FIELDS (parse editor.js with a regex, like the editor itself is plain JS)."""
+    import re
+    from pathlib import Path
+    from screens import KNOWN_FIELDS
+
+    js = (Path(__file__).resolve().parent / "editor_static" / "editor.js").read_text(encoding="utf-8")
+
+    def table(name):
+        m = re.search(r"const " + name + r" = \{(.*?)\n\};", js, re.S)
+        assert m, name
+        out = {}
+        for wm in re.finditer(r"(\w+):\s*\[([^\]]*)\]", m.group(1)):
+            fields = re.findall(r'"([^"]+)"', wm.group(2))
+            out[wm.group(1)] = fields
+        return out
+
+    fields, more, item_fields = table("FIELDS"), table("MORE"), table("ITEM_FIELDS")
+    for wtype, fl in fields.items():
+        known = KNOWN_FIELDS[wtype]
+        missing = [f for f in fl if f not in known]
+        assert not missing, (wtype, missing)
+    for wtype, fl in more.items():
+        if wtype not in KNOWN_FIELDS:
+            continue
+        missing = [f for f in fl if f not in KNOWN_FIELDS[wtype]]
+        assert not missing, (wtype, missing)
+    for itype, fl in item_fields.items():
+        known = KNOWN_FIELDS["item:" + itype]
+        missing = [f for f in fl if f not in known]
+        assert not missing, (itype, missing)
+    # every widget type the editor offers is a known widget type
+    wtypes = re.search(r"const WIDGET_TYPES = \[([^\]]*)\]", js).group(1)
+    for t in re.findall(r'"([^"]+)"', wtypes):
+        assert t in KNOWN_FIELDS, t

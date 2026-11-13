@@ -13,6 +13,7 @@
   <button id="redoBtn" class="btn" title="Redo (Ctrl+Shift+Z)" disabled>&#8631;</button>
   <button id="saveBtn" class="btn primary" disabled>Save</button>
   <button id="historyBtn" class="btn">History</button>
+  <button id="setupBtn" class="btn" title="Set up screens from your Home Assistant entities">Setup</button>
   <button id="yamlToggle" class="btn">Edit YAML</button>
   <label class="auto-toggle" title="Off: screens only change when you press the clock's button">
     <input type="checkbox" id="autoRotate"> Cycle automatically
@@ -76,7 +77,10 @@
       </div>
     </section>
     <section class="card">
-      <h2>Screens <button id="addScreen" class="btn small">Add</button></h2>
+      <h2>Screens
+        <button id="addScreen" class="btn small">Add</button>
+        <button id="importScreens" class="btn small" title="Import screens from YAML">Import</button>
+      </h2>
       <ul id="screenList" class="screen-list"></ul>
       <div class="row">
         <label>default font <select id="defaultFont"></select></label>
@@ -104,11 +108,13 @@
           <option value="center_out">centre out</option>
           <option value="wipe">wipe</option>
         </select></label>
-        <label class="wide">when (template, optional) <input type="text" id="scrWhen" placeholder="{{ is_state('...','on') }}"></label>
+        <label class="wide">when (template, optional) <input type="text" id="scrWhen" placeholder="{{ is_state('...','on') }}">
+          <button id="whenBuild" class="btn small" title="Build the when template with a small editor">Build&hellip;</button></label>
       </div>
       <div class="row">
         <button id="renameScreen" class="btn small">Rename</button>
         <button id="deleteScreen" class="btn small danger">Delete</button>
+        <button id="exportScreen" class="btn small" title="Export this screen as YAML">Export</button>
       </div>
     </div>
 
@@ -171,6 +177,166 @@
   </div>
 </div>
 
+<div id="galleryModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Add a screen">
+    <div class="modal-head">
+      <h2 id="galleryTitle">Add a screen</h2>
+      <button id="galleryClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <div id="galleryGridView">
+      <div class="gallery-grid" id="galleryGrid"></div>
+      <ul id="galleryErrors" class="errors"></ul>
+    </div>
+    <div id="galleryFormView" class="hidden">
+      <p class="hint" id="galleryFormDesc"></p>
+      <div id="galleryInputs"></div>
+      <div class="row">
+        <label class="wide">screen name <input type="text" id="galleryName"></label>
+      </div>
+      <div class="row">
+        <img id="galleryPreview" class="gallery-preview" alt="preview">
+      </div>
+      <ul id="galleryFormErrors" class="errors"></ul>
+      <div class="row">
+        <button id="galleryBack" class="btn">Back</button>
+        <button id="galleryAdd" class="btn primary">Add</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="importModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Import screens">
+    <div class="modal-head">
+      <h2>Import screens</h2>
+      <button id="importClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <p class="hint">Paste one or more screens (<code>name: {...}</code>) or a whole screens file with <code>screens:</code>.</p>
+    <textarea id="importText" spellcheck="false" placeholder="my screen:\n  tubes:\n    - {type: blank} ..."></textarea>
+    <label class="row"><input type="checkbox" id="importRotation" checked> also add to the rotation</label>
+    <ul id="importErrors" class="errors"></ul>
+    <div class="row">
+      <button id="importCancel" class="btn">Cancel</button>
+      <button id="importDo" class="btn primary">Import</button>
+    </div>
+  </div>
+</div>
+
+<div id="exportModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Export screen">
+    <div class="modal-head">
+      <h2 id="exportTitle">Export screen</h2>
+      <button id="exportClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <pre id="exportYaml" class="yaml-view"></pre>
+    <ul id="exportErrors" class="errors"></ul>
+    <div class="row">
+      <button id="exportCopy" class="btn">Copy</button>
+      <button id="exportDownload" class="btn">Download .yaml</button>
+      <button id="exportDone" class="btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="setupModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Setup wizard">
+    <div class="modal-head">
+      <h2 id="setupTitle">Setup</h2>
+      <button id="setupClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <div id="setupStep1">
+      <p class="hint">Step 1 of 4 &mdash; your clocks.</p>
+      <ul id="setupClocks" class="setup-list"></ul>
+      <p id="setupNoClocks" class="hint hidden">No clock is configured yet. Set the <code>clock_host</code> and
+        <code>clock_mqtt_id</code> add-on options and restart the app to connect one.</p>
+      <ul id="setupStep1Errors" class="errors"></ul>
+      <div class="row">
+        <button id="setupSkipClock" class="btn">Continue without a clock</button>
+        <button id="setupStep1Next" class="btn primary">Next</button>
+      </div>
+    </div>
+    <div id="setupStep2" class="hidden">
+      <p class="hint">Step 2 of 4 &mdash; pick the screens to create from your Home Assistant entities.</p>
+      <div id="setupSuggestions"></div>
+      <ul id="setupStep2Errors" class="errors"></ul>
+      <div class="row">
+        <button id="setupStep2Back" class="btn">Back</button>
+        <button id="setupStep2Next" class="btn primary">Next</button>
+      </div>
+    </div>
+    <div id="setupStep3" class="hidden">
+      <p class="hint">Step 3 of 4 &mdash; the rotation: order, duration per screen, automatic cycling.</p>
+      <ul id="setupRotation" class="rotation-list"></ul>
+      <div class="row">
+        <label>duration per screen <input type="number" id="setupDuration" min="1" step="1" value="15"> <span class="unit">s</span></label>
+        <label><input type="checkbox" id="setupCycle" checked> cycle automatically</label>
+      </div>
+      <ul id="setupStep3Errors" class="errors"></ul>
+      <div class="row">
+        <button id="setupStep3Back" class="btn">Back</button>
+        <button id="setupStep3Next" class="btn primary">Next</button>
+      </div>
+    </div>
+    <div id="setupStep4" class="hidden">
+      <p class="hint">Step 4 of 4 &mdash; ready. This replaces the example screens and saves.</p>
+      <p id="setupReplaceNote" class="hint hidden">Your screens file is not the untouched example - replacing it
+        removes the screens currently in it. Continue?</p>
+      <ul id="setupSummary" class="setup-list"></ul>
+      <ul id="setupStep4Errors" class="errors"></ul>
+      <div class="row">
+        <button id="setupStep4Back" class="btn">Back</button>
+        <button id="setupFinish" class="btn primary">Finish and save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="whenModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Build the when condition">
+    <div class="modal-head">
+      <h2>When is this screen shown?</h2>
+      <button id="whenClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <p id="whenHandwritten" class="hint hidden">This condition was written by hand; building a new one replaces it.</p>
+    <div class="row">
+      <label>show when
+        <select id="whenCombine">
+          <option value="all">all of</option>
+          <option value="any">any of</option>
+        </select>
+      </label>
+    </div>
+    <div id="whenConditions"></div>
+    <div class="row">
+      <button id="whenAddCond" class="btn small">+ condition</button>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="whenTimeEnabled"> only between
+        <input type="time" id="whenTimeFrom"> and <input type="time" id="whenTimeTo">
+        <span class="hint">(from later than to crosses midnight)</span></label>
+    </div>
+    <pre id="whenPreview" class="yaml-view"></pre>
+    <p id="whenResult" class="hint"></p>
+    <ul id="whenErrors" class="errors"></ul>
+    <div class="row">
+      <button id="whenCancel" class="btn">Cancel</button>
+      <button id="whenApply" class="btn primary">Apply</button>
+    </div>
+  </div>
+</div>
+
+<div id="warningsModal" class="modal-overlay hidden">
+  <div class="card modal-card" role="dialog" aria-label="Config warnings">
+    <div class="modal-head">
+      <h2>Warnings</h2>
+      <button id="warningsClose" class="btn small" title="Close (Esc)">&times;</button>
+    </div>
+    <p class="hint">Unknown fields - the screens still load, but the field is ignored.</p>
+    <ul id="warningsList" class="warnings-list"></ul>
+  </div>
+</div>
+
+<script src="when.js?v=__VERSION__"></script>
 <script src="editor.js?v=__VERSION__"></script>
 </body>
 </html>

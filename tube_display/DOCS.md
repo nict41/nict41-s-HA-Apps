@@ -28,7 +28,9 @@ The screens file lives in your Home Assistant config folder at
 missing, and the file is **re-read automatically when it changes** — no
 restart needed. A screen with an error is skipped (the error is logged and
 shown in `GET /api/status` under `config_errors`); the other screens keep
-working.
+working. An unknown field (a typo like `colour`) is only a **warning**: the
+screen loads, the warning is logged once per load and shown under
+`config_warnings` in `GET /api/status`, with a "did you mean" suggestion.
 
 ## The screens file
 
@@ -152,9 +154,36 @@ on the app's Info tab if it isn't there).
   shows the clock's own time for its duration.
 * **Cycle automatically** (top bar): untick it for button-only mode, see
   [The clock's button](#the-clocks-button).
-* **Screens:** add, rename or delete; a screen's duration, refresh, background
-  and optional `when` template. **Layout** switches a screen between six tubes
-  and one picture across all six.
+* **Screens:** **Add** opens the gallery — a *Blank screen* card plus ready-made
+  screens (Clock, Weather, Now playing, 3D printer, Energy now, Next event,
+  Doorbell camera, Big analogue clock), each with a live preview picture. Pick
+  one, fill in its entities (searched from HA, filtered to the right domain /
+  device class) and a name, watch the live preview, and **Add** puts the screen
+  in the list and the rotation. **Import** pastes one or more screens (or a
+  whole `screens:` file) — they are validated with the real parser, name clashes
+  get " 2", " 3"…, and a tick box adds them to the rotation. A screen's
+  **Export** shows it as YAML with **Copy** and **Download .yaml**. Rename or
+  delete; a screen's duration, refresh, background and optional `when`
+  template. **Layout** switches a screen between six tubes and one picture
+  across all six.
+* **Setup** (top bar) is the first-run wizard: it opens by itself while the
+  screens file is still the untouched example. Step 1 lists your clocks (with
+  no clock, it explains the `clock_host` / `clock_mqtt_id` options and the
+  restart they need, and offers *Continue without a clock*); step 2 suggests
+  gallery screens that can be filled automatically from your HA entities
+  (weather, media players, energy, printer, calendar, camera — tick the ones
+  you want and change the entities); step 3 sets the rotation order, the
+  duration per screen (default 15 s) and automatic cycling; step 4 builds the
+  screens, replaces the example (asking first if the file isn't the example)
+  and saves.
+* **Build…** next to the `when` field opens a small condition builder: a list
+  of `[entity] [is | is not | above | below | between] [value(s)]` conditions,
+  an optional *only between HH:MM and HH:MM* window (a start later than the end
+  crosses midnight), combined with *all of* / *any of*. It writes the Jinja
+  template (e.g. `{{ is_state('binary_sensor.door', 'on') and (states('sensor.temp') | float(0) > 20) }}`)
+  and shows its live result (*true now* / *false now*). A template the builder
+  wrote opens back in the builder; a hand-written one opens the builder empty
+  with a note that building a new one replaces it.
 * **Preview:** the screen's six tubes rendered with live values. Tap one to edit
   it. A tube with a mistake shows a red **!** and the error at the top, and
   stays editable.
@@ -184,6 +213,12 @@ on the app's Info tab if it isn't there).
 
 Templates the form didn't create (for example multi-line Jinja) open in
 template mode and are left exactly as written unless you change them.
+
+Unknown fields (a typo like `colour` instead of `color`) are **warnings**, not
+errors: the screen still loads, the status line shows *N warnings* — click it
+to list them (each names its screen; click one to jump to it) — and the app
+logs them once per load. At start it logs one line, e.g.
+`Loaded 3 screens (0 errors, 2 warnings)`.
 
 <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-entity.webp" alt="Entity search and colour thresholds on a phone" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-template.webp" alt="A template value with its live result" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-picture.webp" alt="The picture library" width="300">
 
@@ -223,12 +258,18 @@ Editor API on the ingress site (all paths relative to the ingress prefix):
 
 | Endpoint | Description |
 |---|---|
-| `GET api/config` | `{"yaml", "data", "mtime", "errors"}` — the file text, its parsed form, mtime and validation errors. |
-| `POST api/validate` | Body `{"data": {...}}` → `{"errors": [...]}` (same validation as the loader). |
+| `GET api/config` | `{"yaml", "data", "mtime", "errors", "warnings", "is_example"}` — the file text, its parsed form, mtime, validation errors, unknown-field warnings, and whether the file is still the untouched example. |
+| `POST api/validate` | Body `{"data": {...}}` → `{"errors": [...], "warnings": [...]}` (same validation as the loader). |
 | `POST api/preview` | Body `{"screen": {...}, "tube": optional int}` → PNG of the 810x240 strip (or one 135x240 tube), rendered with the real pipeline and live HA states. Does not touch the clock or the file. For a `custom` tube the `X-Item-Boxes` header lists each item's box `[x0, y0, x1, y1]`. |
 | `POST api/source_image` | Body `{"source": "..."}` → PNG of that picture (upright, at most 1620 pixels a side), used to show it while it is placed. |
 | `POST api/template` | Body `{"template": "..."}` → `{"result": "..."}` or `{"error": "..."}` (live HA template render). |
-| `GET api/entities?q=<text>` | Up to 50 matching `[{"entity_id","name","state","unit"}]` from the Supervisor core API `GET /states` (cached ~10 s). |
+| `GET api/entities?q=<text>` | Up to 50 matching `[{"entity_id","name","state","unit","device_class","domain"}]` from the Supervisor core API `GET /states` (cached ~10 s). |
+| `GET api/gallery` | `{"templates": [{id, name, description, inputs}]}` — the ready-made screens (no screen bodies). |
+| `POST api/gallery/build` | Body `{"id", "values": {key: entity_id}, "name"?}` → `{"name", "screen"}` — the built screen with every `[[key]]` replaced; 400 on a missing/invalid input. Not saved; name clashes get " 2", " 3"…. |
+| `POST api/gallery/preview` | Body `{"id", "values"?}` → PNG of the built screen (missing inputs are filled with `domain.example` placeholders, so a template previews before its inputs are chosen). |
+| `POST api/export` | Body `{"name", "screen"}` → `{"yaml"}` — the screen as it would appear under `screens:` (ruamel, same style as the saver: literal blocks for multi-line, quoted times). |
+| `POST api/import` | Body `{"yaml"}` → `{"screens": {name: screen}, "errors": [...]}` — accepts `name: {...}` mappings or a whole `screens:` file; each screen is checked with the real parser; existing names get " 2", " 3"…. |
+| `GET api/suggest` | `{"suggestions": [{id, name, values, why}]}` — gallery templates fillable automatically from HA's `GET /states` (the setup wizard's step 2). 503 without an HA client. |
 | `POST api/save` | Body `{"data": {...}, "mtime": <from api/config>}` — 409 if the file changed on disk, 400 with errors if invalid; otherwise round-trip update and atomic write. Returns the new mtime. |
 | `POST api/save_yaml` | Body `{"yaml": "...", "mtime": ...}` — raw-YAML tab; must parse and validate, then written as is. |
 | `GET api/icons?q=<text>` | Up to 60 `mdi:` icon names containing the text, those starting with it first. |
@@ -272,7 +313,7 @@ host on port 8098.
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/status` | JSON: current screen, rotation list, rotation enabled, pinned screen, screen names, config errors, last error, last clock state seen over MQTT, `paused`, `message`, `quiet`, `online`, `ota_busy`, `brightness`, `live`. With several clocks the top level is the first clock and `clocks` has every clock by name. Also `templates` (live-update statistics) and `firmware` (the release offered to the clocks). |
+| `GET /api/status` | JSON: current screen, rotation list, rotation enabled, pinned screen, screen names, config errors (`config_errors`), config warnings (`config_warnings`), last error, last clock state seen over MQTT, `paused`, `message`, `quiet`, `online`, `ota_busy`, `brightness`, `live`. With several clocks the top level is the first clock and `clocks` has every clock by name. Also `templates` (live-update statistics) and `firmware` (the release offered to the clocks). |
 | `POST /api/show` | Body `{"screen": "doorbell", "seconds": 30}` — interrupt the rotation with that screen for N seconds, then resume. `{"screen": "clock", ...}` hands the tubes to the clock. Unknown screen → 404. |
 | `POST /api/flash` | Body `{"message": "Washing done", "seconds": 10, "icon": "mdi:washing-machine", "color": "#FFC107"}` — show a message across the six tubes, then go back to what was showing. Only `message` is required (up to 255 characters, `seconds` up to 3600). |
 | `POST /api/pause` | Body `{"seconds": 600}` (optional) — hand the tubes back to the clock's own time display and send nothing until resumed or until the time is up. |

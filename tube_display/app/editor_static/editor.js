@@ -87,6 +87,8 @@ const state = {
   yaml: "",
   mtime: null,
   errors: [],
+  warnings: [],        // api/config: unknown-field warnings (the file still loads)
+  isExample: false,    // the screens file is still the untouched example
   selectedScreen: null,
   selectedTube: null,
   clipboard: null,
@@ -124,6 +126,15 @@ function setStatus(text, kind) {
   el.textContent = text || "";
   el.className = "status" + (kind ? " " + kind : "");
   $("reloadBtn").classList.toggle("hidden", kind !== "conflict");
+  // the file's warnings stay visible as a clickable "N warnings" link
+  if (state.warnings && state.warnings.length) {
+    const link = document.createElement("span");
+    link.className = "warn-link";
+    link.textContent = " " + state.warnings.length + " warning" + (state.warnings.length > 1 ? "s" : "");
+    link.title = "Show the warnings";
+    link.addEventListener("click", openWarnings);
+    el.appendChild(link);
+  }
 }
 
 function markDirty() {
@@ -240,6 +251,8 @@ async function load() {
   state.data = body.data || {};
   state.mtime = body.mtime;
   state.errors = body.errors || [];
+  state.warnings = body.warnings || [];
+  state.isExample = !!body.is_example;
   if (!state.data.screens) state.data.screens = {};
   if (!state.data.rotation) state.data.rotation = Object.keys(state.data.screens);
   if (!state.selectedScreen || !state.data.screens[state.selectedScreen]) {
@@ -249,6 +262,11 @@ async function load() {
   renderAll();
   setStatus(state.errors.length ? state.errors.length + " error(s) in file" : "loaded", state.errors.length ? "error" : "");
   schedulePreview(0);
+  if (state.isExample) {
+    let seen = null;
+    try { seen = sessionStorage.getItem("td_setup_seen"); } catch (e) { /* private mode */ }
+    if (!seen) openSetup();
+  }
 }
 
 function renderAll() {
@@ -567,14 +585,16 @@ function allRotations() {
   return out;
 }
 
-$("addScreen").addEventListener("click", () => {
+$("addScreen").addEventListener("click", openGallery);
+
+function addBlankScreen() {
   let name = "screen" + (Object.keys(state.data.screens).length + 1);
   while (state.data.screens[name]) name = "s" + Math.random().toString(36).slice(2, 7);
   state.data.screens[name] = { background: "#000000", tubes: Array.from({ length: 6 }, () => ({ type: "blank" })) };
   if (!state.data.rotation.includes(name)) state.data.rotation.push(name);
   selectScreen(name);
   markDirty();
-});
+}
 
 $("renameScreen").addEventListener("click", () => {
   const old = state.selectedScreen;
@@ -602,6 +622,655 @@ $("deleteScreen").addEventListener("click", () => {
   state.selectedScreen = Object.keys(state.data.screens)[0] || null;
   state.selectedTube = null;
   markDirty(); renderAll(); schedulePreview(0);
+});
+
+// ---------------------------------------------------------------- gallery (Add a screen)
+
+const gal = { templates: [], template: null, previewUrl: null };
+
+function showErrors(ul, errs) {
+  ul.innerHTML = "";
+  (errs || []).forEach((e) => {
+    const li = document.createElement("li"); li.textContent = e; ul.appendChild(li);
+  });
+}
+
+async function previewBlob(path, body) {
+  const { status, res } = await api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (status !== 200) return null;
+  try { return await res.blob(); } catch (e) { return null; }
+}
+
+function setPreviewImg(img, blob) {
+  if (gal.previewUrl) { URL.revokeObjectURL(gal.previewUrl); gal.previewUrl = null; }
+  if (blob) {
+    gal.previewUrl = URL.createObjectURL(blob);
+    img.src = gal.previewUrl;
+    img.classList.remove("hidden");
+  } else {
+    img.removeAttribute("src");
+    img.classList.add("hidden");
+  }
+}
+
+async function openGallery() {
+  $("galleryModal").classList.remove("hidden");
+  $("galleryGridView").classList.remove("hidden");
+  $("galleryFormView").classList.add("hidden");
+  showErrors($("galleryErrors"), []);
+  $("galleryGrid").innerHTML = "";
+  const { status, body } = await api("api/gallery");
+  if (status !== 200 || !body || !Array.isArray(body.templates)) {
+    showErrors($("galleryErrors"), ["could not load the gallery: " + ((body && body.error) || status)]);
+    return;
+  }
+  gal.templates = body.templates;
+  // the blank screen is the first card, like the old "Add" flow
+  const blank = document.createElement("button");
+  blank.className = "gallery-card";
+  blank.innerHTML = '<span class="g-name">Blank screen</span>' +
+    '<span class="g-desc">Six empty tubes, you fill them in yourself.</span>';
+  blank.addEventListener("click", () => { closeGallery(); addBlankScreen(); });
+  $("galleryGrid").appendChild(blank);
+  body.templates.forEach((t) => {
+    const card = document.createElement("button");
+    card.className = "gallery-card";
+    card.dataset.id = t.id;
+    const img = document.createElement("img");
+    img.alt = t.name + " preview";
+    card.appendChild(img);
+    const nm = document.createElement("span"); nm.className = "g-name"; nm.textContent = t.name;
+    const ds = document.createElement("span"); ds.className = "g-desc"; ds.textContent = t.description;
+    card.append(nm, ds);
+    card.addEventListener("click", () => openGalleryForm(t));
+    $("galleryGrid").appendChild(card);
+    // lazy preview: only fetched once the card is on screen
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((en) => en.isIntersecting)) return;
+      io.disconnect();
+      previewBlob("api/gallery/preview", { id: t.id, values: {} }).then((b) => { if (b) img.src = URL.createObjectURL(b); });
+    });
+    io.observe(card);
+  });
+}
+
+function closeGallery() { $("galleryModal").classList.add("hidden"); }
+
+// One entity input of a gallery template / wizard suggestion: a text box (the global
+// autocomplete works in it) plus a list of HA entities of the wanted domain/device_class.
+function entityInputRow(opts) {
+  const row = document.createElement("div");
+  row.className = "field";
+  const lab = document.createElement("span");
+  lab.className = "field-label";
+  lab.textContent = opts.label;
+  const input = document.createElement("input");
+  input.type = "text";
+  input.dataset.entity = "1";
+  input.placeholder = opts.domain + ".…";
+  input.value = opts.value || "";
+  const list = document.createElement("div");
+  list.className = "entity-list";
+  let timer = null;
+  async function search() {
+    const q = input.value.trim();
+    const { status, body } = await api("api/entities?q=" + encodeURIComponent(q));
+    list.innerHTML = "";
+    if (status !== 200 || !Array.isArray(body)) return;
+    body.filter((e) => (!opts.domain || e.domain === opts.domain) &&
+                       (!opts.deviceClass || e.device_class === opts.deviceClass))
+        .slice(0, 8)
+        .forEach((e) => {
+          const b = document.createElement("button");
+          b.type = "button"; b.className = "entity-opt";
+          b.textContent = e.entity_id + (e.name && e.name !== e.entity_id ? " (" + e.name + ")" : "") +
+            (e.state != null ? " — " + e.state + (e.unit || "") : "");
+          b.addEventListener("click", () => {
+            input.value = e.entity_id;
+            if (opts.onChange) opts.onChange(e.entity_id);
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+          });
+          list.appendChild(b);
+        });
+  }
+  input.addEventListener("input", () => {
+    if (opts.onChange) opts.onChange(input.value.trim());
+    clearTimeout(timer);
+    timer = setTimeout(search, 250);
+  });
+  row.append(lab, input, list);
+  search();
+  return { row, input };
+}
+
+function galleryValues() {
+  const values = {};
+  if (!gal.template) return values;
+  gal.template.inputs.forEach((inp) => {
+    const el = $("galIn_" + inp.key);
+    if (el) values[inp.key] = el.value.trim();
+  });
+  return values;
+}
+
+async function refreshGalleryPreview() {
+  if (!gal.template) return;
+  const blob = await previewBlob("api/gallery/preview", { id: gal.template.id, values: galleryValues() });
+  setPreviewImg($("galleryPreview"), blob);
+}
+
+function openGalleryForm(t) {
+  gal.template = t;
+  $("galleryGridView").classList.add("hidden");
+  $("galleryFormView").classList.remove("hidden");
+  $("galleryFormDesc").textContent = t.description;
+  $("galleryName").value = t.name;
+  showErrors($("galleryFormErrors"), []);
+  const box = $("galleryInputs");
+  box.innerHTML = "";
+  t.inputs.forEach((inp) => {
+    const { row, input } = entityInputRow({
+      label: inp.label,
+      domain: inp.domain,
+      deviceClass: inp.device_class,
+      onChange: () => refreshGalleryPreview(),
+    });
+    input.id = "galIn_" + inp.key;
+    box.appendChild(row);
+  });
+  refreshGalleryPreview();
+}
+
+$("galleryClose").addEventListener("click", closeGallery);
+$("galleryModal").addEventListener("click", (e) => { if (e.target === $("galleryModal")) closeGallery(); });
+$("galleryBack").addEventListener("click", () => {
+  $("galleryFormView").classList.add("hidden");
+  $("galleryGridView").classList.remove("hidden");
+  gal.template = null;
+});
+$("galleryName").addEventListener("input", () => refreshGalleryPreview());
+$("galleryAdd").addEventListener("click", async () => {
+  if (!gal.template) return;
+  showErrors($("galleryFormErrors"), []);
+  const { status, body } = await api("api/gallery/build", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: gal.template.id, values: galleryValues(), name: $("galleryName").value }),
+  });
+  if (status !== 200 || !body || !body.screen) {
+    showErrors($("galleryFormErrors"), [(body && (body.error || (body.errors || []).join("; "))) || "build failed: " + status]);
+    return;
+  }
+  state.data.screens[body.name] = body.screen;
+  if (!state.data.rotation.includes(body.name)) state.data.rotation.push(body.name);
+  closeGallery();
+  selectScreen(body.name);
+  markDirty();
+});
+
+// ---------------------------------------------------------------- import / export
+
+async function openExport() {
+  const name = state.selectedScreen;
+  const s = curScreen();
+  if (!name || !s) return;
+  $("exportModal").classList.remove("hidden");
+  $("exportTitle").textContent = "Export screen: " + name;
+  $("exportYaml").textContent = "loading…";
+  showErrors($("exportErrors"), []);
+  const { status, body } = await api("api/export", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, screen: s }),
+  });
+  if (status !== 200 || !body || typeof body.yaml !== "string") {
+    $("exportYaml").textContent = "";
+    showErrors($("exportErrors"), [(body && body.error) || "export failed: " + status]);
+    return;
+  }
+  $("exportYaml").textContent = body.yaml;
+  $("exportYaml").dataset.name = name;
+}
+
+function closeExport() { $("exportModal").classList.add("hidden"); }
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) { /* fall through to the textarea fallback */ }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+$("exportScreen").addEventListener("click", openExport);
+$("exportClose").addEventListener("click", closeExport);
+$("exportDone").addEventListener("click", closeExport);
+$("exportModal").addEventListener("click", (e) => { if (e.target === $("exportModal")) closeExport(); });
+$("exportCopy").addEventListener("click", async () => {
+  const ok = await copyText($("exportYaml").textContent);
+  setStatus(ok ? "copied to clipboard" : "copy failed - select the text manually", ok ? "ok" : "error");
+});
+$("exportDownload").addEventListener("click", () => {
+  const name = $("exportYaml").dataset.name || "screen";
+  const blob = new Blob([$("exportYaml").textContent], { type: "text/yaml" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name.replace(/[^a-z0-9_-]+/gi, "_") + ".yaml";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+});
+
+function openImport() {
+  $("importModal").classList.remove("hidden");
+  $("importText").value = "";
+  showErrors($("importErrors"), []);
+}
+function closeImport() { $("importModal").classList.add("hidden"); }
+
+$("importScreens").addEventListener("click", openImport);
+$("importClose").addEventListener("click", closeImport);
+$("importCancel").addEventListener("click", closeImport);
+$("importModal").addEventListener("click", (e) => { if (e.target === $("importModal")) closeImport(); });
+$("importDo").addEventListener("click", async () => {
+  showErrors($("importErrors"), []);
+  const { status, body } = await api("api/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ yaml: $("importText").value }),
+  });
+  if (status !== 200 || !body) {
+    showErrors($("importErrors"), [(body && (body.error || (body.errors || []).join("; "))) || "import failed: " + status]);
+    return;
+  }
+  if (body.errors && body.errors.length) {
+    showErrors($("importErrors"), body.errors);
+    return;
+  }
+  const names = Object.keys(body.screens || {});
+  if (!names.length) { showErrors($("importErrors"), ["no valid screens in that YAML"]); return; }
+  names.forEach((n) => { state.data.screens[n] = body.screens[n]; });
+  if ($("importRotation").checked) {
+    names.forEach((n) => { if (!state.data.rotation.includes(n)) state.data.rotation.push(n); });
+  }
+  closeImport();
+  selectScreen(names[0]);
+  markDirty();
+});
+
+// ---------------------------------------------------------------- setup wizard
+
+const setup = { step: 1, suggestions: [], built: [] };
+
+function setupShow(step) {
+  setup.step = step;
+  [1, 2, 3, 4].forEach((n) => $("setupStep" + n).classList.toggle("hidden", n !== step));
+}
+
+async function openSetup() {
+  try { sessionStorage.setItem("td_setup_seen", "1"); } catch (e) { /* private mode */ }
+  $("setupModal").classList.remove("hidden");
+  setupShow(1);
+  await drawSetupClocks();
+  if (!gal.templates.length) {
+    const { status, body } = await api("api/gallery");
+    if (status === 200 && body && Array.isArray(body.templates)) gal.templates = body.templates;
+  }
+}
+function closeSetup() { $("setupModal").classList.add("hidden"); }
+
+async function drawSetupClocks() {
+  const ul = $("setupClocks");
+  ul.innerHTML = "";
+  showErrors($("setupStep1Errors"), []);
+  const { status, body } = await api("api/clocks");
+  const clocks = (status === 200 && body && Array.isArray(body.clocks)) ? body.clocks : [];
+  $("setupNoClocks").classList.toggle("hidden", clocks.length > 0);
+  clocks.forEach((c) => {
+    const li = document.createElement("li");
+    li.textContent = c.name + "  —  " + (c.host || "no host") + "  —  " + (c.online ? "online" : "offline") +
+      (c.rotation_enabled ? "  —  cycling" : "");
+    ul.appendChild(li);
+  });
+}
+
+async function drawSetupSuggestions() {
+  const box = $("setupSuggestions");
+  box.innerHTML = "";
+  showErrors($("setupStep2Errors"), []);
+  const { status, body } = await api("api/suggest");
+  if (status !== 200 || !body || !Array.isArray(body.suggestions)) {
+    showErrors($("setupStep2Errors"), ["could not load suggestions: " + ((body && body.error) || status)]);
+    return;
+  }
+  setup.suggestions = body.suggestions;
+  body.suggestions.forEach((s, i) => {
+    const t = (gal.templates.find((x) => x.id === s.id)) || { id: s.id, name: s.name, inputs: [] };
+    const row = document.createElement("div");
+    row.className = "suggest-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = true; cb.dataset.idx = i;
+    const nm = document.createElement("strong");
+    nm.textContent = s.name || t.name;
+    const why = document.createElement("span");
+    why.className = "why";
+    why.textContent = s.why || "";
+    row.append(cb, nm, why);
+    // one entity input per template input, pre-filled from the suggestion
+    t.inputs.forEach((inp) => {
+      const { row: erow, input } = entityInputRow({
+        label: inp.label,
+        domain: inp.domain,
+        deviceClass: inp.device_class,
+        value: (s.values || {})[inp.key] || "",
+      });
+      input.dataset.sug = i;
+      input.dataset.key = inp.key;
+      erow.classList.add("suggest-entity");
+      row.appendChild(erow);
+    });
+    box.appendChild(row);
+  });
+}
+
+function setupSelected() {
+  const out = [];
+  document.querySelectorAll("#setupSuggestions input[type=checkbox]").forEach((cb) => {
+    if (!cb.checked) return;
+    const s = setup.suggestions[Number(cb.dataset.idx)];
+    if (!s) return;
+    const values = {};
+    Object.assign(values, s.values || {});
+    document.querySelectorAll('#setupSuggestions input[data-sug="' + cb.dataset.idx + '"]').forEach((inp) => {
+      values[inp.dataset.key] = inp.value.trim();
+    });
+    out.push({ id: s.id, name: s.name, values });
+  });
+  return out;
+}
+
+function drawSetupRotation(names) {
+  const ul = $("setupRotation");
+  ul.innerHTML = "";
+  names.forEach((name, i) => {
+    const li = document.createElement("li");
+    li.className = "rot-item";
+    const span = document.createElement("span");
+    span.className = "rot-name";
+    span.textContent = (i + 1) + ". " + name;
+    li.appendChild(span);
+    li.appendChild(mkBtn("↑", () => {
+      if (i > 0) { [names[i - 1], names[i]] = [names[i], names[i - 1]]; drawSetupRotation(names); }
+    }));
+    li.appendChild(mkBtn("↓", () => {
+      if (i < names.length - 1) { [names[i + 1], names[i]] = [names[i], names[i + 1]]; drawSetupRotation(names); }
+    }));
+    ul.appendChild(li);
+  });
+  setup.rotationNames = names;
+}
+
+$("setupBtn").addEventListener("click", openSetup);
+$("setupClose").addEventListener("click", closeSetup);
+$("setupModal").addEventListener("click", (e) => { if (e.target === $("setupModal")) closeSetup(); });
+$("setupSkipClock").addEventListener("click", () => setupShow(2));
+$("setupStep1Next").addEventListener("click", async () => { await drawSetupSuggestions(); setupShow(2); });
+$("setupStep2Back").addEventListener("click", () => setupShow(1));
+$("setupStep2Next").addEventListener("click", () => {
+  const sel = setupSelected();
+  if (!sel.length) { showErrors($("setupStep2Errors"), ["tick at least one screen"]); return; }
+  drawSetupRotation(sel.map((s) => s.name));
+  setupShow(3);
+});
+$("setupStep3Back").addEventListener("click", () => setupShow(2));
+$("setupStep3Next").addEventListener("click", () => {
+  $("setupReplaceNote").classList.toggle("hidden", state.isExample);
+  const ul = $("setupSummary");
+  ul.innerHTML = "";
+  setupSelected().forEach((s) => {
+    const li = document.createElement("li");
+    li.textContent = s.name + "  (" + Object.values(s.values).filter(Boolean).join(", ") + ")";
+    ul.appendChild(li);
+  });
+  setupShow(4);
+});
+$("setupStep4Back").addEventListener("click", () => setupShow(3));
+$("setupFinish").addEventListener("click", async () => {
+  showErrors($("setupStep4Errors"), []);
+  const sel = setupSelected();
+  const built = [];
+  for (const s of sel) {
+    const { status, body } = await api("api/gallery/build", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: s.id, values: s.values, name: s.name }),
+    });
+    if (status !== 200 || !body || !body.screen) {
+      showErrors($("setupStep4Errors"), [(body && body.error) || (s.name + ": build failed")]);
+      return;
+    }
+    built.push({ name: body.name, screen: body.screen });
+  }
+  if (!state.isExample && !confirm("Replace the current screens with these " + built.length + "?")) return;
+  const duration = parseInt($("setupDuration").value, 10);
+  state.data.screens = {};
+  built.forEach((b) => {
+    state.data.screens[b.name] = b.screen;
+    if (duration > 0) b.screen.duration = duration;
+  });
+  state.data.rotation = built.map((b) => b.name);
+  closeSetup();
+  selectScreen(built[0].name);
+  markDirty();
+  // cycle automatically on/off, like the topbar toggle
+  const { status: rstatus } = await api("api/rotation", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: $("setupCycle").checked }),
+  });
+  if (rstatus !== 200) showErrors($("setupStep4Errors"), ["screens added, but cycling could not be set"]);
+  // save through the normal API
+  const { status, body } = await api("api/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: state.data, mtime: state.mtime }),
+  });
+  if (status === 200) {
+    state.mtime = body.mtime;
+    state.dirty = false;
+    $("saveBtn").disabled = true;
+    state.savedJson = snapshot();
+    history.lastJson = state.savedJson;
+    updateHistoryButtons();
+    const cfg = await api("api/config");
+    if (cfg.status === 200) {
+      state.yaml = cfg.body.yaml; state.errors = cfg.body.errors || [];
+      state.warnings = cfg.body.warnings || []; state.isExample = !!cfg.body.is_example;
+    }
+    setStatus("setup saved " + built.length + " screen(s)", "ok");
+  } else if (status === 409) {
+    setStatus("changed on disk — reload to keep your edits safe", "conflict");
+  } else {
+    setStatus("save failed: " + ((body && (body.errors || [body.error]).join("; ")) || status), "error");
+  }
+});
+
+// ---------------------------------------------------------------- when builder
+
+const when = { spec: null, timer: null };
+
+function whenReadSpec() {
+  const conditions = [];
+  document.querySelectorAll("#whenConditions .when-cond").forEach((row) => {
+    const entity = row.querySelector(".wc-entity").value.trim();
+    const op = row.querySelector(".wc-op").value;
+    const value = row.querySelector(".wc-value").value.trim();
+    const value2 = row.querySelector(".wc-value2");
+    if (!entity) return;
+    const c = { entity, op, value };
+    if (op === "between" && value2) c.value2 = value2.value.trim();
+    conditions.push(c);
+  });
+  const time = $("whenTimeEnabled").checked && $("whenTimeFrom").value && $("whenTimeTo").value
+    ? { from: $("whenTimeFrom").value, to: $("whenTimeTo").value } : null;
+  return { combine: $("whenCombine").value, conditions, time };
+}
+
+function whenDrawSpec(spec) {
+  $("whenCombine").value = spec.combine === "any" ? "any" : "all";
+  const box = $("whenConditions");
+  box.innerHTML = "";
+  (spec.conditions || []).forEach((c) => box.appendChild(whenCondRow(c)));
+  if (!spec.conditions || !spec.conditions.length) box.appendChild(whenCondRow(null));
+  if (spec.time) {
+    $("whenTimeEnabled").checked = true;
+    $("whenTimeFrom").value = spec.time.from;
+    $("whenTimeTo").value = spec.time.to;
+  } else {
+    $("whenTimeEnabled").checked = false;
+  }
+}
+
+function whenCondRow(c) {
+  const row = document.createElement("div");
+  row.className = "when-cond";
+  const ent = document.createElement("input");
+  ent.type = "text"; ent.className = "wc-entity"; ent.dataset.entity = "1";
+  ent.placeholder = "entity…"; ent.value = (c && c.entity) || "";
+  const op = document.createElement("select");
+  op.className = "wc-op";
+  [["is", "is"], ["is not", "is not"], ["above", "above"], ["below", "below"], ["between", "between"]]
+    .forEach(([v, t]) => {
+      const o = document.createElement("option"); o.value = v; o.textContent = t; op.appendChild(o);
+    });
+  op.value = (c && c.op) || "is";
+  const val = document.createElement("input");
+  val.type = "text"; val.className = "wc-value"; val.placeholder = "value";
+  val.value = (c && c.value != null) ? String(c.value) : "";
+  const val2 = document.createElement("input");
+  val2.type = "text"; val2.className = "wc-value2"; val2.placeholder = "and";
+  val2.value = (c && c.value2 != null) ? String(c.value2) : "";
+  const del = mkBtn("✕", () => { row.remove(); whenUpdate(); }, "remove this condition");
+  function sync() {
+    const numeric = op.value === "above" || op.value === "below" || op.value === "between";
+    val.type = numeric ? "number" : "text";
+    val2.style.display = op.value === "between" ? "" : "none";
+    whenUpdate();
+  }
+  op.addEventListener("change", sync);
+  [ent, val, val2].forEach((el) => el.addEventListener("input", whenUpdate));
+  sync();
+  row.append(ent, op, val, val2, del);
+  return row;
+}
+
+async function whenUpdate() {
+  showErrors($("whenErrors"), []);
+  let template = "";
+  try {
+    template = WhenBuilder.whenToTemplate(whenReadSpec());
+  } catch (err) {
+    $("whenPreview").textContent = "";
+    $("whenResult").textContent = "";
+    showErrors($("whenErrors"), [String(err.message || err)]);
+    return;
+  }
+  $("whenPreview").textContent = template;
+  $("whenResult").textContent = "checking…";
+  const { status, body } = await api("api/template", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template }),
+  });
+  if (status === 200 && body && "result" in body) {
+    const r = String(body.result).trim().toLowerCase();
+    $("whenResult").textContent = (r === "true" ? "true now" : r === "false" ? "false now" : "renders: " + body.result);
+  } else {
+    $("whenResult").textContent = (body && body.error) ? "could not render: " + body.error : "no HA client";
+  }
+}
+
+function openWhen() {
+  const s = curScreen();
+  if (!s) return;
+  $("whenModal").classList.remove("hidden");
+  const current = s.when || "";
+  const spec = current ? WhenBuilder.templateToWhen(current) : null;
+  $("whenHandwritten").classList.toggle("hidden", !!spec);
+  whenDrawSpec(spec || { combine: "all", conditions: [], time: null });
+  whenUpdate();
+}
+function closeWhen() { $("whenModal").classList.add("hidden"); }
+
+$("whenBuild").addEventListener("click", openWhen);
+$("whenClose").addEventListener("click", closeWhen);
+$("whenCancel").addEventListener("click", closeWhen);
+$("whenModal").addEventListener("click", (e) => { if (e.target === $("whenModal")) closeWhen(); });
+$("whenAddCond").addEventListener("click", () => {
+  $("whenConditions").appendChild(whenCondRow(null));
+  whenUpdate();
+});
+$("whenCombine").addEventListener("change", whenUpdate);
+$("whenTimeEnabled").addEventListener("change", whenUpdate);
+$("whenTimeFrom").addEventListener("change", whenUpdate);
+$("whenTimeTo").addEventListener("change", whenUpdate);
+$("whenApply").addEventListener("click", () => {
+  const s = curScreen();
+  if (!s) return;
+  let template;
+  try {
+    template = WhenBuilder.whenToTemplate(whenReadSpec());
+  } catch (err) {
+    showErrors($("whenErrors"), [String(err.message || err)]);
+    return;
+  }
+  if (template === "{{ true }}") delete s.when; else s.when = template;
+  $("scrWhen").value = s.when || "";
+  closeWhen();
+  markDirty(); schedulePreview();
+});
+
+// ---------------------------------------------------------------- warnings modal
+
+function openWarnings() {
+  const ul = $("warningsList");
+  ul.innerHTML = "";
+  (state.warnings || []).forEach((w) => {
+    const li = document.createElement("li");
+    li.textContent = w;
+    const m = w.match(/screen '([^']+)'/);
+    if (m && state.data.screens[m[1]]) {
+      li.title = "jump to screen '" + m[1] + "'";
+      li.addEventListener("click", () => {
+        closeWarnings();
+        selectScreen(m[1]);
+      });
+    }
+    ul.appendChild(li);
+  });
+  $("warningsModal").classList.remove("hidden");
+}
+function closeWarnings() { $("warningsModal").classList.add("hidden"); }
+$("warningsClose").addEventListener("click", closeWarnings);
+$("warningsModal").addEventListener("click", (e) => { if (e.target === $("warningsModal")) closeWarnings(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  [["galleryModal", closeGallery], ["importModal", closeImport], ["exportModal", closeExport],
+   ["setupModal", closeSetup], ["whenModal", closeWhen], ["warningsModal", closeWarnings]]
+    .forEach(([id, fn]) => { if (!$(id).classList.contains("hidden")) fn(); });
 });
 
 // ---------------------------------------------------------------- screen settings
@@ -2059,7 +2728,11 @@ $("saveBtn").addEventListener("click", async () => {
   history.lastJson = state.savedJson;
   updateHistoryButtons();
   const cfg = await api("api/config");
-  if (cfg.status === 200) { state.yaml = cfg.body.yaml; state.errors = cfg.body.errors || []; }
+  if (cfg.status === 200) {
+    state.yaml = cfg.body.yaml; state.errors = cfg.body.errors || [];
+    state.warnings = cfg.body.warnings || []; state.isExample = !!cfg.body.is_example;
+    setStatus("saved", "ok");
+  }
 });
 
 $("reloadBtn").addEventListener("click", () => { state.dirty = false; $("saveBtn").disabled = true; load(); });

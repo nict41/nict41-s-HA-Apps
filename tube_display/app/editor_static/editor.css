@@ -301,3 +301,51 @@ details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   .yaml-view { max-height: 50vh; }
   #nightCard input[type="time"] { width: 116px; }
 }
+
+/* gallery (Add a screen) */
+.gallery-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px; margin-top: 10px;
+}
+.gallery-card {
+  background: #242424; border: 1px solid #333; border-radius: 8px; padding: 8px;
+  cursor: pointer; text-align: left; color: var(--text); font: inherit;
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.gallery-card:hover { border-color: var(--accent); }
+.gallery-card img {
+  width: 100%; aspect-ratio: 810 / 240; object-fit: cover; border-radius: 6px;
+  background: #000; display: block;
+}
+.gallery-card .g-name { font-weight: 600; font-size: 13px; }
+.gallery-card .g-desc { color: var(--muted); font-size: 11px; }
+.gallery-preview { max-width: 100%; width: 100%; border-radius: 8px; background: #000; }
+#importText { width: 100%; min-height: 180px; font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* setup wizard */
+.setup-list { list-style: none; margin: 8px 0; padding: 0; }
+.setup-list li { padding: 4px 0; overflow-wrap: anywhere; }
+.suggest-row {
+  display: flex; align-items: center; gap: 8px; padding: 6px; border-radius: 6px;
+  flex-wrap: wrap;
+}
+.suggest-row:hover { background: #262626; }
+.suggest-row .why { color: var(--muted); font-size: 11px; flex: 1 1 100%; }
+.suggest-row input[type="text"] { flex: 1 1 140px; min-width: 0; }
+
+/* when builder */
+.when-cond { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
+.when-cond input[type="text"] { flex: 1 1 130px; min-width: 0; }
+.when-cond input[type="number"] { width: 80px; }
+.when-cond select { max-width: 100%; }
+#whenModal input[type="time"] { width: 110px; color-scheme: dark; }
+#whenPreview { min-height: 34px; }
+
+/* warnings list (click a warning to jump to its screen) */
+.warnings-list { list-style: none; margin: 10px 0 0; padding: 0; }
+.warnings-list li {
+  padding: 6px 8px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere;
+  border-left: 3px solid #ffc107; background: #242424; margin: 4px 0;
+}
+.warnings-list li:hover { border-left-color: var(--accent); }
+.status .warn-link { color: #ffc107; cursor: pointer; text-decoration: underline; }
