@@ -24,9 +24,10 @@ WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline
                 "progress", "analog_clock", "weather", "ticker", "gif", "custom", "blank")
 ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
-TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe")
+TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe", "wipe_right", "wipe_center")
 DEFAULT_TRANSITION = "none"
 DEFAULT_TRANSITION_DELAY = 90   # ms between tubes during a transition
+DEFAULT_TRANSITION_DURATION = 500   # ms a wipe takes from start to end
 MAX_GIF_TUBES = 2               # the clock plays at most two GIFs at once
 
 
@@ -47,7 +48,7 @@ _TEXT_COMMON = ("font",)
 KNOWN_FIELDS: dict[str, frozenset[str]] = {
     # screen level
     "screen": frozenset({"duration", "refresh", "when", "background", "transition",
-                         "transition_delay", "tubes", "strip", "canvas"}),
+                         "transition_delay", "transition_duration", "tubes", "strip", "canvas"}),
     # strip (one picture across all six tubes): the image placement fields
     "strip": frozenset({"source", "fit", "zoom", "offset_x", "offset_y", "rotate", "background"}),
     # canvas (free design across all six tubes)
@@ -118,6 +119,7 @@ class Screen:
     background: str = "#000000"
     transition: str | None = None     # None -> the top-level `transition` default
     transition_delay: int | None = None   # ms between tubes, None -> 90
+    transition_duration: int | None = None   # ms a wipe takes, None -> 500
     tubes: list[dict] = field(default_factory=list)   # exactly 6 widgets
     strip: dict | None = None         # alternative: one 810x240 picture
     canvas: dict | None = None        # alternative: free design across all six tubes
@@ -141,6 +143,9 @@ class Screen:
 
     def resolved_transition_delay(self, default: int = DEFAULT_TRANSITION_DELAY) -> int:
         return self.transition_delay if self.transition_delay is not None else default
+
+    def resolved_transition_duration(self, default: int = DEFAULT_TRANSITION_DURATION) -> int:
+        return self.transition_duration if self.transition_duration is not None else default
 
 
 @dataclass
@@ -330,6 +335,12 @@ def _parse_screen(name: str, raw: object, errors: list[str],
             _err(errors, name, f"'transition_delay' must be a number of ms in 0..1000, got {delay!r}")
         else:
             screen.transition_delay = int(delay)
+    dur = raw.get("transition_duration")
+    if dur is not None:
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)) or not 100 <= dur <= 5000:
+            _err(errors, name, f"'transition_duration' must be a number of ms in 100..5000, got {dur!r}")
+        else:
+            screen.transition_duration = int(dur)
     bg = raw.get("background", "#000000")
     if not isinstance(bg, str):
         _err(errors, name, f"'background' must be a string, got {type(bg).__name__}")
@@ -522,8 +533,10 @@ def example_screens_yaml() -> str:
 rotation: [claude, clock]
 clock: {duration: 60}
 # transition: cascade    # optional default for all screens: none | cascade |
-#                        # cascade_right | center_out | wipe (how a screen appears
-#                        # tube by tube when it becomes active; per screen too)
+#                        # cascade_right | center_out | wipe | wipe_right |
+#                        # wipe_center (how a screen appears when it becomes
+#                        # active; per screen too, with transition_delay and,
+#                        # for the wipes, transition_duration in ms)
 # font: bebas-neue      # optional default font for every widget that draws text
 #                        # (a bundled family id, or file:<uploaded font>); each
 #                        # widget's own `font:` wins over this

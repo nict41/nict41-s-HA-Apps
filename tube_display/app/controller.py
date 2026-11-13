@@ -42,7 +42,8 @@ import fonts
 from clock import (DISPLAY_CLOCK, DISPLAY_PANELS, GIF_MAX_BYTES, GIF_TD_PREFIX, ClockPusher,
                    gif_clock_name)
 from rgb565 import STRIP_H, STRIP_W, TUBE_COUNT, TUBE_H, TUBE_W, image_to_rgb565, strip_to_tube_bytes
-from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY, Screen,
+from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY,
+                     DEFAULT_TRANSITION_DURATION, Screen,
                      ScreensConfig, ScreensError, load_screens)
 from settings import ClockSettings
 
@@ -58,7 +59,13 @@ TRANSITION_ORDERS = {
     "cascade": [0, 1, 2, 3, 4, 5],
     "cascade_right": [5, 4, 3, 2, 1, 0],
     "center_out": [2, 3, 1, 4, 0, 5],
+    "wipe": [0, 1, 2, 3, 4, 5],
+    "wipe_right": [5, 4, 3, 2, 1, 0],
+    "wipe_center": [2, 3, 1, 4, 0, 5],
 }
+WIPES = ("wipe", "wipe_right", "wipe_center")
+# HA Tubes 2.5+ plays transitions itself: what each one is called there (with the tube order above)
+FIRMWARE_TRANSITIONS = {t: ("wipe" if t in WIPES else "cascade") for t in TRANSITION_ORDERS}
 WIPE_BANDS = 6             # a wipe draws each tube top to bottom in this many bands
 WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
 # A wipe runs in steps: each tube starts one step after the tube to its left, and every step
@@ -636,25 +643,31 @@ class Controller:
         default_t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
         t = transition if transition is not None else screen.resolved_transition(default_t)
         delay_ms = screen.resolved_transition_delay(DEFAULT_TRANSITION_DELAY)
+        duration_ms = screen.resolved_transition_duration(DEFAULT_TRANSITION_DURATION)
         if t == "none" or self._interrupted or self._stop:
             await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK,
                                           photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         else:
             await self._run_transition(t, tube_bytes, delay_ms,
-                                      photo_tubes=render_mod.photo_tubes(screen, self._tubes))
+                                      photo_tubes=render_mod.photo_tubes(screen, self._tubes),
+                                      duration_ms=duration_ms)
         self.current = screen.name
         await self._start_gifs(screen)
         self._publish_state()
 
     async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int,
-                              photo_tubes: set[int] | None = None) -> None:
-        """Send the tubes one by one (or in staggered bands for a wipe), aborting as soon
-        as an interrupt/stop/OTA/unreachable arrives. All sends still go through the
-        pusher's lock, so only one upload runs at a time."""
+                              photo_tubes: set[int] | None = None,
+                              duration_ms: int = DEFAULT_TRANSITION_DURATION) -> None:
+        """Show the tubes with a transition, aborting as soon as an interrupt/stop/OTA/
+        unreachable arrives. On HA Tubes 2.5+ the clock plays it itself from one upload of
+        all six tubes, smooth and exactly timed; otherwise the tubes go one by one (or in
+        staggered bands for a wipe). All sends go through the pusher's lock, so only one
+        upload runs at a time."""
         p = self._pusher
         if p is None:
             return
         photo = photo_tubes or set()
+        order = TRANSITION_ORDERS.get(t, TRANSITION_ORDERS["cascade"])
         self._transitioning = True
         try:
             delay = delay_ms / 1000.0
@@ -663,14 +676,30 @@ class Controller:
                 return (self._interrupted or self._stop or self._ota_busy()
                         or not getattr(p, "reachable", True))
 
-            if t == "wipe":
+            send_screen = getattr(p, "send_screen", None)
+            if send_screen is not None:
+                kind = FIRMWARE_TRANSITIONS.get(t, "cascade")
+                ok = await send_screen(tube_bytes, photo, kind, order,
+                                       duration_ms=duration_ms, gap_ms=delay_ms)
+                if ok is not None:
+                    if ok:
+                        # the clock is playing it: wait until it's done, so nothing else is
+                        # sent meanwhile (an interrupt stops waiting; the next screen replaces it)
+                        left = duration_ms / 1000.0 if kind == "wipe" else delay * (len(order) - 1)
+                        while left > 0 and not aborted():
+                            step = min(0.05, left)
+                            await self._sleep(step)
+                            left -= step
+                    return
+
+            if t in WIPES:
                 step_delay = delay * WIPE_DELAY_FACTOR
                 for step in range(WIPE_STEPS):
                     if aborted():
                         return
                     rects = []
-                    for tube in range(TUBE_COUNT):      # left to right, staggered by a step
-                        band = step - tube
+                    for k, tube in enumerate(order):    # staggered by a step, in the wipe's order
+                        band = step - k
                         if not 0 <= band < WIPE_BANDS:
                             continue
                         y = band * WIPE_BAND_H
@@ -683,7 +712,6 @@ class Controller:
                     if step < WIPE_STEPS - 1 and step_delay > 0 and not aborted():
                         await self._sleep(step_delay)
             else:
-                order = TRANSITION_ORDERS.get(t, TRANSITION_ORDERS["cascade"])
                 for i, tube in enumerate(order):
                     if aborted():
                         return

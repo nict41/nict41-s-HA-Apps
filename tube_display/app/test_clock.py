@@ -394,9 +394,12 @@ class FakeClock:
     """A fake HA Tubes clock: /panel (old or new firmware), /gif endpoints.
     Records every request; `panel_statuses` queues non-200 answers for POST /panel."""
 
-    def __init__(self, new_firmware=True, batch=False):
+    def __init__(self, new_firmware=True, batch=False, held=0, transitions=()):
         self.new = new_firmware
         self.batch = batch       # HA Tubes 2.5+: POST /panel/batch
+        self.held = held         # batch_buffer: the batch it can hold in memory (0 = none)
+        self.transitions = list(transitions)
+        self.batch_params = []   # query of each batch POST
         self.batches = []        # list of [(tube, fmt, x, y, w, h, picture)] per batch POST
         self.batch_statuses = []  # statuses to answer POST /panel/batch with, in order
         self.posts = []          # (path, params, content_type, body)
@@ -423,6 +426,9 @@ class FakeClock:
         info["playing"] = sorted(self.playing)
         if self.batch:
             info["batch"] = True
+        if self.held:
+            info["batch_buffer"] = self.held
+            info["transitions"] = self.transitions
         return web.json_response(info)
 
     async def post_batch(self, req):
@@ -437,10 +443,14 @@ class FakeClock:
             off += n
         assert off == len(body)
         self.batches.append(records)
+        self.batch_params.append(dict(req.query))
         if self.batch_statuses:
             status = self.batch_statuses.pop(0)
+            headers = {}
+            if isinstance(status, tuple):
+                status, headers = status
             if status != 200:
-                return web.Response(status=status, text="fake clock answer")
+                return web.Response(status=status, text="fake clock answer", headers=headers)
         for r in records:
             self.playing.discard(r[0])
         return web.Response(status=200, text="ok")
@@ -754,6 +764,11 @@ def _decode_record(rec):
         assert len(pic) == w * h * 2
         return pic
     from PIL import Image
+    if fmt == 2:
+        assert pic[:2] == b"\xff\xd8"
+        img = Image.open(io.BytesIO(pic)).convert("RGB")
+        assert img.size == (w, h)
+        return None             # lossy: no exact pixels to compare
     assert fmt == 1 and pic[:4] == b"qoif"
     img = Image.open(io.BytesIO(pic)).convert("RGB")
     assert img.size == (w, h)
@@ -866,3 +881,75 @@ def test_batch_bodies_stay_under_the_limit():
             chunks = p._batch_chunks(small, "rgb565")   # 214 bytes each: all in one
             assert len(chunks) == 1 and len(chunks[0][1]) == 6 * 214 <= BATCH_MAX_BYTES
     asyncio.run(go())
+
+
+# ======================================================================
+# batches the clock holds in memory and transitions it plays (HA Tubes 2.5+)
+# ======================================================================
+
+@pytestmark_pil
+def test_send_screen_one_batch_with_the_transition():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        payloads[4] = _photo_payload()
+        order = [2, 3, 1, 4, 0, 5]
+        ok = await pusher.send_screen(payloads, {4}, "wipe", order, duration_ms=450, gap_ms=70)
+        assert ok is True and clock.posts == [] and len(clock.batches) == 1
+        assert clock.batch_params[0] == {"transition": "wipe", "order": "2,3,1,4,0,5",
+                                         "interrupt": "1", "duration": "450"}
+        recs = clock.batches[0]
+        assert [r[0] for r in recs] == order                       # in the transition's order
+        assert {r[0]: r[1] for r in recs}[4] == 2                  # the photo as JPEG
+        assert all(_decode_record(r) == payloads[r[0]] for r in recs if r[1] != 2)
+        assert pusher.tubes_to_send(payloads) == []                # all recorded as sent
+        ok = await pusher.send_screen(payloads, (), "cascade", [0, 1, 2, 3, 4, 5], gap_ms=70)
+        assert ok is True and clock.batch_params[1]["gap"] == "70" and "duration" not in clock.batch_params[1]
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["wipe", "cascade"]), check))
+
+
+@pytestmark_pil
+def test_send_screen_none_when_the_clock_cant():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_screen(payloads, (), "wipe", list(range(6))) is None
+        assert clock.batches == [] and clock.posts == []
+    _run(_with_fake_clock(FakeClock(batch=True), check))                     # 2.5 without holding
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["cascade"]), check))
+    _run(_with_fake_clock(FakeClock(batch=True, held=500, transitions=["wipe"]), check))   # too big
+
+    async def check_413(pusher, clock):
+        clock.batch_statuses = [413]
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_screen(payloads, (), "wipe", list(range(6))) is None
+        assert pusher.batch_buffer == 0
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["wipe"]), check_413))
+
+
+@pytestmark_pil
+def test_held_batches_use_the_clocks_room_and_413_falls_back_to_small_ones():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        assert [len(b) for b in clock.batches] == [6]              # one body: the clock holds it
+        clock.batch_statuses = [413]
+        payloads = [_flat_payload(i + 50) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        # the 413'd body, then bodies of at most 3 KB
+        assert [len(b) for b in clock.batches[1:]] == [6, 5, 1]
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["wipe"]), check))
+
+
+@pytestmark_pil
+def test_busy_drawing_503_waits_as_told():
+    slept = []
+
+    async def check(pusher, clock):
+        async def sleep(s):
+            slept.append(s)
+        pusher._sleep = sleep
+        clock.batch_statuses = [(503, {"X-Retry-After-Ms": "240"})]
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        assert await pusher.send_tubes(payloads) == list(range(TUBE_COUNT))
+        assert slept == [0.24] and len(clock.batches) == 2
+        assert pusher._backoff == 1.0                              # no backoff for a busy clock
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000, transitions=["wipe"]), check))
