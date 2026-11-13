@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.4
+
+- Dependency updates: jinja2 3.1.6 (security fixes), httpx 0.28.1.
+
 ## 1.0.3
 
 - Security: fastapi 0.162.4 (was 0.111.0, whose starlette 0.37.2 has known HIGH vulnerabilities fixed in starlette 1.3.1) and uvicorn 0.54.0 (was 0.30.1).

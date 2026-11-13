@@ -928,6 +928,22 @@ def test_transition_cascade_right_and_center_out_orders(tmp_path):
         assert [tube for tube, _ in pusher.tubes_sent] == order
 
 
+def test_transition_runs_on_a_button_press_in_button_only_mode(tmp_path):
+    """Rotation off: the clock's button sets the interrupt flag to wake the loop; the screen it
+    brings up must still play its transition (regression: it was skipped)."""
+    data = _transition_screens("center_out", delay=0)
+    data["rotation"] = ["a", "b"]
+    data["screens"]["b"] = dict(data["screens"]["a"])
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    controller.rotation_enabled = False
+    controller.current = "a"
+    controller.next_screen()                       # what the button does
+    assert controller._interrupted is True
+    asyncio.run(controller._manual_step())
+    assert [tube for tube, _ in pusher.tubes_sent] == [2, 3, 1, 4, 0, 5]
+    assert pusher.sent == []                       # not one plain send of all six
+
+
 def test_transition_wipe_sends_six_bands_per_tube_left_to_right(tmp_path):
     controller, time, pusher, mqtt = _make_controller(
         tmp_path, _transition_screens("wipe", delay=0))
