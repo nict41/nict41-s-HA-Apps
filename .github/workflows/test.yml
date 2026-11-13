@@ -20,7 +20,7 @@ jobs:
     outputs:
       test: ${{ steps.select.outputs.test }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -61,8 +61,8 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.select.outputs.test) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install ffmpeg
@@ -87,8 +87,8 @@ jobs:
     if: contains(needs.select.outputs.test, 'tube_display')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: Install dependencies
@@ -102,7 +102,7 @@ jobs:
         run: python -m pytest e2e -v
       - name: Upload failure screenshots
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-failure-screenshots
           path: tube_display/app/e2e/artifacts/

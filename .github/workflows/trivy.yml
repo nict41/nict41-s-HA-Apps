@@ -41,7 +41,7 @@ jobs:
       contents: read
       security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Scan for vulnerable dependencies and committed secrets
         run: |
@@ -72,7 +72,7 @@ jobs:
 
       - name: Upload findings to code scanning
         if: always() && !github.event.repository.private
-        uses: github/codeql-action/upload-sarif@5895b2c9be147bc7f1c75ce72c5cb577febb1907 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: trivy-repo.sarif
           category: trivy-repo
@@ -83,7 +83,7 @@ jobs:
     outputs:
       apps: ${{ steps.list.outputs.apps }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: list
         name: Every directory with a Dockerfile is an app image
         run: |
@@ -103,7 +103,7 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.list.outputs.apps) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The largest images (elegoo_slicer, android_dev) need more room than
       # the runner has spare once the image is also loaded for scanning.
@@ -112,8 +112,8 @@ jobs:
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache/CodeQL
           df -h / | tail -1
 
-      - uses: docker/setup-buildx-action@v3
-      - uses: crazy-max/ghaction-github-runtime@v3
+      - uses: docker/setup-buildx-action@v4
+      - uses: crazy-max/ghaction-github-runtime@v4
 
       # Built the way the Supervisor builds it on an amd64 machine. Layers
       # come from the cache the Build workflow wrote; nothing is written back.
@@ -167,7 +167,7 @@ jobs:
 
       - name: Upload findings to code scanning
         if: always() && !github.event.repository.private && hashFiles('trivy-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@5895b2c9be147bc7f1c75ce72c5cb577febb1907 # v4
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image-${{ matrix.app }}
