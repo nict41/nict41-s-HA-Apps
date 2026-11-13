@@ -43,35 +43,46 @@
       </div>
     </section>
     <section class="card" id="nightCard">
-      <h2>Night mode</h2>
-      <p class="hint">Sets the clock's brightness from the sun's elevation and dims the screens at night.</p>
+      <h2>Brightness</h2>
       <div class="row">
-        <label><input type="checkbox" id="nightEnabled"> Dim with the sun</label>
+        <label><input type="checkbox" id="nightEnabled"> Dim the clock at night, following the sun</label>
       </div>
+      <p class="hint" id="nightOffHint">Off: the clock stays at the brightness set on the clock or in Home Assistant.</p>
       <div id="nightFields" class="hidden">
         <div class="row">
-          <label>brightness day <input type="range" id="nightDay" min="10" max="255" step="1"> <span class="unit" id="nightDayVal"></span></label>
+          <label>Daytime brightness <input type="range" id="nightDay" min="5" max="100" step="1"> <span class="unit" id="nightDayVal"></span></label>
         </div>
         <div class="row">
-          <label>brightness night <input type="range" id="nightNight" min="10" max="255" step="1"> <span class="unit" id="nightNightVal"></span></label>
+          <label>Night brightness <input type="range" id="nightNight" min="1" max="100" step="1"> <span class="unit" id="nightNightVal"></span></label>
         </div>
         <div class="row">
-          <label>full day above <input type="number" id="nightAbove" step="0.5" title="sun elevation in degrees"> &deg;</label>
-          <label>full night below <input type="number" id="nightBelow" step="0.5" title="sun elevation in degrees"> &deg;</label>
+          <label>Dim <select id="nightWhen" style="max-width: 100%">
+            <option value="twilight">around sunset and sunrise</option>
+            <option value="dark">only once it's dark</option>
+            <option value="early">from late afternoon</option>
+            <option value="custom">at sun angles I choose</option>
+          </select></label>
         </div>
-        <div class="row">
-          <label>dim screens at night <input type="range" id="nightDim" min="20" max="100" step="1"> <span class="unit" id="nightDimVal"></span></label>
+        <div id="nightCustom" class="hidden">
+          <div class="row">
+            <label>daytime brightness while the sun is above <input type="number" id="nightAbove" step="0.5"> &deg;</label>
+            <label>night brightness once it's below <input type="number" id="nightBelow" step="0.5"> &deg;</label>
+          </div>
+          <p class="hint">0&deg; is the horizon, and around &minus;6&deg; it's getting dark. In between, the brightness changes gradually.</p>
         </div>
+        <p class="hint" id="nightNow"></p>
+        <p class="hint">While this is on, the app sets the clock's brightness about once a minute, so a brightness set on the clock or in Home Assistant only lasts until then.</p>
         <div class="row">
           <label><input type="checkbox" id="nightQuiet"> Quiet hours</label>
+          <span class="hint">a time each night when the app stops showing your screens</span>
         </div>
         <div id="quietFields" class="hidden">
           <div class="row">
             <label>from <input type="time" id="quietFrom"></label>
             <label>to <input type="time" id="quietTo"></label>
-            <label><select id="quietMode">
-              <option value="clock">show the clock</option>
-              <option value="blank">blank tubes</option>
+            <label>the tubes <select id="quietMode">
+              <option value="clock">show the clock's own time</option>
+              <option value="blank">go dark</option>
             </select></label>
           </div>
         </div>

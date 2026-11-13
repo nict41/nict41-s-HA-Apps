@@ -171,13 +171,33 @@ def test_night_mode_saved_with_defaults_and_quoted_times(page, screens_file):
     data = load_screens_file(screens_file)
     night = data["night"]
     assert night["brightness_day"] == 255
-    assert night["brightness_night"] == 50
+    assert night["brightness_night"] == 64
     assert night["bright_above"] == 3
     assert night["dim_below"] == -6
-    assert night["dim_screens"] == 0.6
+    assert "dim_screens" not in night           # one night brightness: the clock's own
     assert night["quiet"] == {"from": "23:00", "to": "07:00", "mode": "clock"}
     raw = read_screens_file(screens_file)
     assert '"23:00"' in raw and '"07:00"' in raw   # quoted, not sexagesimal ints
+
+
+def test_brightness_card_speaks_percent_and_merges_the_two_dimmers(page, screens_file):
+    page, base_url = page
+    open_editor(page, base_url)
+    page.check("#nightEnabled")
+    page.wait_for_selector("#nightFields:not(.hidden)")
+    assert page.input_value("#nightDay") == "100" and page.input_value("#nightNight") == "25"
+    assert page.input_value("#nightWhen") == "twilight"
+    page.wait_for_selector("#nightCustom", state="hidden")
+    # darker than the clock's lowest brightness (4%): the pictures dim the rest
+    page.fill("#nightNight", "2")
+    page.dispatch_event("#nightNight", "input")
+    page.select_option("#nightWhen", "early")
+    save(page)
+    night = load_screens_file(screens_file)["night"]
+    assert night["brightness_night"] == 10 and night["dim_screens"] == 0.51
+    assert night["bright_above"] == 10 and night["dim_below"] == 0
+    page.select_option("#nightWhen", "custom")
+    page.wait_for_selector("#nightCustom:not(.hidden)")
 
 
 # ---------------------------------------------------------------- f. clock picker
