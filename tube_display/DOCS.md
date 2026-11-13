@@ -85,11 +85,53 @@ every refresh.
 | `icon` | `icon: mdi:<name>` (Material Design Icons), optional `text` below, `color` (default Claude orange). Without `text` the icon is centred and a little bigger. Optional `icon_size`, `text_size`, `text_color` |
 | `image` | `source`: `builtin:claude` (procedural orange starburst), `file:<name>` (a picture you uploaded, see [Your own pictures](#your-own-pictures)), an `http(s)://` URL, `camera:<entity_id>` (HA camera proxy snapshot), `entity_picture:<entity_id>`; `fit`, `zoom`, `offset_x`, `offset_y`, `rotate`, `background`, see [Placing a picture](#placing-a-picture) |
 | `sparkline` | `entity`, `hours` (HA history API), optional `unit`, `color` — line graph with the latest value on top |
+| `graph` | `entity`, `hours` (24), `style: line\|area\|bars` (area), `label`, `unit`, `show_value` (true: the latest value big at the top), `min`/`max` (fixed axis; default from the data), `points` (bars: buckets, default 12), `color` — a history graph with the axis values at the left |
+| `progress` | `value` (0..`max`, default 100), `label`, `finish` (an ISO time, a unix timestamp or `HH:MM`), `eta_format: remaining\|time` ("23 min" or "12:45"), `color`, `track` — a gauge open at the bottom with the percentage in the middle and the ETA under it. For 3D prints, washing machines, downloads |
+| `analog_clock` | `tz` (e.g. `Europe/London`; default local time), `seconds` (true: a seconds hand that ticks on the clock), `numerals` (12/3/6/9 instead of tick marks), `label`, `color` (hands), `accent` (seconds hand), `face` |
+| `weather` | `entity` (a `weather.*`), `show: today\|now` (today adds the day's high and low from the forecast), `label`, `color`, `icon_color` — the condition's icon, the temperature and H/L |
+| `ticker` | `text` (e.g. headlines joined with " • "), `size` (28), `speed` (pixels a second, 40), `y` (the band's centre, 120), `color`, `background`, `label` — text that scrolls through a band of the tube about 10 times a second. Text that fits doesn't scroll |
+| `gif` | `source: file:<name>.gif` (from the picture library, at most 135x240 and 600 KB), `loop` (true), `background`, `x`/`y` — an animated GIF played **by the clock itself** (HA Tubes 2.4 or later) at the GIF's own frame rate, with no Wi-Fi traffic while it plays. At most two `gif` tubes per screen. Older firmware shows the first frame |
 | `custom` | `items`: your own layout, see [Custom tubes](#custom-tubes) |
 | `blank` | empty tube |
 
 Sizes are font sizes in pixels; leave one out (or `auto`) and the text is
 fitted to its space as before.
+
+**Fonts:** every widget that draws text has a `font` field, and a top-level
+`font:` sets the default for all screens. Bundled (SIL Open Font Licence):
+`bebas-neue`, `orbitron`, `share-tech-mono`, `oswald`, `jetbrains-mono`,
+`nunito`, `playfair`, `press-start`, `roboto-condensed`, `audiowide`. Your own
+`.ttf`/`.otf` files (**+ Upload font** in the editor, or copy them into
+`tube_display/fonts/`) are `file:<name>.ttf`. `weight: bold` uses the font's bold
+weight where it has one.
+
+**Transitions:** `transition: none|cascade|cascade_right|center_out|wipe` on a
+screen, or at the top level as the default, changes how a screen appears:
+`cascade` changes the tubes one after another from the left (`cascade_right`
+from the right, `center_out` from the middle), `wipe` draws each tube from the
+top down. `transition_delay` is the pause between tubes in ms (90). Only when a
+screen appears, never on a refresh.
+
+**Free design across all six tubes:** instead of `tubes` (or `strip`), a screen
+can have a `canvas` with `items` placed anywhere on the 810x240 picture, the same
+items as a [custom tube](#custom-tubes) with `x`/`y` across all six tubes:
+
+```yaml
+weather_wide:
+  canvas:
+    background: "#000000"
+    items:
+      - {type: icon, icon: mdi:weather-partly-cloudy, x: 67, y: 120, size: 100}
+      - {type: text, text: "{{ states('sensor.outside_temp') }}°", x: 270, y: 120, size: 120, font: bebas-neue}
+      - {type: bar, value: "{{ states('sensor.humidity') }}", max: 100, x: 607, y: 200, width: 380, height: 12}
+```
+
+The clock has gaps between its tubes, so keep text inside one tube or across a
+gap on purpose; the editor shows where they are.
+
+**Mistakes:** an unknown field doesn't stop a screen; it's listed as a warning
+with a guess ("unknown field 'colour' — did you mean 'color'?") in the log, in
+`GET /api/status` (`config_warnings`) and in the editor's status line.
 
 ### Placing a picture
 
@@ -221,6 +263,23 @@ logs them once per load. At start it logs one line, e.g.
 `Loaded 3 screens (0 errors, 2 warnings)`.
 
 <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-entity.webp" alt="Entity search and colour thresholds on a phone" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-template.webp" alt="A template value with its live result" width="300"> <img src="https://raw.githubusercontent.com/nict41/nict41-s-HA-Apps/main/tube_display/docs/editor-picture.webp" alt="The picture library" width="300">
+
+### Gallery, import, setup and conditions
+
+- **Add** offers ready-made screens: Clock, Weather, Now playing, 3D printer,
+  Energy now, Next event, Doorbell camera and a big analogue clock. Pick one,
+  choose the entities it asks for, and it's added to the rotation.
+- **Import** takes one or more screens pasted as YAML (from someone else, or
+  from **Export**, which shows the selected screen as YAML to copy or download).
+- **Setup** is a short wizard: it checks the clocks, suggests screens for the
+  entities you have (a weather entity, media players, a power sensor, a printer,
+  a calendar) and sets the rotation. It opens by itself while the screens file
+  is still the example the app wrote.
+- **Build…** next to *when* writes the condition for you: entities that are or
+  aren't in a state, above or below a value, between two values, and a time
+  window, combined with *all of* or *any of*. It shows whether it's true now.
+- **Show on clock** in the preview card shows the screen you're editing on the
+  clock while you change it, and hands back when you turn it off or leave.
 
 ### Undo, history, clocks and night mode
 
@@ -448,6 +507,19 @@ when it changes by 3 or more. A message, a pinned screen and the clock's button
 still work during quiet hours. Use the **Night mode** card in the editor
 instead of writing this by hand. If you had an automation that set the clock's
 brightness, turn it off, or the two will fight.
+
+## Faster pictures and GIFs (HA Tubes 2.4)
+
+On a clock with HA Tubes 2.4 or later the app sends compressed pictures:
+lossless QOI for dashboards (a typical tube is 1 to 3 KB instead of 64.8 KB, so
+all six change in about half a second instead of 1.3 s) and JPEG for photos
+and camera pictures when that's smaller. Older firmware still gets raw pixels.
+`GET /api/status` shows the `upload_format` per clock. The `gif` widget needs
+2.4 too.
+
+For a clock used only through Home Assistant, set the `firmware_variant`
+option to `ipstube_ha`: the HA-only build leaves out the clock's own weather,
+which leaves more memory free for GIFs and JPEG pictures.
 
 ## Live updates
 

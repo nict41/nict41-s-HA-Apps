@@ -6,6 +6,7 @@ speaking old and new /panel.
 """
 
 import asyncio
+import time
 import io
 
 import pytest
@@ -629,7 +630,9 @@ def test_status_upload_format_and_bytes_per_minute():
         sent_bytes = sum(len(b) for _, _, _, b in clock.posts)
         assert pusher.bytes_per_minute() == sent_bytes
         # the rolling window drops entries older than 60 s
-        pusher._sent_log = [(0.0, 12345)] + pusher._sent_log
+        # (relative to now: time.monotonic() counts from boot, which on a fresh CI runner
+        # can be less than a minute ago)
+        pusher._sent_log = [(time.monotonic() - 120.0, 12345)] + pusher._sent_log
         assert pusher.bytes_per_minute() == sent_bytes   # the old entry is dropped
     _run(_with_fake_clock(FakeClock(new_firmware=True), check))
 

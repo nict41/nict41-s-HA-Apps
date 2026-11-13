@@ -38,7 +38,11 @@ pictures on `POST /panel`); the stock time/date/weather firmware does not.
    API, and MQTT entities (screen select, rotation and pause switches,
    message text, next-screen button, current screen, clock online) appear
    under the device "Tube Display".
-7. Night mode sets the clock's brightness from the sun and dims the screens,
+7. Widgets for history graphs, progress with an ETA, weather, an analogue
+   clock, a scrolling ticker and animated GIFs (played by the clock itself),
+   ten fonts plus your own, free designs across all six tubes, transitions,
+   and a gallery of ready-made screens with a setup wizard.
+8. Night mode sets the clock's brightness from the sun and dims the screens,
    with optional quiet hours; new HA Tubes firmware releases are offered to
    the clock as a Home Assistant update; and one app can drive several
    clocks.
@@ -51,7 +55,7 @@ the MQTT entities and an example automation.
 ## Requirements
 
 - An IPSTube (or EleksTube-style) clock on the network running
-  [HA Tubes](https://github.com/nict41/HA-Tubes) 2.3.0 or later, and its MQTT id
+  [HA Tubes](https://github.com/nict41/HA-Tubes) 2.3.0 or later (2.4.0 for faster pictures and GIFs), and its MQTT id
   (shown on the clock's Info and MQTT pages).
 - The MQTT broker service enabled in Home Assistant (the app uses the
   broker the Supervisor injects; no credentials are stored in the app).
