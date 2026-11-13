@@ -127,6 +127,9 @@ def page(browser_context, server, viewport, request):
     page.on("console", lambda msg: errors.append(f"console.error: {msg.text}")
             if msg.type == "error" else None)
     page.on("pageerror", lambda err: errors.append(f"pageerror: {err}"))
+    # name the URL behind a "Failed to load resource" console error
+    page.on("response", lambda resp: errors.append(f"HTTP {resp.status}: {resp.request.method} {resp.url}")
+            if resp.status == 404 else None)
 
     # the page has no favicon; answer the browser's /favicon.ico with 204 so the
     # 404 does not show up as a console error (every console error fails a test)

@@ -49,7 +49,7 @@ def edit_tube0_text(page, new_text):
     field.wait_for(state="visible")
     field.fill(new_text)
     page.wait_for_function(
-        "state.previewUrl !== null && state.previewUrl !== arguments[0]",
+        "(prev) => state.previewUrl !== null && state.previewUrl !== prev",
         arg=old_preview)
 
 
@@ -152,7 +152,7 @@ def test_history_view_and_restore(page, screens_file):
     page.locator("#historyList .history-item button", has_text="Restore").click()
     page.wait_for_function(
         "state.data.screens.main.tubes[0].text === 'Hello tubes'")
-    page.wait_for_selector("#historyModal.hidden")
+    page.wait_for_selector("#historyModal", state="hidden")
     data = load_screens_file(screens_file)
     assert data["screens"]["main"]["tubes"][0]["text"] == "Hello tubes"
 
@@ -214,7 +214,7 @@ def test_gallery_add_clock_screen(page, screens_file):
     page.locator("#galleryGrid .gallery-card .g-name:text-is('Clock')").click()
     page.wait_for_selector("#galleryFormView:not(.hidden)")
     page.click("#galleryAdd")
-    page.wait_for_selector("#galleryModal.hidden")
+    page.wait_for_selector("#galleryModal", state="hidden")
     # the new screen is selected and in the rotation
     page.wait_for_function("state.selectedScreen === 'Clock'")
     page.wait_for_function("state.data.rotation.includes('Clock')")
@@ -244,7 +244,7 @@ def test_import_and_export(page, screens_file):
     page.wait_for_selector("#importModal:not(.hidden)")
     page.fill("#importText", IMPORT_YAML)
     page.click("#importDo")
-    page.wait_for_selector("#importModal.hidden")
+    page.wait_for_selector("#importModal", state="hidden")
     # the imported screen appears in the list, selected, and in the rotation
     page.wait_for_function("state.selectedScreen === 'imported screen'")
     page.wait_for_function("state.data.rotation.includes('imported screen')")
@@ -273,7 +273,7 @@ def test_when_builder_applies_template(page, screens_file):
     row.locator(".wc-op").select_option("above")
     row.locator(".wc-value").fill("20")
     page.click("#whenApply")
-    page.wait_for_selector("#whenModal.hidden")
+    page.wait_for_selector("#whenModal", state="hidden")
     page.wait_for_function(
         "document.getElementById('scrWhen').value.includes('> 20')")
     assert "> 20" in page.evaluate("state.data.screens.main.when")
@@ -295,7 +295,7 @@ def test_canvas_designer_tube_lines_and_drag(page, screens_file):
     assert page.locator(".designer-side .item-list .item-row").count() == 3
 
     # dragging the first item changes its x in the state
-    before = page.evaluate("state.data.screens.canvas.items[0].x")
+    before = page.evaluate("state.data.screens.canvas.canvas.items[0].x")
     box = page.locator(".designer-overlay .item-box").first.bounding_box()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     page.mouse.move(x, y)
@@ -303,7 +303,7 @@ def test_canvas_designer_tube_lines_and_drag(page, screens_file):
     page.mouse.move(x + 80, y, steps=5)
     page.mouse.up()
     page.wait_for_function(
-        "state.data.screens.canvas.items[0].x !== arguments[0]", arg=before)
+        "(prev) => state.data.screens.canvas.canvas.items[0].x !== prev", arg=before)
     assert page.locator("#saveBtn").is_enabled()
 
 
@@ -323,7 +323,7 @@ def test_font_select_lists_bundled_families(page, screens_file):
     old_preview = page.evaluate("state.previewUrl")
     page.select_option("#defaultFont", "bebas-neue")
     page.wait_for_function(
-        "state.previewUrl !== null && state.previewUrl !== arguments[0]",
+        "(prev) => state.previewUrl !== null && state.previewUrl !== prev",
         arg=old_preview)
     assert page.locator(".tube-img.broken").count() == 0
     assert "error" not in page.evaluate(
