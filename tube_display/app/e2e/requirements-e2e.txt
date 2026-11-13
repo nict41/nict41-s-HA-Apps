@@ -2,4 +2,4 @@
 # Browser e2e tests (e2e/): Python Playwright + pytest. Everything else the
 # stub server needs (aiohttp, PyYAML, ruamel.yaml, Pillow) is already in
 # requirements-dev.txt, which CI installs alongside this file.
-playwright==1.49.1
+playwright==1.65.1
