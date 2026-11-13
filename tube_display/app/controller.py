@@ -62,10 +62,17 @@ TRANSITION_ORDERS = {
     "wipe": [0, 1, 2, 3, 4, 5],
     "wipe_right": [5, 4, 3, 2, 1, 0],
     "wipe_center": [2, 3, 1, 4, 0, 5],
+    "flip": [0, 1, 2, 3, 4, 5],
+    "flip_right": [5, 4, 3, 2, 1, 0],
+    "flip_center": [2, 3, 1, 4, 0, 5],
 }
 WIPES = ("wipe", "wipe_right", "wipe_center")
-# HA Tubes 2.5+ plays transitions itself: what each one is called there (with the tube order above)
-FIRMWARE_TRANSITIONS = {t: ("wipe" if t in WIPES else "cascade") for t in TRANSITION_ORDERS}
+FLIPS = ("flip", "flip_right", "flip_center")
+# HA Tubes 2.5+ plays transitions itself: what each one is called there (with the tube order above).
+# A flip needs HA Tubes 2.6; on 2.5 the clock plays a wipe instead, and older clocks get the app's
+# own wipe.
+FIRMWARE_TRANSITIONS = {t: ("wipe" if t in WIPES else "flip" if t in FLIPS else "cascade")
+                        for t in TRANSITION_ORDERS}
 WIPE_BANDS = 6             # a wipe draws each tube top to bottom in this many bands
 WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
 # A wipe runs in steps: each tube starts one step after the tube to its left, and every step
@@ -87,12 +94,15 @@ PRERENDER_MAX_AGE = 2.0
 # clock's firmware cannot do
 NOTICE_GIF = "gif_needs_2_4"
 NOTICE_TRANSITIONS = "transitions_need_2_5"
+NOTICE_FLIP = "flip_needs_2_6"
 NOTICE_MESSAGES = {
     NOTICE_GIF: "A screen uses a gif tube, but this clock's firmware cannot play GIFs "
                 "(needs HA Tubes 2.4 or newer) - the first frame is shown instead.",
     NOTICE_TRANSITIONS: "A screen uses a transition, but this clock's firmware cannot play "
                         "transitions itself (needs HA Tubes 2.5 or newer) - the app plays a "
                         "simpler one instead.",
+    NOTICE_FLIP: "A screen uses a flip transition, but this clock's firmware cannot flip "
+                 "(needs HA Tubes 2.6 or newer) - it plays a wipe instead.",
 }
 
 
@@ -530,6 +540,12 @@ class Controller:
             if uses:
                 notices.append({"code": NOTICE_TRANSITIONS,
                                 "message": NOTICE_MESSAGES[NOTICE_TRANSITIONS]})
+        elif "flip" not in p.transitions:
+            default_t = cfg.transition
+            if default_t in FLIPS or any(
+                    (s.transition if s.transition is not None else default_t) in FLIPS
+                    for s in cfg.screens.values()):
+                notices.append({"code": NOTICE_FLIP, "message": NOTICE_MESSAGES[NOTICE_FLIP]})
         return notices
 
     def status(self) -> dict:
@@ -822,20 +838,27 @@ class Controller:
             send_screen = getattr(p, "send_screen", None)
             if send_screen is not None:
                 kind = FIRMWARE_TRANSITIONS.get(t, "cascade")
+                if kind == "flip" and "flip" not in (getattr(p, "transitions", None) or ()):
+                    kind = "wipe"   # HA Tubes 2.5: the closest it can play
                 ok = await send_screen(tube_bytes, photo, kind, order,
                                        duration_ms=duration_ms, gap_ms=delay_ms)
                 if ok is not None:
                     if ok:
                         # the clock is playing it: wait until it's done, so nothing else is
                         # sent meanwhile (an interrupt stops waiting; the next screen replaces it)
-                        left = duration_ms / 1000.0 if kind == "wipe" else delay * (len(order) - 1)
+                        if kind == "wipe":
+                            left = duration_ms / 1000.0
+                        elif kind == "flip":
+                            left = duration_ms / 1000.0 + delay * (len(order) - 1)
+                        else:
+                            left = delay * (len(order) - 1)
                         while left > 0 and not aborted():
                             step = min(0.05, left)
                             await self._sleep(step)
                             left -= step
                     return
 
-            if t in WIPES:
+            if t in WIPES or t in FLIPS:    # older clocks: the app's own wipe for a flip too
                 step_delay = delay * WIPE_DELAY_FACTOR
                 for step in range(WIPE_STEPS):
                     if aborted():

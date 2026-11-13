@@ -105,16 +105,22 @@ fitted to its space as before.
 `tube_display/fonts/`) are `file:<name>.ttf`. `weight: bold` uses the font's bold
 weight where it has one.
 
-**Transitions:** `transition: none|cascade|cascade_right|center_out|wipe|wipe_right|wipe_center`
+**Transitions:** `transition: none|cascade|cascade_right|center_out|wipe|wipe_right|wipe_center|flip|flip_right|flip_center`
 on a screen, or at the top level as the default, changes how a screen appears:
 `cascade` changes the tubes one after another from the left (`cascade_right`
 from the right, `center_out` from the middle), `wipe` draws the tubes from the
 top down, each starting a moment after the one to its left (`wipe_right` from
-the right, `wipe_center` from the middle). `transition_delay` is the pause
-between tubes of a cascade in ms (90), and `transition_duration` how long a wipe
-takes in ms (500, 100 to 5000). Only when a screen appears, never on a refresh.
+the right, `wipe_center` from the middle), and `flip` flips each tube like a
+split-flap display, the old top half folding down to uncover the new one and the
+new bottom half folding down over the old (`flip_right` from the right,
+`flip_center` from the middle). `transition_delay` is the pause between tubes of
+a cascade, or between the starts of the tubes' flips, in ms (90), and
+`transition_duration` how long a wipe takes, or each tube's flip, in ms (500, 100
+to 5000). A flip looks best with the delay at least a sixth of the duration, for
+example 450 and 80. Only when a screen appears, never on a refresh.
 On HA Tubes 2.5 the clock plays the transition itself, smoothly and exactly on
-time; with older firmware the app sends the tubes one after another.
+time; a flip needs HA Tubes 2.6 (2.5 plays a wipe instead). With older firmware
+the app sends the tubes one after another.
 
 **Free design across all six tubes:** instead of `tubes` (or `strip`), a screen
 can have a `canvas` with `items` placed anywhere on the 810x240 picture, the same

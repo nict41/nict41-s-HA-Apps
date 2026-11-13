@@ -1440,9 +1440,10 @@ def test_status_has_upload_format_and_bytes_per_minute(tmp_path):
 class FirmwareTransitionPusher(FakePusher):
     """HA Tubes 2.5+: plays transitions itself from send_screen (None = can't, fall back)."""
 
-    def __init__(self, result=True):
+    def __init__(self, result=True, transitions=("wipe", "cascade")):
         super().__init__()
         self.result = result
+        self.transitions = set(transitions)
         self.screens = []       # (kind, order, duration_ms, gap_ms, photo)
 
     async def send_screen(self, tube_bytes, photo_tubes, kind, order, duration_ms=500, gap_ms=90):
@@ -1470,6 +1471,38 @@ def test_firmware_plays_the_transition_and_the_app_waits_for_it(tmp_path):
         assert p.tubes_sent == [] and p.rects == [] and p.sent == []   # nothing sent the old way
         # the 0.5 s mode-switch pause, then waiting for the clock's transition to finish
         assert time.t - t0 == pytest.approx(0.5 + wait, abs=0.01)
+
+
+def test_firmware_plays_a_flip_with_duration_and_gap_and_the_app_waits(tmp_path):
+    for t, order in (("flip", [0, 1, 2, 3, 4, 5]), ("flip_right", [5, 4, 3, 2, 1, 0]),
+                     ("flip_center", [2, 3, 1, 4, 0, 5])):
+        data = _transition_screens(t, delay=80)
+        data["screens"]["a"]["transition_duration"] = 450
+        controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+        p = _with_pusher(controller, FirmwareTransitionPusher(
+            transitions=("wipe", "cascade", "flip")))
+        t0 = time.t
+        asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+        assert p.screens == [("flip", order, 450, 80, set())]
+        assert p.tubes_sent == [] and p.rects == [] and p.sent == []
+        # each tube's flip, plus the gaps between their starts
+        assert time.t - t0 == pytest.approx(0.5 + 0.45 + 5 * 0.08, abs=0.01)
+
+
+def test_flip_on_25_firmware_plays_its_wipe(tmp_path):
+    data = _transition_screens("flip_center", delay=80)
+    data["screens"]["a"]["transition_duration"] = 450
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    p = _with_pusher(controller, FirmwareTransitionPusher())      # wipe and cascade only
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert p.screens == [("wipe", [2, 3, 1, 4, 0, 5], 450, 80, set())]
+
+
+def test_flip_on_old_firmware_is_the_apps_own_wipe(tmp_path):
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _transition_screens("flip"))
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert len(pusher.rects) == 6 * 6       # six bands per tube, like a wipe
+    assert pusher.tubes_sent == []
 
 
 def test_firmware_transition_wait_stops_on_an_interrupt(tmp_path):
@@ -1796,6 +1829,27 @@ def test_status_no_notices_on_25_and_none_when_nothing_used(tmp_path):
     # 2.4 with no gif screen and no transition: no notices either
     controller2, *_ = _make_controller(tmp_path, _caps_screens(), pusher=CapsPusher(PANEL_24))
     assert controller2.status()["clock_info"]["notices"] == []
+
+
+PANEL_26 = dict(PANEL_25, transitions=["wipe", "cascade", "flip"], flip_memory=30720,
+                firmware="2.6.0")
+
+
+def test_status_notice_flip_on_25_only(tmp_path):
+    for screens in (_caps_screens(transition="flip"), _caps_screens(top="flip_center")):
+        controller, *_ = _make_controller(tmp_path, screens, pusher=CapsPusher(PANEL_25))
+        notices = controller.status()["clock_info"]["notices"]
+        assert [n["code"] for n in notices] == ["flip_needs_2_6"] and notices[0]["message"]
+        controller, *_ = _make_controller(tmp_path, screens, pusher=CapsPusher(PANEL_26))
+        assert controller.status()["clock_info"]["notices"] == []
+        # 2.4 can't play any transition itself: just that notice
+        controller, *_ = _make_controller(tmp_path, screens, pusher=CapsPusher(PANEL_24))
+        assert [n["code"] for n in controller.status()["clock_info"]["notices"]] == \
+            ["transitions_need_2_5"]
+    # a wipe on 2.5 is fine
+    controller, *_ = _make_controller(tmp_path, _caps_screens(transition="wipe"),
+                                      pusher=CapsPusher(PANEL_25))
+    assert controller.status()["clock_info"]["notices"] == []
 
 
 def test_status_no_notices_when_offline_or_caps_unknown(tmp_path):

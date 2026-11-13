@@ -424,8 +424,9 @@ class ClockPusher:
     async def send_screen(self, tube_bytes: list[bytes], photo_tubes, kind: str,
                           order: list[int], duration_ms: int = 500, gap_ms: int = 90) -> bool | None:
         """Send all six tubes in one batch that the clock draws with a transition of its own
-        (HA Tubes 2.5+): kind "wipe" (the whole wipe taking duration_ms) or "cascade"
-        (gap_ms between tubes), the tubes in `order`. It replaces whatever the clock is
+        (HA Tubes 2.5+): kind "wipe" (the whole wipe taking duration_ms), "cascade"
+        (gap_ms between tubes) or "flip" (HA Tubes 2.6+: each tube flipping over duration_ms,
+        starting gap_ms after the one before it), the tubes in `order`. It replaces whatever the clock is
         still drawing. Returns True when the clock took it, False when it failed, None
         when this clock can't (old firmware, or too big to hold now): send it another way."""
         await self._ensure_caps()
@@ -438,9 +439,9 @@ class ClockPusher:
         if len(body) > self.batch_buffer:
             return None
         params = {"transition": kind, "order": ",".join(str(i) for i in order), "interrupt": "1"}
-        if kind == "wipe":
+        if kind in ("wipe", "flip"):
             params["duration"] = str(int(duration_ms))
-        else:
+        if kind in ("cascade", "flip"):
             params["gap"] = str(int(gap_ms))
         status = await self._post_batch(rects, body, held=True, params=params)
         if status == "ok":
