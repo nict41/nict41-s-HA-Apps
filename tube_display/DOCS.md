@@ -303,7 +303,7 @@ logs them once per load. At start it logs one line, e.g.
   rotation you edit: *All clocks* is the shared one, and a clock can get its
   own (or go back to the shared one). *Cycle automatically* follows the same
   choice.
-- The **Night mode** card writes the `night:` block (see [Night mode](#night-mode)).
+- The **Brightness** card writes the `night:` block (see [Night mode](#night-mode)).
 - The line at the top right shows what each clock is showing, whether it's
   live, and its brightness. Next to it, a diagnostics line shows each clock's
   firmware, upload format, how long its last screen took to draw, how big a
@@ -522,8 +522,14 @@ night:
 
 The brightness is sent to `clock/<id>/set/brightness` about once a minute, only
 when it changes by 3 or more. A message, a pinned screen and the clock's button
-still work during quiet hours. Use the **Night mode** card in the editor
-instead of writing this by hand. If you had an automation that set the clock's
+still work during quiet hours. Use the **Brightness** card in the editor
+instead of writing this by hand: it shows a daytime and a night brightness in %,
+when to dim (around sunset and sunrise, only once it's dark, from late afternoon,
+or sun angles you choose) and what the brightness is right now. Its night
+brightness is `brightness_night` (as a share of 255) times `dim_screens`, as on
+a clock without hardware dimming both darken the same pixels; it sets
+`brightness_night` alone, down to the clock's lowest (10, about 4%), and
+`dim_screens` only for darker than that. If you had an automation that set the clock's
 brightness, turn it off, or the two will fight.
 
 ## Faster pictures, GIFs and transitions (HA Tubes 2.4 and 2.5)

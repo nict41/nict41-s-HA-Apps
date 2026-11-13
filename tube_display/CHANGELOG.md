@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- **Clearer brightness settings:** the editor's Night mode card is now **Brightness**, with a daytime and a night brightness in %, a plain choice of when to dim (around sunset and sunrise, only once it's dark, from late afternoon, or sun angles you choose) and a "Right now" line showing the current brightness and where the sun is. The two night dimmers (the clock's brightness and darkening the pictures) are one night brightness, as both darken the same pixels on the clock. Your saved settings keep working unchanged.
+
 ## 1.3.0
 
 - **Flip transition** (HA Tubes 2.6): `flip`, `flip_right` and `flip_center` flip the tubes like a split-flap display, each starting a moment after the one before it. `transition_duration` is each tube's flip and `transition_delay` the time between their starts; both can be set in the editor, and **Play on clock** tries it straight away. On HA Tubes 2.5 the clock plays a wipe instead, and a warning in Repairs says the clock needs updating (the integration is updated to 1.3.0 for that warning, which Home Assistant loads at its next restart).

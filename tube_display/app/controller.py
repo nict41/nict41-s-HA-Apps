@@ -158,6 +158,7 @@ class Controller:
 
         # night mode
         self.daylight = 1.0                       # 0..1, from the sun elevation
+        self.sun_elevation: float | None = None   # degrees, at the last night-mode tick
         self._brightness: int | None = None       # last brightness sent to the clock
         self._last_night_tick = -1e9
         self._quiet_shown = False
@@ -571,6 +572,9 @@ class Controller:
             "online": self._online(),
             "ota_busy": self._ota_busy(),
             "brightness": self._brightness,
+            # night mode: the sun and how much daylight it counts (None without night mode)
+            "sun_elevation": self.sun_elevation if cfg is not None and cfg.night is not None else None,
+            "daylight": self.daylight if cfg is not None and cfg.night is not None else None,
             "live": bool(self.live),
             "mirroring": self._mirror is not None
                           and self._now() < self._mirror[1],
@@ -706,6 +710,7 @@ class Controller:
         except Exception as err:
             _LOG.debug("Night mode: sun elevation unavailable (%s) - skipping", err)
             return
+        self.sun_elevation = elevation
         self.daylight = night_mod.daylight(elevation, night.bright_above, night.dim_below)
         target = night_mod.brightness(self.daylight, night.brightness_day, night.brightness_night)
         if self._brightness is None or abs(target - self._brightness) >= 3:

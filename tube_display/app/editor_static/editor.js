@@ -475,24 +475,54 @@ $("clockDuration").addEventListener("change", (e) => {
   markDirty();
 });
 
-// ---------------------------------------------------------------- night mode
+// ---------------------------------------------------------------- night mode (Brightness card)
+// The card speaks in what the tubes look like: a day and a night brightness in %, and when to
+// dim. In screens.yaml the night level is brightness_night (the clock's brightness, 10..255)
+// times dim_screens (the app darkening the pictures): on a clock without hardware dimming both
+// darken the pixels, so the card shows and sets their product as one "Night brightness". Below
+// 4% (the clock's lowest brightness, 10) the rest is done by dim_screens.
 
-const NIGHT_DEFAULTS = { brightness_day: 255, brightness_night: 50, bright_above: 3, dim_below: -6, dim_screens: 0.6 };
+const NIGHT_DEFAULTS = { brightness_day: 255, brightness_night: 64, bright_above: 3, dim_below: -6 };
+// "Dim ..." choices: sun elevation (degrees) for full day and full night
+const NIGHT_WHEN = {
+  twilight: { bright_above: 3, dim_below: -6 },
+  dark: { bright_above: -2, dim_below: -8 },
+  early: { bright_above: 10, dim_below: 0 },
+};
+const MIN_CLOCK_BRIGHTNESS = 10;
+let nightCustomChosen = false;   // "at sun angles I choose" picked: stays, even if they match a choice
+
+function nightLevel(n) {   // 0..1: how bright the tubes are at full night
+  const b = n.brightness_night != null ? n.brightness_night : NIGHT_DEFAULTS.brightness_night;
+  const d = n.dim_screens != null ? n.dim_screens : 1;
+  return (b / 255) * d;
+}
+
+function nightWhenOf(n) {
+  const above = n.bright_above != null ? n.bright_above : NIGHT_DEFAULTS.bright_above;
+  const below = n.dim_below != null ? n.dim_below : NIGHT_DEFAULTS.dim_below;
+  for (const [k, v] of Object.entries(NIGHT_WHEN)) {
+    if (v.bright_above === above && v.dim_below === below) return k;
+  }
+  return "custom";
+}
 
 function renderNight() {
   const n = state.data.night;
   $("nightEnabled").checked = !!n;
   $("nightFields").classList.toggle("hidden", !n);
+  $("nightOffHint").classList.toggle("hidden", !!n);
   if (!n) return;
-  $("nightDay").value = n.brightness_day != null ? n.brightness_day : NIGHT_DEFAULTS.brightness_day;
-  $("nightNight").value = n.brightness_night != null ? n.brightness_night : NIGHT_DEFAULTS.brightness_night;
+  const day = n.brightness_day != null ? n.brightness_day : NIGHT_DEFAULTS.brightness_day;
+  $("nightDay").value = Math.round(day / 255 * 100);
+  $("nightDayVal").textContent = $("nightDay").value + "%";
+  $("nightNight").value = Math.max(1, Math.round(nightLevel(n) * 100));
+  $("nightNightVal").textContent = $("nightNight").value + "%";
+  const when = nightCustomChosen ? "custom" : nightWhenOf(n);
+  $("nightWhen").value = when;
+  $("nightCustom").classList.toggle("hidden", when !== "custom");
   $("nightAbove").value = n.bright_above != null ? n.bright_above : NIGHT_DEFAULTS.bright_above;
   $("nightBelow").value = n.dim_below != null ? n.dim_below : NIGHT_DEFAULTS.dim_below;
-  const dim = n.dim_screens != null ? n.dim_screens : NIGHT_DEFAULTS.dim_screens;
-  $("nightDim").value = Math.round(dim * 100);
-  $("nightDayVal").textContent = $("nightDay").value;
-  $("nightNightVal").textContent = $("nightNight").value;
-  $("nightDimVal").textContent = $("nightDim").value + "%";
   const q = n.quiet;
   $("nightQuiet").checked = !!q;
   $("quietFields").classList.toggle("hidden", !q);
@@ -501,6 +531,25 @@ function renderNight() {
     $("quietTo").value = q.to || "07:00";
     $("quietMode").value = q.mode === "blank" ? "blank" : "clock";
   }
+  renderNightNow();
+}
+
+// "Right now: ..." from the clock's status (sun elevation, daylight and brightness the app set)
+let nightStatus = null;
+function renderNightNow() {
+  const el = $("nightNow");
+  const n = state.data.night;
+  const st = nightStatus;
+  if (!n || !st || st.brightness == null || st.daylight == null) { el.textContent = ""; return; }
+  const dimScreens = n.dim_screens != null ? n.dim_screens : 1;
+  const d = Math.min(1, Math.max(0, st.daylight));
+  const level = (st.brightness / 255) * (1 + (dimScreens - 1) * (1 - d));
+  let sun = "";
+  if (st.sun_elevation != null) {
+    const e = Math.round(st.sun_elevation);
+    sun = e > 0 ? ` (the sun is ${e}\u00b0 above the horizon)` : e < 0 ? ` (the sun is ${-e}\u00b0 below the horizon)` : " (the sun is on the horizon)";
+  }
+  el.textContent = `Right now: ${Math.round(level * 100)}%${sun}.`;
 }
 
 $("nightEnabled").addEventListener("change", (e) => {
@@ -509,33 +558,46 @@ $("nightEnabled").addEventListener("change", (e) => {
   markDirty(); renderNight();
 });
 
-function nightNum(id, key) {
-  $(id).addEventListener("input", (e) => {
-    const n = state.data.night; if (!n) return;
-    const v = parseFloat(e.target.value);
-    if (isFinite(v)) n[key] = v; else delete n[key];
-    if (id === "nightDay" || id === "nightNight") $(id + "Val").textContent = e.target.value;
-    if (id === "nightDim") $("nightDimVal").textContent = e.target.value + "%";
-    markDirty();
-  });
+$("nightDay").addEventListener("input", (e) => {
+  const n = state.data.night; if (!n) return;
+  const pct = parseInt(e.target.value, 10) || 100;
+  n.brightness_day = Math.max(MIN_CLOCK_BRIGHTNESS, Math.round(pct / 100 * 255));
+  $("nightDayVal").textContent = pct + "%";
+  markDirty();
+});
+
+$("nightNight").addEventListener("input", (e) => {
+  const n = state.data.night; if (!n) return;
+  const pct = parseInt(e.target.value, 10) || 1;
+  const target = pct / 100 * 255;       // on the clock's 0..255 scale
+  if (target >= MIN_CLOCK_BRIGHTNESS) {
+    n.brightness_night = Math.round(target);
+    delete n.dim_screens;
+  } else {                              // darker than the clock goes: the pictures dim the rest
+    n.brightness_night = MIN_CLOCK_BRIGHTNESS;
+    n.dim_screens = Math.round(target / MIN_CLOCK_BRIGHTNESS * 100) / 100;
+  }
+  $("nightNightVal").textContent = pct + "%";
+  markDirty(); renderNightNow();
+});
+
+$("nightWhen").addEventListener("change", (e) => {
+  const n = state.data.night; if (!n) return;
+  const preset = NIGHT_WHEN[e.target.value];
+  nightCustomChosen = !preset;
+  if (preset) Object.assign(n, preset);
+  markDirty(); renderNight();
+});
+
+for (const [id, key] of [["nightAbove", "bright_above"], ["nightBelow", "dim_below"]]) {
   $(id).addEventListener("change", (e) => {
     const n = state.data.night; if (!n) return;
     const v = parseFloat(e.target.value);
     if (isFinite(v)) n[key] = v; else delete n[key];
-    markDirty(); renderNight();
+    nightCustomChosen = true;
+    markDirty();
   });
 }
-nightNum("nightDay", "brightness_day");
-nightNum("nightNight", "brightness_night");
-nightNum("nightAbove", "bright_above");
-nightNum("nightBelow", "dim_below");
-$("nightDim").addEventListener("input", (e) => {
-  const n = state.data.night; if (!n) return;
-  n.dim_screens = Math.round(parseInt(e.target.value, 10) || 100) / 100;
-  $("nightDimVal").textContent = e.target.value + "%";
-  markDirty();
-});
-$("nightDim").addEventListener("change", () => { markDirty(); renderNight(); });
 
 $("nightQuiet").addEventListener("change", (e) => {
   const n = state.data.night; if (!n) return;
@@ -3051,6 +3113,9 @@ function diagText(st) {
 async function refreshClockChip() {
   const { status, body } = await api("api/status");
   if (status !== 200 || !body || !body.clocks) return;
+  const nightClock = state.selectedClock || (state.clocks[0] && state.clocks[0].name);
+  nightStatus = nightClock ? body.clocks[nightClock] || null : null;
+  renderNightNow();
   const parts = state.clocks
     .map((c) => c.name + ": " + chipText(body.clocks[c.name] || {}))
     .filter((p) => p);

@@ -1865,3 +1865,22 @@ def test_status_no_notices_when_offline_or_caps_unknown(tmp_path):
                                       pusher=p)
     assert controller2.status()["clock_info"]["notices"] == []
     assert controller2.status()["clock_info"]["firmware"] is None
+
+
+def test_status_reports_sun_and_daylight_with_night_mode(tmp_path):
+    data = _base_screens()
+    data["night"] = {"brightness_day": 255, "brightness_night": 64, "bright_above": 3, "dim_below": -6}
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data)
+    controller._renderer = lambda t: _async_value("-1.5")
+    asyncio.run(controller._night_tick())
+    st = controller.status()
+    assert st["sun_elevation"] == -1.5
+    assert st["daylight"] == pytest.approx(0.5)
+    assert st["brightness"] == round(64 + (255 - 64) * 0.5)
+    # without night mode: nothing
+    controller2, *_ = _make_controller(tmp_path, _base_screens())
+    assert controller2.status()["sun_elevation"] is None and controller2.status()["daylight"] is None
+
+
+async def _async_value(v):
+    return v
