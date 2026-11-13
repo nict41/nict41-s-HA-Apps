@@ -122,6 +122,59 @@ def test_sparkline_needs_entity():
     assert any("entity" in e for e in cfg.errors)
 
 
+def test_new_widget_types_accepted():
+    from screens import WIDGET_TYPES
+    for t in ("graph", "progress", "analog_clock", "weather", "ticker"):
+        assert t in WIDGET_TYPES
+    # one new type per screen (a screen has exactly 6 tubes)
+    widgets = [
+        {"type": "graph", "entity": "sensor.temp"},
+        {"type": "progress", "value": "42", "max": 100, "finish": "18:30", "eta_format": "time"},
+        {"type": "analog_clock", "tz": "Europe/Berlin", "seconds": True, "numerals": False},
+        {"type": "weather", "entity": "weather.home", "show": "now"},
+        {"type": "ticker", "text": "hello", "size": 28, "speed": 40},
+    ]
+    for w in widgets:
+        tubes = [{"type": "blank"}] * 5 + [w]
+        cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+        assert cfg.errors == [], (w["type"], cfg.errors)
+
+
+def test_graph_weather_need_entity():
+    for t in ("graph", "weather"):
+        tubes = [{"type": "blank"}] * 5 + [{"type": t}]
+        cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+        assert any("entity" in e for e in cfg.errors), t
+
+
+def test_graph_bad_style_rejected():
+    tubes = [{"type": "blank"}] * 5 + [{"type": "graph", "entity": "sensor.x", "style": "pie"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("style" in e and "pie" in e for e in cfg.errors)
+
+
+def test_progress_needs_value_and_valid_eta_format():
+    tubes = [{"type": "blank"}] * 5 + [{"type": "progress", "max": 100}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("value" in e for e in cfg.errors)
+    tubes = [{"type": "blank"}] * 5 + [{"type": "progress", "value": "5", "eta_format": "soon"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("eta_format" in e for e in cfg.errors)
+
+
+def test_weather_bad_show_rejected():
+    tubes = [{"type": "blank"}] * 5 + [{"type": "weather", "entity": "weather.x", "show": "week"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("show" in e for e in cfg.errors)
+
+
+def test_analog_clock_bool_fields_rejected_when_not_bool():
+    for f in ("seconds", "numerals"):
+        tubes = [{"type": "blank"}] * 5 + [{"type": "analog_clock", f: "yes"}]
+        cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+        assert any(f in e for e in cfg.errors), f
+
+
 def test_bad_strip_fit():
     cfg = parse_screens(_cfg(screens={"a": {"strip": {"source": "camera:x", "fit": "squish"}}}))
     assert any("fit" in e for e in cfg.errors)

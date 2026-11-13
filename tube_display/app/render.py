@@ -14,9 +14,17 @@ import os
 import logging
 import math
 import random
+import re
+import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # no tz database on this system: analog_clock falls back to local time
+    ZoneInfo = None
 
 import fonts
 from rgb565 import STRIP_H, STRIP_W, TUBE_H, TUBE_W
@@ -47,6 +55,10 @@ class RenderContext:
         self.record_boxes: dict[str, list] | None = None
         # (path, mtime) -> decoded picture, so a big photo isn't decoded on every refresh
         self.image_cache: dict[tuple, Image.Image] = {}
+        # entity -> (monotonic time, daily forecast), so the forecast API isn't hit every
+        # refresh; the clock is time.monotonic, injectable for tests
+        self.forecast_cache: dict[str, tuple[float, list]] = {}
+        self.now_monotonic = time.monotonic
 
     def note_error(self, key: str, msg: str) -> None:
         if self.last_errors.get(key) != msg:
@@ -158,6 +170,29 @@ def _parse_number(value: Any) -> float | None:
 # ---------------------------------------------------------------------------
 # template collection / resolution
 # ---------------------------------------------------------------------------
+
+# The template-capable fields of each widget type. Resolution itself walks every
+# string of a widget (collect_templates), so a template anywhere works; this table
+# is the documented contract the editor mirrors (editor.js FIELDS) and what tests
+# check - every field listed here must survive collect_templates/resolve_templates.
+_WIDGET_TEMPLATE_FIELDS = {
+    "text": ("text", "color"),
+    "big_number": ("value", "unit", "label", "color"),
+    "ring": ("value", "max", "label", "unit", "color"),
+    "bar": ("value", "max", "label", "unit", "color"),
+    "icon": ("icon", "text", "color"),
+    "image": ("source",),
+    "sparkline": ("entity", "hours", "unit", "color"),
+    "graph": ("entity", "hours", "style", "color", "label", "unit", "show_value",
+              "min", "max", "points"),
+    "progress": ("value", "max", "label", "finish", "eta_format", "color", "track"),
+    "analog_clock": ("tz", "seconds", "numerals", "label", "color", "accent", "face"),
+    "weather": ("entity", "label", "show", "color", "icon_color"),
+    "ticker": ("text", "size", "color", "background", "y", "speed", "label"),
+    "custom": (),
+    "blank": (),
+}
+
 
 def is_template(value: Any) -> bool:
     return isinstance(value, str) and ("{{" in value or "{%" in value)
@@ -800,6 +835,468 @@ async def draw_sparkline(w: dict, ctx: RenderContext, bg) -> Image.Image:
     return img
 
 
+# ---------------------------------------------------------------------------
+# graph: history graph of one entity (the bigger brother of sparkline)
+# ---------------------------------------------------------------------------
+
+def _history_values(states: list, hours: float) -> list[float]:
+    """Numeric states of a history reply, oldest first; non-numeric states are skipped."""
+    values: list[float] = []
+    for s in states or []:
+        if not isinstance(s, dict):
+            continue
+        v = _parse_number(s.get("state"))
+        if v is not None:
+            values.append(v)
+    return values
+
+
+def _resample(values: list[float], max_points: int) -> list[float]:
+    """Downsample to at most max_points values (mean of each bucket), keeping first and last."""
+    n = len(values)
+    if max_points <= 0 or n <= max_points:
+        return list(values)
+    out: list[float] = []
+    for i in range(max_points):
+        lo = i * n // max_points
+        hi = (i + 1) * n // max_points
+        bucket = values[lo:max(hi, lo + 1)]
+        out.append(sum(bucket) / len(bucket))
+    return out
+
+
+async def draw_graph(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """History graph of one entity: line, area (line + 35% fill) or bars (mean per bucket).
+
+    The axis is auto from the data unless min/max are given; the min/max values are drawn
+    small at the left, the label at the top and (show_value) the latest value big under it."""
+    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    draw = ImageDraw.Draw(img)
+    color = parse_color(w.get("color"), CLAUDE_ORANGE)
+    entity = str(w.get("entity") or "")
+    hours = _num(w.get("hours"), 24.0)
+    if hours <= 0:
+        hours = 24.0
+    style = str(w.get("style") or "area").lower()
+    if style not in ("line", "area", "bars"):
+        style = "area"
+    label = _str(w.get("label"))
+    unit = _str(w.get("unit"))
+    show_value = w.get("show_value", True)
+    if isinstance(show_value, str):
+        show_value = show_value.strip().lower() not in ("false", "0", "no", "off")
+    points = int(max(2, min(600, _num(w.get("points"), 12 if style == "bars" else 120))))
+    if ctx.ha is None:
+        raise ValueError("no HA client for graph")
+    states = await ctx.ha.history(entity, hours)
+    values = _history_values(states, hours)
+
+    top = 46 if (label or show_value) else 16
+    bottom = TUBE_H - 14
+    left, right = 26, TUBE_W - 8     # left margin leaves room for the axis values
+    if label:
+        _draw_centered(draw, TUBE_W // 2, 14, label, fonts.load_font(14),
+                       parse_color(w.get("label_color"), DEFAULT_COLOR))
+    if not values:
+        _draw_centered(draw, TUBE_W // 2, (top + bottom) // 2, "no data",
+                       fonts.load_font(16), DEFAULT_COLOR)
+        return img
+
+    lo = _parse_number(w.get("min"))
+    hi = _parse_number(w.get("max"))
+    if lo is None:
+        lo = min(values)
+    if hi is None:
+        hi = max(values)
+    if hi - lo < 1e-9:
+        hi = lo + 1.0
+
+    def xy(v: float, i: int, n: int) -> tuple[float, float]:
+        x = left + (right - left) * (i / max(n - 1, 1))
+        y = bottom - (bottom - top) * (v - lo) / (hi - lo)
+        return x, y
+
+    # faint baseline and the axis values small at the left
+    draw.line([(left, bottom), (right, bottom)], fill=(50, 50, 50), width=1)
+    axis_font = fonts.load_font(11)
+    axis_color = (150, 150, 150)
+    _draw_centered(draw, 2, top + 6, f"{hi:g}", axis_font, axis_color, align="left")
+    _draw_centered(draw, 2, bottom - 6, f"{lo:g}", axis_font, axis_color, align="left")
+
+    if style == "bars":
+        n = max(1, min(points, len(values)))
+        buckets: list[list[float]] = [[] for _ in range(n)]
+        for i, v in enumerate(values):
+            buckets[min(n - 1, i * n // len(values))].append(v)
+        means = [sum(b) / len(b) for b in buckets if b]
+        if not means:
+            _draw_centered(draw, TUBE_W // 2, (top + bottom) // 2, "no data",
+                           fonts.load_font(16), DEFAULT_COLOR)
+            return img
+        bw = (right - left) / n
+        for i, m in enumerate(means):
+            x0 = left + i * bw + 1
+            x1 = left + (i + 1) * bw - 1
+            _, y = xy(m, 0, 1)
+            draw.rectangle([x0, y, x1, bottom], fill=color)
+    else:
+        pts = [xy(v, i, len(values)) for i, v in enumerate(_resample(values, points))]
+        if style == "area":
+            # translucent fill: blend the colour 35% into the background
+            fill = tuple(int(c * 0.35 + b * 0.65) for c, b in zip(color, tuple(bg)))
+            draw.polygon(pts + [(pts[-1][0], bottom), (pts[0][0], bottom)], fill=fill)
+        draw.line(pts, fill=color, width=2, joint="curve")
+        draw.ellipse([pts[-1][0] - 3, pts[-1][1] - 3, pts[-1][0] + 3, pts[-1][1] + 3],
+                     fill=color)
+
+    if show_value:
+        latest = f"{values[-1]:g}" + unit
+        vfont = _font(draw, latest, _size(w.get("value_size")), TUBE_W - 8, 34, start=30, bold=True)
+        _draw_centered(draw, TUBE_W // 2, top - 22, latest, vfont,
+                       parse_color(w.get("value_color"), DEFAULT_COLOR))
+    return img
+
+
+# ---------------------------------------------------------------------------
+# progress: a 270 degree gauge with an ETA in the gap at the bottom
+# ---------------------------------------------------------------------------
+
+_ISO_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?"
+    r"(Z|[+-]\d{2}:?\d{2})?$")
+_HHMM_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _parse_finish(value: Any, now: datetime) -> datetime | None:
+    """A finish time as ISO datetime (tz-aware, or naive = local), unix timestamp, or
+    "HH:MM" (today, or tomorrow when that time has already passed). None when unparseable."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if _HHMM_RE.match(s):
+        h, m = (int(x) for x in _HHMM_RE.match(s).groups())
+        t = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if t <= now:
+            t += timedelta(days=1)
+        return t
+    n = _parse_number(s)
+    if n is not None and re.fullmatch(r"-?\d+(\.\d+)?", s):
+        try:
+            return datetime.fromtimestamp(n, tz=timezone.utc).astimezone(now.tzinfo or None)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if _ISO_RE.match(s):
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=now.tzinfo)   # naive ISO = local time
+        return dt
+    return None
+
+
+def format_eta(finish_value: str, now: datetime, fmt: str) -> str:
+    """The ETA text for a progress widget.
+
+    fmt "remaining": "23 min", "1 h 05", "done" when the finish is past (or <= 0).
+    fmt "time": "12:45" (local time of the finish). Garbage input -> ""."""
+    finish = _parse_finish(finish_value, now)
+    if finish is None:
+        return ""
+    # a naive `now` (datetime.now()) and a tz-aware finish can't be subtracted: make
+    # them match - an aware finish is read in local time, a naive one in now's zone
+    if finish.tzinfo is not None and now.tzinfo is None:
+        finish = finish.astimezone().replace(tzinfo=None)
+    elif finish.tzinfo is None and now.tzinfo is not None:
+        finish = finish.replace(tzinfo=now.tzinfo)
+    delta = (finish - now).total_seconds()
+    if fmt == "time":
+        return finish.astimezone(now.tzinfo or None).strftime("%H:%M") if delta > 0 else "done"
+    if delta <= 0:
+        return "done"
+    minutes = int(round(delta / 60))
+    if minutes < 1:
+        return "<1 min"
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d}"
+
+
+def draw_progress(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """270 degree arc (open at the bottom) with the percentage in the middle, the label
+    under it and the ETA text in the gap at the bottom."""
+    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    draw = ImageDraw.Draw(img)
+    color = parse_color(w.get("color"), CLAUDE_ORANGE)
+    track = parse_color(w.get("track"), (0x33, 0x33, 0x33))
+    frac = _gauge_fraction(w)
+    label = _str(w.get("label"))
+    r = 62
+    width = 12
+    cx, cy = TUBE_W // 2, 108
+    # 270 degrees open at the bottom: from 135 deg to 405 deg (0 = three o'clock, clockwise)
+    _draw_arc(img, cx, cy, r, width, frac, color, track, start=135, sweep=270)
+    pct = f"{round(frac * 100)}%"
+    vfont = _font(draw, pct, _size(w.get("value_size")), 2 * (r - width), 44, start=40, bold=True)
+    _draw_centered(draw, cx, cy - 6, pct, vfont, parse_color(w.get("value_color"), DEFAULT_COLOR))
+    if label:
+        _draw_centered(draw, cx, cy + 22, label, fonts.load_font(_size(w.get("label_size")) or 16),
+                       parse_color(w.get("label_color"), DEFAULT_COLOR))
+    eta = format_eta(_str(w.get("finish")), datetime.now(), str(w.get("eta_format") or "remaining"))
+    if eta:
+        _draw_centered(draw, cx, TUBE_H - 26, eta, fonts.load_font(18, bold=True),
+                       parse_color(w.get("eta_color"), color))
+    return img
+
+
+# ---------------------------------------------------------------------------
+# analog_clock: an analogue clock face, drawn at 3x and downscaled
+# ---------------------------------------------------------------------------
+
+def hand_angles(dt: datetime) -> tuple[float, float, float]:
+    """(hour, minute, second) hand angles in degrees, 0 = twelve o'clock, clockwise."""
+    second = dt.second + dt.microsecond / 1e6
+    minute = dt.minute + second / 60
+    hour = (dt.hour % 12) + minute / 60
+    return (hour * 30.0, minute * 6.0, second * 6.0)
+
+
+def _tzinfo(name: Any):
+    """A zoneinfo.ZoneInfo for an IANA name, or None (local time) when unknown/absent."""
+    if ZoneInfo is None or not name:
+        return None
+    try:
+        return ZoneInfo(str(name))
+    except Exception:
+        return None
+
+
+def draw_analog_clock(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """Analogue clock face at datetime.now(tz): face circle, 12 ticks (or 12/3/6/9 numerals),
+    hour/minute hands, an optional seconds hand, and a small label under the face."""
+    ss = 3   # draw at 3x and downsample, like the ring's 4x arcs, for smooth edges
+    img = Image.new("RGB", (TUBE_W * ss, TUBE_H * ss), tuple(bg))
+    draw = ImageDraw.Draw(img)
+    color = parse_color(w.get("color"), DEFAULT_COLOR)
+    accent = parse_color(w.get("accent"), CLAUDE_ORANGE)
+    face = parse_color(w.get("face"), (0x22, 0x22, 0x22))
+    seconds = w.get("seconds", True)
+    if isinstance(seconds, str):
+        seconds = seconds.strip().lower() not in ("false", "0", "no", "off")
+    numerals = bool(w.get("numerals", False))
+    now = datetime.now(_tzinfo(w.get("tz")))
+    cx, cy = TUBE_W * ss / 2, 104 * ss
+    r = 78 * ss
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=face, outline=color, width=2 * ss)
+    # ticks (or numerals at 12/3/6/9)
+    num_font = fonts.load_font(20 * ss, bold=True)
+    for i in range(12):
+        a = math.radians(i * 30)
+        if numerals and i % 3 == 0:
+            label = str(12 if i == 0 else i // 3 * 3)
+            tx = cx + math.sin(a) * (r - 16 * ss)
+            ty = cy - math.cos(a) * (r - 16 * ss)
+            _draw_centered(draw, tx, ty, label, num_font, color)
+        else:
+            x0 = cx + math.sin(a) * (r - 6 * ss)
+            y0 = cy - math.cos(a) * (r - 6 * ss)
+            x1 = cx + math.sin(a) * (r - (14 if i % 3 == 0 else 10) * ss)
+            y1 = cy - math.cos(a) * (r - (14 if i % 3 == 0 else 10) * ss)
+            draw.line([(x0, y0), (x1, y1)], fill=color, width=(3 if i % 3 == 0 else 2) * ss)
+    hour_deg, minute_deg, second_deg = hand_angles(now)
+
+    def hand(deg: float, length: float, width: float, col) -> None:
+        a = math.radians(deg)
+        draw.line([(cx, cy),
+                   (cx + math.sin(a) * length, cy - math.cos(a) * length)],
+                  fill=col, width=int(width * ss))
+        draw.ellipse([cx - 3 * ss, cy - 3 * ss, cx + 3 * ss, cy + 3 * ss], fill=col)
+
+    hand(hour_deg, r * 0.5, 5, color)
+    hand(minute_deg, r * 0.78, 3.5, color)
+    if seconds:
+        hand(second_deg, r * 0.86, 1.5, accent)
+    label = _str(w.get("label"))
+    if label:
+        _draw_centered(draw, cx, 208 * ss, label, fonts.load_font(16 * ss),
+                       parse_color(w.get("label_color"), DEFAULT_COLOR))
+    return img.resize((TUBE_W, TUBE_H), Image.LANCZOS)
+
+
+# ---------------------------------------------------------------------------
+# weather: current conditions of a weather.* entity
+# ---------------------------------------------------------------------------
+
+# HA condition -> mdi icon (unknown conditions fall back to cloudy)
+WEATHER_ICONS = {
+    "sunny": "mdi:weather-sunny",
+    "cloudy": "mdi:weather-cloudy",
+    "partlycloudy": "mdi:weather-partly-cloudy",
+    "rainy": "mdi:weather-rainy",
+    "pouring": "mdi:weather-pouring",
+    "snowy": "mdi:weather-snowy",
+    "snowy-rainy": "mdi:weather-snowy-rainy",
+    "fog": "mdi:weather-fog",
+    "hail": "mdi:weather-hail",
+    "lightning": "mdi:weather-lightning",
+    "lightning-rainy": "mdi:weather-lightning-rainy",
+    "windy": "mdi:weather-windy",
+    "windy-variant": "mdi:weather-windy-variant",
+    "clear-night": "mdi:weather-night",
+    "exceptional": "mdi:alert-circle-outline",
+}
+FORECAST_CACHE_SECONDS = 600   # 10 minutes
+
+
+async def _daily_forecast(entity: str, ctx: RenderContext) -> list[dict]:
+    """The daily forecast of a weather entity, cached per entity for 10 minutes."""
+    if ctx.ha is None:
+        return []
+    now = ctx.now_monotonic()
+    cached = ctx.forecast_cache.get(entity)
+    if cached is not None and now - cached[0] < FORECAST_CACHE_SECONDS:
+        return cached[1]
+    try:
+        forecast = await ctx.ha.forecast_daily(entity)
+    except Exception as err:
+        ctx.note_error(f"weather:{entity}", str(err))
+        forecast = []
+    ctx.forecast_cache[entity] = (now, forecast)
+    return forecast
+
+
+async def draw_weather(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """Current weather: big condition icon in the top half, temperature big, today's
+    high/low small (show: today) and the label at the bottom."""
+    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    draw = ImageDraw.Draw(img)
+    entity = str(w.get("entity") or "")
+    color = parse_color(w.get("color"), DEFAULT_COLOR)
+    icon_color = parse_color(w.get("icon_color"), (0xFF, 0xC1, 0x07))
+    show = str(w.get("show") or "today").lower()
+    if show not in ("today", "now"):
+        show = "today"
+    label = _str(w.get("label"))
+    if ctx.ha is None:
+        raise ValueError("no HA client for weather")
+    st = await ctx.ha.state(entity)
+    if not st:
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2, "no data", fonts.load_font(16), DEFAULT_COLOR)
+        return img
+    condition = str(st.get("state") or "").strip().lower()
+    icon = WEATHER_ICONS.get(condition, WEATHER_ICONS["cloudy"])
+    attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
+    temp = _parse_number(attrs.get("temperature"))
+    unit = attrs.get("temperature_unit") or "°"
+    _draw_mdi(draw, TUBE_W // 2, 62, icon, 84, icon_color)
+    if temp is not None:
+        text = f"{temp:g}{unit if unit != '°' else '°'}"
+        tfont = _font(draw, text, _size(w.get("temp_size")), TUBE_W - 8, 60, start=44, bold=True)
+        _draw_centered(draw, TUBE_W // 2, 140, text, tfont, color)
+    else:
+        _draw_centered(draw, TUBE_W // 2, 140, "--", fonts.load_font(36, bold=True), color)
+    if show == "today":
+        forecast = await _daily_forecast(entity, ctx)
+        today = None
+        today_str = datetime.now().date().isoformat()
+        for f in forecast:
+            dt = str(f.get("datetime") or "")[:10]
+            if dt == today_str:
+                today = f
+                break
+        if today is None and forecast:
+            today = forecast[0]     # no entry for today: the first one is the closest
+        if today is not None:
+            hi = _parse_number(today.get("temperature"))
+            lo = _parse_number(today.get("templow"))
+            if hi is not None or lo is not None:
+                hl = f"H {hi:g}{unit if hi is not None else ''} L {lo:g}{unit if lo is not None else ''}".replace("None", "--")
+                _draw_centered(draw, TUBE_W // 2, 178, hl, fonts.load_font(18),
+                               parse_color(w.get("hl_color"), DEFAULT_COLOR))
+    if label:
+        _draw_centered(draw, TUBE_W // 2, TUBE_H - 22, label, fonts.load_font(16),
+                       parse_color(w.get("label_color"), DEFAULT_COLOR))
+    return img
+
+
+# ---------------------------------------------------------------------------
+# ticker: a scrolling text band (the animation engine uses ticker_band/ticker_cycle)
+# ---------------------------------------------------------------------------
+
+TICKER_GAP = 60   # px of empty band between two loops of the text
+
+
+def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, int, int]]:
+    """The ticker's band image at scroll `offset` px, and its (x, y, w, h) in the tube.
+
+    `w` is the resolved widget dict. The band is TUBE_W x (size + 12) centred at y; the
+    text is drawn twice with a TICKER_GAP px gap so it loops seamlessly. Text narrower
+    than the tube is centred and does not scroll."""
+    size = _size(w.get("size")) or 28
+    band_h = size + 12
+    y = int(round(_num(w.get("y"), TUBE_H / 2)))
+    top = max(0, min(TUBE_H - band_h, y - band_h // 2))
+    band = Image.new("RGB", (TUBE_W, band_h), parse_color(w.get("background"), (0, 0, 0)))
+    draw = ImageDraw.Draw(band)
+    text = _str(w.get("text"))
+    color = parse_color(w.get("color"), DEFAULT_COLOR)
+    font = fonts.load_font(size, bold=True)
+    tw = _text_size(draw, text, font)[0] if text else 0
+    if not text:
+        return band, (0, top, TUBE_W, top + band_h)
+    if tw <= TUBE_W:
+        _draw_centered(draw, TUBE_W / 2, band_h / 2, text, font, color)
+    else:
+        # scroll left: draw the text at -offset and again one cycle later
+        cycle = tw + TICKER_GAP
+        start = -int(round(offset)) % cycle
+        x = start - cycle
+        while x < TUBE_W:
+            draw.text((x, 0), text, font=font, fill=color)
+            x += cycle
+    return band, (0, top, TUBE_W, top + band_h)
+
+
+def ticker_cycle(w: dict) -> float:
+    """Seconds for one full loop of the ticker: (text width + gap) / speed.
+    0 when the text fits the tube (it is centred and doesn't scroll)."""
+    speed = _num(w.get("speed"), 40.0)
+    if speed <= 0:
+        return 0.0
+    probe = Image.new("RGB", (1, 1))
+    size = _size(w.get("size")) or 28
+    tw = _text_size(ImageDraw.Draw(probe), _str(w.get("text")), fonts.load_font(size, bold=True))[0]
+    if tw <= TUBE_W:
+        return 0.0
+    return (tw + TICKER_GAP) / speed
+
+
+def draw_ticker(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """The static ticker: the label above the band plus the band at scroll offset 0.
+
+    The band colour defaults to the screen background, so the band is only visible
+    where the text is; ticker_band itself takes the colour from w["background"]."""
+    w = dict(w)
+    if w.get("background") is None:
+        w["background"] = "#%02X%02X%02X" % tuple(max(0, min(255, int(c))) for c in tuple(bg))
+    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    label = _str(w.get("label"))
+    if label:
+        draw = ImageDraw.Draw(img)
+        y = int(round(_num(w.get("y"), TUBE_H / 2)))
+        size = _size(w.get("size")) or 28
+        band_h = size + 12
+        top = max(0, min(TUBE_H - band_h, y - band_h // 2))
+        _draw_centered(draw, TUBE_W // 2, max(12, top - 12), label, fonts.load_font(14),
+                       parse_color(w.get("label_color"), DEFAULT_COLOR))
+    band, (x, y, bw, bh) = ticker_band(w, 0)
+    img.paste(band, (x, y))
+    return img
+
+
 def draw_blank(w: dict, ctx: RenderContext, bg) -> Image.Image:
     return Image.new("RGB", (TUBE_W, TUBE_H), bg)
 
@@ -810,12 +1307,17 @@ _WIDGET_DRAW = {
     "ring": draw_ring,
     "bar": draw_bar,
     "icon": draw_icon,
+    "progress": draw_progress,
+    "analog_clock": draw_analog_clock,
+    "ticker": draw_ticker,
     "blank": draw_blank,
 }
 _WIDGET_DRAW_ASYNC = {
     "custom": draw_custom,
     "image": draw_image,
     "sparkline": draw_sparkline,
+    "graph": draw_graph,
+    "weather": draw_weather,
 }
 
 

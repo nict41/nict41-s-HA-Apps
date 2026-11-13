@@ -195,6 +195,49 @@ def test_template_bytes_reply_is_decoded():
     assert asyncio.run(Fake().render_template("x")) == "42\nunder"
 
 
+def test_ha_state_and_forecast_daily():
+    import asyncio
+    from ha import HaClient, HaError
+
+    class Fake(HaClient):
+        def __init__(self, replies):
+            self.replies = replies
+            self.calls = []
+
+        async def _request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            r = self.replies.get((method, path))
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+    async def main():
+        # state(): the full state object, None on a 404-ish HaError
+        ha = Fake({("GET", "/states/weather.home"): {"state": "sunny", "attributes": {"temperature": 21}}})
+        assert await ha.state("weather.home") == {"state": "sunny", "attributes": {"temperature": 21}}
+        ha404 = Fake({("GET", "/states/weather.gone"): HaError("404")})
+        assert await ha404.state("weather.gone") is None
+
+        # forecast_daily(): the wrapped service_response shape
+        wrapped = {"service_response": {"weather.home": {"forecast": [
+            {"datetime": "2026-11-12T00:00:00+00:00", "temperature": 14, "templow": 6}]}}}
+        ha2 = Fake({("POST", "/services/weather/get_forecasts"): wrapped})
+        fc = await ha2.forecast_daily("weather.home")
+        assert fc == [{"datetime": "2026-11-12T00:00:00+00:00", "temperature": 14, "templow": 6}]
+        method, path, kwargs = ha2.calls[0]
+        assert method == "POST" and path == "/services/weather/get_forecasts"
+        assert kwargs["json"] == {"entity_id": "weather.home", "type": "daily"}
+        assert kwargs["params"] == {"return_response": "true"}
+        # the bare {"<entity>": {...}} shape is accepted too
+        ha3 = Fake({("POST", "/services/weather/get_forecasts"): {"weather.home": {"forecast": [{"temperature": 1}]}}})
+        assert await ha3.forecast_daily("weather.home") == [{"temperature": 1}]
+        # a failing call -> [] (the widget then just shows no high/low)
+        ha4 = Fake({("POST", "/services/weather/get_forecasts"): HaError("500")})
+        assert await ha4.forecast_daily("weather.home") == []
+
+    asyncio.run(main())
+
+
 def test_file_image_source_with_transparency(tmp_path):
     import asyncio
     import render
@@ -441,3 +484,265 @@ def test_render_message_long_text_wraps_to_at_most_3_lines():
     assert px
     assert min(p[0] for p in px) >= 8 - 2 and max(p[0] for p in px) <= STRIP_W - 8 + 2
     assert min(p[1] for p in px) >= 8 - 2 and max(p[1] for p in px) <= STRIP_H - 8 + 2
+
+
+# ----------------------------------------------------------------------
+# the five new widget types: graph, progress, analog_clock, weather, ticker
+# ----------------------------------------------------------------------
+
+class _FakeHa:
+    """history + state + forecast for the graph/weather tests."""
+
+    def __init__(self, states=None, weather=None, forecast=None):
+        self._states = states if states is not None else [{"state": str(v)} for v in (1, 5, 3, 9, 4, "unavailable", 7)]
+        self._weather = weather
+        self._forecast = forecast if forecast is not None else []
+        self.forecast_calls = 0
+
+    async def history(self, entity, hours):
+        return self._states
+
+    async def state(self, entity):
+        return self._weather
+
+    async def forecast_daily(self, entity):
+        self.forecast_calls += 1
+        return self._forecast
+
+
+def _ctx_ha(ha):
+    return render.RenderContext(lambda t: asyncio.sleep(0, result=t), ha=ha)
+
+
+def test_new_widget_types_are_registered():
+    for t in ("graph", "progress", "analog_clock", "weather", "ticker"):
+        assert t in render._WIDGET_DRAW or t in render._WIDGET_DRAW_ASYNC, t
+        assert t in render._WIDGET_TEMPLATE_FIELDS, t
+
+
+def test_widget_template_fields_cover_every_type():
+    # the editor mirrors this table; every widget type must have an entry
+    from screens import WIDGET_TYPES
+    assert set(render._WIDGET_TEMPLATE_FIELDS) == set(WIDGET_TYPES)
+
+
+def test_graph_renders_all_styles_and_skips_non_numeric():
+    ha = _FakeHa()
+    ctx = _ctx_ha(ha)
+    for style in ("line", "area", "bars"):
+        w = {"type": "graph", "entity": "sensor.temp", "hours": 24, "style": style,
+             "label": "Temp", "unit": "°", "color": "#D97757"}
+        img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0)), f"{style} must draw something"
+
+
+def test_graph_no_data_and_no_ha():
+    ctx = _ctx_ha(_FakeHa(states=[]))
+    img = asyncio.run(render.draw_graph({"type": "graph", "entity": "sensor.x"}, ctx, (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    assert _non_bg_pixels(img, (0, 0, 0))          # "no data"
+    # no HA client at all: raises, render_screen turns that into the "!" tile
+    with pytest.raises(ValueError):
+        asyncio.run(render.draw_graph({"type": "graph", "entity": "x"}, _ctx(), (0, 0, 0)))
+
+
+def test_graph_fixed_axis_and_resample():
+    values = list(range(500))                       # far more than the 120 point cap
+    ha = _FakeHa(states=[{"state": str(v)} for v in values])
+    ctx = _ctx_ha(ha)
+    w = {"type": "graph", "entity": "sensor.x", "style": "line", "min": 0, "max": 600,
+         "points": 120, "show_value": False}
+    img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    rs = render._resample(values, 120)
+    assert len(rs) == 120                            # capped at `points`
+    assert abs(sum(rs) / len(rs) - sum(values) / len(values)) < 1.0   # bucket means keep the average
+    assert render._resample([1, 2, 3], 120) == [1, 2, 3]   # fewer points than the cap: unchanged
+
+
+def test_graph_area_fill_is_35_percent_blend():
+    ha = _FakeHa(states=[{"state": str(v)} for v in (0, 10, 0)])
+    ctx = _ctx_ha(ha)
+    w = {"type": "graph", "entity": "sensor.x", "style": "area", "color": "#FF0000", "show_value": False}
+    img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+    # somewhere inside the filled area the pixel is red blended 35% into black
+    assert (89, 0, 0) in [img.getpixel((x, y)) for x in range(TUBE_W) for y in range(TUBE_H)]
+
+
+def test_progress_renders_and_clamps():
+    ctx = _ctx()
+    for value in ("42", "150", "junk"):
+        img = render.draw_progress({"type": "progress", "value": value, "max": 100,
+                                    "label": "Print", "finish": "2999-01-01T00:00:00+00:00"}, ctx, (0, 0, 0))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_format_eta_remaining():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+    assert render.format_eta("2026-11-12T12:23:00+00:00", now, "remaining") == "23 min"
+    assert render.format_eta("2026-11-12T13:05:00+00:00", now, "remaining") == "1 h 05"
+    assert render.format_eta("2026-11-12T12:00:30+00:00", now, "remaining") == "<1 min"
+    assert render.format_eta("2026-11-12T11:00:00Z", now, "remaining") == "done"     # past
+    assert render.format_eta("2026-11-12T12:00:00+00:00", now, "remaining") == "done"  # <= 0
+    assert render.format_eta("garbage", now, "remaining") == ""
+    assert render.format_eta("", now, "remaining") == ""
+    assert render.format_eta(None, now, "remaining") == ""
+
+
+def test_format_eta_time_and_epoch_and_hhmm():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+    assert render.format_eta("2026-11-12T14:23:00+00:00", now, "time") == "14:23"
+    assert render.format_eta("2026-11-12T11:00:00Z", now, "time") == "done"
+    epoch = int((now + timedelta(minutes=65)).timestamp())
+    assert render.format_eta(str(epoch), now, "remaining") == "1 h 05"
+    assert render.format_eta(f"{epoch}.5", now, "remaining") == "1 h 05"     # float epoch string
+    assert render.format_eta("13:30", now, "time") == "13:30"                # later today
+    # HH:MM already past today means tomorrow: still in the future, so "time" shows it
+    assert render.format_eta("11:30", now, "time") == "11:30"
+    assert render.format_eta("11:30", now, "remaining") == "23 h 30"
+    # naive ISO is read as local time; compare against the same instant in UTC
+    local_finish = datetime(2026, 11, 12, 12, 30, 0).astimezone(timezone.utc)
+    assert render.format_eta("2026-11-12T12:30:00", now, "remaining") == \
+        render.format_eta(local_finish.isoformat(), now, "remaining") == "30 min"
+    # naive now + aware finish must not crash (draw_progress passes datetime.now())
+    naive = datetime(2026, 11, 12, 12, 0, 0)
+    assert render.format_eta("2026-11-12T14:23:00+00:00", naive, "remaining") == "2 h 23"
+    assert render.format_eta("2026-11-12T12:30:00", naive, "time") == "12:30"
+
+
+def test_hand_angles():
+    from datetime import datetime
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 0, 0, 0))
+    assert (h, m, s) == (0.0, 0.0, 0.0)
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 3, 30, 15))
+    assert h == 105.125 and m == 181.5 and s == 90.0
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 23, 59, 59))
+    assert abs(h - (11 + 59 / 60 + 59 / 3600) * 30) < 1e-9
+    assert abs(m - (59 + 59 / 60) * 6) < 1e-9 and abs(s - 59 * 6) < 1e-9
+
+
+def test_analog_clock_renders_with_and_without_extras():
+    ctx = _ctx()
+    for w in ({"type": "analog_clock"},
+              {"type": "analog_clock", "tz": "Europe/Berlin", "label": "Berlin", "numerals": True},
+              {"type": "analog_clock", "seconds": False, "tz": "not/a-zone", "color": "#00FF00",
+               "accent": "#FF0000", "face": "#101010"}):
+        img = render.draw_analog_clock(w, ctx, (0, 0, 0))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_weather_icon_map_covers_all_conditions():
+    conditions = ("sunny", "cloudy", "partlycloudy", "rainy", "pouring", "snowy", "snowy-rainy",
+                  "fog", "hail", "lightning", "lightning-rainy", "windy", "windy-variant",
+                  "clear-night", "exceptional")
+    for c in conditions:
+        assert render.WEATHER_ICONS[c].startswith("mdi:weather-") or c == "exceptional"
+    assert render.WEATHER_ICONS["exceptional"] == "mdi:alert-circle-outline"
+    assert render.WEATHER_ICONS.get("made-up", render.WEATHER_ICONS["cloudy"]) == "mdi:weather-cloudy"
+
+
+def test_weather_renders_today_and_now():
+    from datetime import datetime
+    today = datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "partlycloudy",
+                          "attributes": {"temperature": 12.3, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 14, "templow": 6}])
+    ctx = _ctx_ha(ha)
+    for show in ("today", "now"):
+        img = asyncio.run(render.draw_weather(
+            {"type": "weather", "entity": "weather.home", "show": show, "label": "Home"}, ctx, (0, 0, 0)))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+    # unknown condition falls back to the cloudy icon, missing temperature shows "--"
+    ha2 = _FakeHa(weather={"state": "weird", "attributes": {}})
+    img = asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.x"}, _ctx_ha(ha2), (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    # entity gone -> "no data", no raise
+    img = asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.gone"},
+                                          _ctx_ha(_FakeHa(weather=None)), (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H) and _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_weather_forecast_cached_10_minutes():
+    from datetime import datetime
+    today = datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "sunny", "attributes": {"temperature": 20, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 21, "templow": 9}])
+    ctx = _ctx_ha(ha)
+    ticks = iter([1000.0, 1000.0, 1000.0 + 599, 1000.0 + 600])   # injectable clock
+    ctx.now_monotonic = lambda: next(ticks)
+    for _ in range(3):
+        asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.home"}, ctx, (0, 0, 0)))
+    assert ha.forecast_calls == 1                       # 2nd and 3rd call within 10 min: cache
+    asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.home"}, ctx, (0, 0, 0)))
+    assert ha.forecast_calls == 2                       # after 10 min: fetched again
+
+
+def test_ticker_band_and_cycle():
+    long_text = "headline one • headline two • headline three • " * 3
+    w = {"type": "ticker", "text": long_text, "size": 28, "y": 120, "speed": 40}
+    band, box = render.ticker_band(w, 0)
+    assert band.size == (TUBE_W, 28 + 12)
+    assert box == (0, 120 - 20, TUBE_W, 120 + 20)
+    cycle = render.ticker_cycle(w)
+    assert cycle > 0
+    # one full loop of the offset must give the same band again (seamless loop)
+    band2, _ = render.ticker_band(w, cycle * 40)       # offset = cycle * speed px
+    assert band.tobytes() == band2.tobytes()
+    # short text: centred, no scrolling
+    short = {"type": "ticker", "text": "hi", "size": 28, "speed": 40}
+    assert render.ticker_cycle(short) == 0.0
+    band3, box3 = render.ticker_band(short, 999)
+    band4, _ = render.ticker_band(short, 0)
+    assert band3.tobytes() == band4.tobytes()           # offset is ignored
+    # band position follows y, clamped to the tube
+    _, box5 = render.ticker_band({"text": "hi", "size": 28, "y": 5}, 0)
+    assert box5[1] == 0
+    _, box6 = render.ticker_band({"text": "hi", "size": 28, "y": 239}, 0)
+    assert box6[3] == TUBE_H
+
+
+def test_ticker_draw_static():
+    ctx = _ctx()
+    img = render.draw_ticker({"type": "ticker", "text": "news " * 30, "size": 28,
+                              "label": "News", "background": "#101010"}, ctx, (0, 0, 0))
+    assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+    # the band's background colour fills the band (top row of the band, left edge)
+    assert img.getpixel((2, 120 - 20)) == (0x10, 0x10, 0x10)
+    assert img.getpixel((2, 120 + 20 - 1)) == (0x10, 0x10, 0x10)
+    # empty text still draws the band, no raise
+    img = render.draw_ticker({"type": "ticker", "text": ""}, ctx, (0, 0, 0))
+    assert img.size == (TUBE_W, TUBE_H)
+
+
+def test_new_widgets_in_a_full_screen_with_templates():
+    async def renderer(t):
+        return {"{{ temp }}": "21.5", "{{ headlines }}": "a • b • c " * 10,
+                "{{ pct }}": "63", "{{ when_done }}": "2999-01-01T10:00:00+00:00"}.get(t, t)
+
+    today = __import__("datetime").datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "rainy", "attributes": {"temperature": 8, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 9, "templow": 4}])
+    ctx = render.RenderContext(renderer, ha=ha)
+    screen = Screen(name="s", tubes=[
+        {"type": "graph", "entity": "sensor.temp", "hours": "{{ h }}", "label": "{{ lbl }}",
+         "unit": "°", "color": "{{ col }}"},
+        {"type": "progress", "value": "{{ pct }}", "max": 100, "finish": "{{ when_done }}",
+         "label": "Print"},
+        {"type": "analog_clock", "tz": "Europe/Berlin", "label": "Berlin"},
+        {"type": "weather", "entity": "weather.home", "label": "{{ lbl }}"},
+        {"type": "ticker", "text": "{{ headlines }}", "size": 28, "speed": 40},
+        {"type": "blank"},
+    ])
+    # templates in the new widgets' fields are collected like any other field
+    assert "{{ h }}" in render.collect_templates(screen)
+    assert "{{ lbl }}" in render.collect_templates(screen)
+    assert "{{ col }}" in render.collect_templates(screen)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H) and strip.mode == "RGB"
+    assert ctx.last_errors == {}

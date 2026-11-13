@@ -17,7 +17,10 @@ from night import NightConfig, parse_night
 _LOG = logging.getLogger(__name__)
 
 CLOCK_ENTRY = "clock"  # rotation entry that hands the tubes back to the clock
-WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline", "custom", "blank")
+# Order matters: it is the order of the type <select> in the editor (graph sits next to
+# sparkline, the rest before custom/blank)
+WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline", "graph",
+                "progress", "analog_clock", "weather", "ticker", "custom", "blank")
 ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
 
@@ -101,9 +104,34 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
         if fit not in FITS:
             errors.append(f"{where}: image 'fit' must be one of {', '.join(FITS)}, got {fit!r}")
             return False
-    if wtype == "sparkline":
+    if wtype in ("sparkline", "graph", "weather"):
         if not isinstance(w.get("entity"), str) or not w["entity"]:
-            errors.append(f"{where}: sparkline widget needs an 'entity'")
+            errors.append(f"{where}: {wtype} widget needs an 'entity'")
+            return False
+    if wtype == "graph":
+        style = w.get("style", "area")
+        if style not in ("line", "area", "bars"):
+            errors.append(f"{where}: graph 'style' must be one of line, area, bars, got {style!r}")
+            return False
+    if wtype == "progress":
+        if "value" not in w:
+            errors.append(f"{where}: progress widget needs a 'value'")
+            return False
+        eta_format = w.get("eta_format", "remaining")
+        if eta_format not in ("time", "remaining"):
+            errors.append(f"{where}: progress 'eta_format' must be one of time, remaining, got {eta_format!r}")
+            return False
+    if wtype == "weather":
+        show = w.get("show", "today")
+        if show not in ("today", "now"):
+            errors.append(f"{where}: weather 'show' must be one of today, now, got {show!r}")
+            return False
+    if wtype == "analog_clock":
+        if "seconds" in w and not isinstance(w["seconds"], bool):
+            errors.append(f"{where}: analog_clock 'seconds' must be true or false, got {w['seconds']!r}")
+            return False
+        if "numerals" in w and not isinstance(w["numerals"], bool):
+            errors.append(f"{where}: analog_clock 'numerals' must be true or false, got {w['numerals']!r}")
             return False
     if wtype == "icon":
         icon = w.get("icon")
@@ -334,6 +362,16 @@ screens:
 #              entity_picture:<entity_id>, fit: cover|contain, zoom, offset_x, offset_y, rotate,
 #              background (the editor sets these when you drag the picture into place)
 #   sparkline  entity + hours, line graph from the HA history API, latest value shown
+#   graph      entity + hours, bigger history graph: style line|area|bars, optional label,
+#              unit, show_value, fixed min/max axis, points (bar buckets / max line points)
+#   progress   value 0..max with an ETA: finish (ISO datetime, unix timestamp or HH:MM),
+#              eta_format time|remaining, label, color, track - a 270 degree gauge
+#   analog_clock  analogue clock face: tz, seconds, numerals (12/3/6/9), label, color,
+#              accent (seconds hand), face
+#   weather    weather.* entity: condition icon + temperature, show today|now (today adds
+#              the daily high/low), label, color, icon_color
+#   ticker     scrolling text band: text (template), size, color, background, y, speed,
+#              label
 #   custom     items: a list of text / ring / bar / icon / image / rect, each placed by x, y
 #              (easiest with the editor's designer)
 #   blank      empty tube

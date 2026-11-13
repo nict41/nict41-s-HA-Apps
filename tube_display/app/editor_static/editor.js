@@ -2,7 +2,9 @@
    (the page is served under the HA ingress X-Ingress-Path prefix). */
 "use strict";
 
-const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "sparkline", "custom", "blank"];
+// Order = the type <select>: graph sits next to sparkline, the new types before custom/blank
+const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "sparkline", "graph",
+  "progress", "analog_clock", "weather", "ticker", "custom", "blank"];
 // fields per widget type, mirroring render._WIDGET_TEMPLATE_FIELDS plus the
 // other keys screens.py / render.py read
 const FIELDS = {
@@ -13,6 +15,11 @@ const FIELDS = {
   icon:       ["icon", "text", "color"],
   image:      ["source"],
   sparkline:  ["entity", "hours", "unit", "color"],
+  graph:      ["entity", "hours", "style", "label", "unit", "show_value", "color"],
+  progress:   ["value", "max", "label", "finish", "eta_format", "color", "track"],
+  analog_clock: ["tz", "seconds", "numerals", "label", "color", "accent", "face"],
+  weather:    ["entity", "label", "show", "color", "icon_color"],
+  ticker:     ["text", "size", "color", "background", "y", "speed", "label"],
   custom:     [],
   blank:      [],
 };
@@ -23,6 +30,11 @@ const MORE = {
   ring:       ["radius", "thickness", "value_size", "unit_size", "label_size", "value_color", "label_color"],
   bar:        ["value_size", "label_size", "value_color", "label_color"],
   icon:       ["icon_size", "text_size", "text_color"],
+  graph:      ["min", "max", "points", "value_size", "value_color", "label_color"],
+  progress:   ["value_size", "value_color", "label_size", "label_color", "eta_color"],
+  analog_clock: ["label_color"],
+  weather:    ["temp_size", "hl_color", "label_color"],
+  ticker:     ["label_color"],
 };
 // what a custom tube is made of (render.ITEM_TYPES) and each item's fields
 const ITEM_FIELDS = {
@@ -47,12 +59,18 @@ const SELECTS = {                         // first option = the default, not wri
   valign: ["middle", "top", "bottom"],
   weight: ["", "bold"],
   direction: ["", "right", "up", "left", "down"],
+  style: ["area", "line", "bars"],       // graph
+  eta_format: ["remaining", "time"],      // progress
+  show: ["today", "now"],                  // weather
 };
 const MULTILINE = ["label", "unit"];      // Enter adds a line
+const BOOL_FIELDS = ["show_value", "seconds", "numerals"];   // checkboxes, default = first
 const HINTS = {
   size: "auto", value_size: "auto", unit_size: "auto", label_size: "auto", icon_size: "auto", text_size: "auto",
   radius: "52", thickness: "12", max: "100", start: "-90", sweep: "360",
   width: "auto size: fit in", height: "auto size: fit in",
+  hours: "24", points: "12 bars / 120 line", y: "120", speed: "40",
+  finish: "ISO datetime, unix timestamp or HH:MM", tz: "IANA name, e.g. Europe/Berlin",
 };
 const isColorField = (f) => f === "color" || f.endsWith("_color") || f === "track";
 const hasTemplate = (v) => typeof v === "string" && (v.includes("{{") || v.includes("{%"));
@@ -758,6 +776,18 @@ function fieldRow(w, f, opts) {
     row.appendChild(valueSourceEditor(w, f));
   } else if (isColorField(f)) {
     row.appendChild(colorEditor(w, f));
+  } else if (BOOL_FIELDS.includes(f)) {
+    // a checkbox; the default (true for show_value/seconds, false for numerals) is not written
+    const def = f === "numerals" ? false : true;
+    const lab = document.createElement("label");
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = w[f] != null ? !!w[f] : def;
+    cb.addEventListener("change", () => {
+      if (cb.checked === def) delete w[f]; else w[f] = cb.checked;
+      markDirty(); schedulePreview();
+    });
+    lab.append(cb, document.createTextNode(" " + f.replace(/_/g, " ")));
+    row.appendChild(lab);
   } else if (f === "unit_newline") {
     const lab = document.createElement("label");
     const cb = document.createElement("input");
@@ -1577,10 +1607,11 @@ function colorEditor(w, f) {
     if (mode === "fixed") {
       const input = document.createElement("input");
       input.type = "color";
-      // With no colour set, start from what the tube really shows (icons, rings, bars and
-      // sparklines default to Claude orange), so picking white is a real change that gets saved
+      // With no colour set, start from what the tube really shows (icons, rings, bars,
+      // sparklines, graphs and progress arcs default to Claude orange), so picking white
+      // is a real change that gets saved
       const fallback = f === "track" ? "#3c3c3c" : f !== "color" ? "#ffffff"
-        : ["icon", "ring", "bar", "sparkline"].includes(w.type) ? "#d97757" : "#ffffff";
+        : ["icon", "ring", "bar", "sparkline", "graph", "progress"].includes(w.type) ? "#d97757" : "#ffffff";
       input.value = /^#[0-9a-fA-F]{6}$/.test(current) ? current : fallback;
       input.addEventListener("input", () => apply(input.value));
       input.addEventListener("change", () => apply(input.value));
@@ -1656,6 +1687,16 @@ function colorEditor(w, f) {
 
 // ---- tube buttons ---------------------------------------------------------
 
+// Sensible starting values when a tube's type is switched to one of the new types
+// (fields the old widget already had are kept by the generic loop above).
+const TYPE_DEFAULTS = {
+  graph:        { hours: 24, style: "area", show_value: true },
+  progress:     { max: 100, eta_format: "remaining" },
+  analog_clock: { seconds: true, numerals: false },
+  weather:      { show: "today" },
+  ticker:       { size: 28, y: 120, speed: 40 },
+};
+
 $("tType").addEventListener("change", (e) => {
   const s = curScreen(); if (!s || state.selectedTube == null) return;
   const w = s.tubes[state.selectedTube];
@@ -1663,6 +1704,7 @@ $("tType").addEventListener("change", (e) => {
   let nw = { type: e.target.value };
   // keep fields that exist for the new type
   (FIELDS[e.target.value] || []).concat(MORE[e.target.value] || []).forEach((f) => { if (f in old) nw[f] = old[f]; });
+  Object.assign(nw, JSON.parse(JSON.stringify(TYPE_DEFAULTS[e.target.value] || {})));
   if (e.target.value === "custom") nw = toCustom(old);
   state.designerSel = null;
   s.tubes[state.selectedTube] = nw;
