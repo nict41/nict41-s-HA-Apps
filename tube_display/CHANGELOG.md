@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Dependency updates: aiohttp 3.14.5, ruamel.yaml 0.19.1.
+
 ## 1.0.0
 
 - **New widgets:** `graph` (history as a line, area or bars), `progress` (a gauge with an ETA, for prints and washing machines), `analog_clock` (with a ticking seconds hand), `weather` (condition icon, temperature and today's high/low), `ticker` (scrolling text) and `gif` (an animated GIF played by the clock itself).

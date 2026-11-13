@@ -1,5 +1,5 @@
 name: "YouTube Music Sync"
-version: "0.2.6"
+version: "0.2.7"
 slug: "youtube_music_sync"
 description: "Mirrors the audio of public YouTube playlists into your music library, skipping tracks you already have"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/youtube_music_sync"

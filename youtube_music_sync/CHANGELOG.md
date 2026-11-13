@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7
+
+- New icon and logo. Dependency updates: yt-dlp 2026.10.26, paho-mqtt 2.2.0.
+
 ## 0.2.6
 
 - New `playlist_settings` option: per playlist (matched by URL, list= id or

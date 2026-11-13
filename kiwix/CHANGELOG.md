@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- Dependency updates: FastAPI 0.162.4 and uvicorn 0.54.0 (from 0.111 and 0.30, including security fixes), jinja2 3.1.6, httpx 0.28.1.
+
 ## 0.2.3
 
 - **Much faster installs and updates.** kiwix-serve and kiwix-manage now come

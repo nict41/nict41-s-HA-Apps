@@ -1,3 +1,7 @@
+## 0.16.3
+
+- Dependency updates: jinja2 3.1.6 (security fixes), APScheduler 3.11.3.
+
 ## 0.16.2
 
 - Security: Pillow 13.0.0 (was 10.4.0), python-multipart 0.0.33 (was 0.0.9), fastapi 0.162.4 (was 0.111.0, whose starlette 0.37.2 has known HIGH vulnerabilities fixed in starlette 1.3.1), uvicorn 0.54.0 (was 0.30.1) and websockets 17.4 (was 12.0, required by the new uvicorn), which fix known vulnerabilities.
