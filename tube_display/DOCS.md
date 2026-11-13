@@ -19,7 +19,7 @@ not accept panels.
 | `screens_file` | `/homeassistant/tube_display/screens.yaml` | Where the screens are kept (`tube_display/screens.yaml` in File editor). Uploaded pictures go in an `images` folder next to it. |
 | `clocks` | empty | More clocks, each `{name, host, mqtt_id, user, password}`. The clock in `clock_host` is called `main`. See [Several clocks](#several-clocks). |
 | `firmware_updates` | `true` | Offer new HA Tubes releases to the clocks, so Home Assistant shows a firmware update for each clock. See [Clock firmware updates](#clock-firmware-updates). |
-| `firmware_variant` | `ipstube` | Which HA Tubes build the clocks run: the part after `firmware-` in the release file names. |
+| `firmware_variant` | `ipstube_ha` | Which HA Tubes build the clocks run: the part after `firmware-` in the release file names. `ipstube_ha` is the recommended IPSTube build, the one the web installer chooses; `ipstube` is the standard build with the clock's own weather. |
 | `app_url` | empty | How a clock reaches this app's HTTP API, e.g. `http://192.168.8.25:8098`. Empty: the Home Assistant host's address and the host port the app's port 8098 is published on (Network settings). |
 
 The screens file lives in your Home Assistant config folder at
@@ -550,9 +550,10 @@ The app also renders the next screen of the rotation a moment before it's
 due, so a screen change (or a press of the clock's button) starts straight
 away instead of after the render.
 
-For a clock used only through Home Assistant, set the `firmware_variant`
-option to `ipstube_ha`: the HA-only build leaves out the clock's own weather,
-which leaves more memory free for GIFs and JPEG pictures.
+The `firmware_variant` option is `ipstube_ha` unless you change it: the
+Home Assistant-only build, which the web installer chooses. It leaves out the
+clock's own weather, which leaves more memory free for GIFs and JPEG pictures.
+If your clock runs the standard build, set it to `ipstube`.
 
 ## Live updates
 

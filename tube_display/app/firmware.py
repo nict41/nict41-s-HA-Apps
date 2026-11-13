@@ -46,7 +46,7 @@ class FirmwarePublisher:
                  publish: Callable[[str, str], Awaitable[None]],
                  clock_ids: Callable[[], list[str]],
                  base_url: Callable[[], Awaitable[str | None]],
-                 repo: str = "nict41/HA-Tubes", variant: str = "ipstube",
+                 repo: str = "nict41/HA-Tubes", variant: str = "ipstube_ha",
                  api_base: str = "https://api.github.com",
                  interval: float = 6 * 3600,
                  sleep: Callable[[float], Awaitable[None]] = asyncio.sleep) -> None:

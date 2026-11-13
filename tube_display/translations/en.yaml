@@ -53,7 +53,7 @@ configuration:
     name: Firmware variant
     description: >-
       Which build of HA Tubes the clocks run (the part after firmware- in the release
-      file names). ipstube for the IPSTube H401/H402 clocks.
+      file names). ipstube_ha (the default) for an IPSTube H401/H402 running the Home Assistant-only build, ipstube for the standard build.
   app_url:
     name: App address for the clock
     description: >-
