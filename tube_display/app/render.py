@@ -938,3 +938,14 @@ async def screen_when_true(screen: Screen, ctx: RenderContext) -> bool:
         ctx.note_error(f"{screen.name}:when", str(err))
         return False
     return str(result).strip().lower() == "true"
+
+
+async def resolved_tubes(screen: Screen, ctx: RenderContext) -> list[dict | None]:
+    """The screen's six tube widget dicts with their templates resolved exactly as
+    render_screen does it (same resolve_templates + _resolved_widget pass), for
+    consumers that need the widgets themselves (e.g. animate.py's animators).
+    Strip screens have no per-tube widgets: a list of six None."""
+    if screen.strip is not None:
+        return [None] * 6
+    resolved = await resolve_templates(screen, ctx)
+    return [_resolved_widget(w, resolved) for w in screen.tubes]

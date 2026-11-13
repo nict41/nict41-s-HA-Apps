@@ -590,6 +590,7 @@ function renderScreenSettings() {
   $("scrBackground").value = /^#[0-9a-fA-F]{6}$/.test(s.background || "") ? s.background : "#000000";
   $("scrWhen").value = s.when || "";
   $("scrLayout").value = s.strip ? "strip" : "tubes";
+  $("scrTransition").value = s.transition != null ? s.transition : "";
 }
 
 function bindScreenSettings() {
@@ -613,6 +614,11 @@ function bindScreenSettings() {
   $("scrWhen").addEventListener("change", (e) => {
     const s = curScreen(); if (!s) return;
     if (e.target.value.trim()) s.when = e.target.value; else delete s.when;
+    markDirty(); schedulePreview();
+  });
+  $("scrTransition").addEventListener("change", (e) => {
+    const s = curScreen(); if (!s) return;
+    if (e.target.value) s.transition = e.target.value; else delete s.transition;  // "" = default
     markDirty(); schedulePreview();
   });
 }
@@ -681,6 +687,7 @@ async function refreshPreview() {
     });
     box.appendChild(img);
   }
+  scheduleMirrorPost();      // while "Show on clock" is on, every preview refresh re-POSTs
 }
 
 function markSelectedTube() {
@@ -690,6 +697,97 @@ function markSelectedTube() {
 }
 
 $("refreshPreview").addEventListener("click", () => refreshPreview());
+
+// ---------------------------------------------------------------- live mirror ("Show on clock")
+
+// While on, the current screen is POSTed to api/mirror after every preview refresh
+// (at most once per second, trailing call guaranteed) and re-POSTed every 60 s to
+// keep it alive. Turning it off, hiding or closing the editor ends the mirror.
+const mirror = { on: false, lastPost: 0, pending: null, keepAlive: null };
+
+// with 2+ clocks: the clock chosen in the clock picker; with one clock: that clock;
+// with "All clocks" chosen: no "clock" field, so the server uses the first clock
+function mirrorClockName() {
+  if (state.selectedClock) return state.selectedClock;
+  if (state.clocks.length === 1) return state.clocks[0].name;
+  return null;
+}
+
+function renderMirrorBtn() {
+  const btn = $("mirrorBtn");
+  btn.classList.toggle("hidden", state.clocks.length === 0);
+  btn.classList.toggle("primary", mirror.on);   // accent colour while showing
+  btn.textContent = mirror.on ? "Showing on clock" : "Show on clock";
+}
+
+async function postMirror() {
+  const s = curScreen();
+  if (!s || !mirror.on) return;
+  mirror.lastPost = Date.now();
+  const payload = { screen: s, seconds: 120 };
+  const clock = mirrorClockName();
+  if (clock) payload.clock = clock;
+  await api("api/mirror", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// at most one POST per second, with a trailing call guaranteed
+function scheduleMirrorPost() {
+  if (!mirror.on) return;
+  const wait = Math.max(0, 1000 - (Date.now() - mirror.lastPost));
+  clearTimeout(mirror.pending);
+  mirror.pending = setTimeout(async () => {
+    mirror.pending = null;
+    await postMirror();
+  }, wait);
+}
+
+async function mirrorOff() {
+  if (!mirror.on) return;
+  mirror.on = false;
+  clearTimeout(mirror.pending);
+  clearInterval(mirror.keepAlive);
+  mirror.keepAlive = null;
+  renderMirrorBtn();
+  const payload = {};
+  const clock = mirrorClockName();
+  if (clock) payload.clock = clock;
+  try {
+    await api("api/mirror", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) { /* the clock may be gone; the mirror expires on its own */ }
+}
+
+$("mirrorBtn").addEventListener("click", async () => {
+  if (mirror.on) { await mirrorOff(); return; }
+  mirror.on = true;
+  renderMirrorBtn();
+  await postMirror();       // show right away, not after the first preview refresh
+  mirror.keepAlive = setInterval(() => { if (mirror.on) postMirror(); }, 60000);
+});
+
+// hidden editor: stop mirroring (the clock keeps the last picture until it expires)
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) mirrorOff();
+});
+// closed editor: sendBeacon cannot DELETE, so POST the api/mirror/end alias too
+window.addEventListener("pagehide", () => {
+  if (!mirror.on) return;
+  mirror.on = false;
+  const payload = {};
+  const clock = mirrorClockName();
+  if (clock) payload.clock = clock;
+  try {
+    navigator.sendBeacon("api/mirror/end",
+                         new Blob([JSON.stringify(payload)], { type: "application/json" }));
+  } catch (e) { /* nothing more we can do while unloading */ }
+});
 
 // ---------------------------------------------------------------- tube editor
 
@@ -1893,6 +1991,7 @@ async function fetchClocks() {
   state.clocks = (status === 200 && body && Array.isArray(body.clocks)) ? body.clocks : [];
   renderClockSelect();
   renderRotation();
+  renderMirrorBtn();          // the "Show on clock" button is hidden with no clocks
   const chip = $("clockChip");
   chip.classList.toggle("hidden", state.clocks.length === 0);
   if (state.clocks.length) refreshClockChip();

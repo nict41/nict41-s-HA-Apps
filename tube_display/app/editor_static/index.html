@@ -92,6 +92,14 @@
           <option value="tubes">six tubes</option>
           <option value="strip">one picture across all six</option>
         </select></label>
+        <label>transition <select id="scrTransition">
+          <option value="">default</option>
+          <option value="none">none</option>
+          <option value="cascade">cascade</option>
+          <option value="cascade_right">cascade right</option>
+          <option value="center_out">centre out</option>
+          <option value="wipe">wipe</option>
+        </select></label>
         <label class="wide">when (template, optional) <input type="text" id="scrWhen" placeholder="{{ is_state('...','on') }}"></label>
       </div>
       <div class="row">
@@ -103,6 +111,7 @@
     <div class="card preview-card">
       <div class="preview-head">
         <h2>Preview</h2>
+        <button id="mirrorBtn" class="btn small hidden" title="Show this screen on the clock while you edit">Show on clock</button>
         <button id="refreshPreview" class="btn small">Refresh</button>
       </div>
       <div id="tubes" class="tubes"></div>

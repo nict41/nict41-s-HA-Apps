@@ -441,3 +441,36 @@ def test_render_message_long_text_wraps_to_at_most_3_lines():
     assert px
     assert min(p[0] for p in px) >= 8 - 2 and max(p[0] for p in px) <= STRIP_W - 8 + 2
     assert min(p[1] for p in px) >= 8 - 2 and max(p[1] for p in px) <= STRIP_H - 8 + 2
+
+
+# ----------------------------------------------------------------------
+# resolved_tubes: the screen's six widgets with templates resolved
+# ----------------------------------------------------------------------
+
+def test_resolved_tubes_resolves_templates_like_render_screen():
+    async def renderer(t):
+        return {"{{ v }}" : "42"}.get(t, t)
+    ctx = render.RenderContext(renderer)
+    screen = Screen(name="s", tubes=[
+        {"type": "text", "text": "{{ v }}"},
+        {"type": "big_number", "value": "{{ v }}", "unit": "%"},
+        {"type": "blank"},
+        {"type": "custom", "items": [{"type": "text", "text": "{{ v }}", "x": 1, "y": 2}]},
+        {"type": "ring", "value": "{{ v }}", "max": 100},
+        {"type": "text", "text": "plain"},
+    ])
+    tubes = asyncio.run(render.resolved_tubes(screen, ctx))
+    assert len(tubes) == 6
+    assert tubes[0]["text"] == "42"
+    assert tubes[1]["value"] == "42"
+    assert tubes[3]["items"][0]["text"] == "42"     # nested inside custom items
+    assert tubes[4]["value"] == "42"
+    assert tubes[5]["text"] == "plain"
+    # the original widget dicts are not mutated
+    assert screen.tubes[0]["text"] == "{{ v }}"
+
+
+def test_resolved_tubes_strip_screen_is_six_nones():
+    ctx = _ctx()
+    screen = Screen(name="s", strip={"source": "camera:x"})
+    assert asyncio.run(render.resolved_tubes(screen, ctx)) == [None] * 6

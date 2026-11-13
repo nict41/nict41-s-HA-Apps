@@ -249,3 +249,123 @@ def test_probe_non_200_marks_unreachable():
     p = _pusher(BadStatusSession())
     assert asyncio.run(p.probe()) is False
     assert p.reachable is False
+
+
+# ----------------------------------------------------------------------
+# partial uploads: send_rect
+# ----------------------------------------------------------------------
+
+def _rect_payload(w, h, seed):
+    return bytes([seed]) * (w * h * 2)
+
+
+def test_send_rect_posts_params_and_body():
+    session = FakeSession()
+    p = _pusher(session)
+    data = _rect_payload(135, 40, 7)
+    ok = asyncio.run(p.send_rect(2, 0, 40, 135, 40, data))
+    assert ok is True
+    params, body = session.posts[-1]
+    assert params == {"tube": 2, "x": 0, "y": 40, "w": 135, "h": 40}
+    assert body == data
+    assert len(body) == 135 * 40 * 2
+
+
+def test_send_rect_validates_arguments():
+    p = _pusher(FakeSession())
+    with pytest.raises(ValueError):
+        asyncio.run(p.send_rect(6, 0, 0, 10, 10, b"\x00" * 200))       # tube out of range
+    with pytest.raises(ValueError):
+        asyncio.run(p.send_rect(0, 130, 0, 10, 10, b"\x00" * 200))      # x+w > 135
+    with pytest.raises(ValueError):
+        asyncio.run(p.send_rect(0, 0, 230, 10, 20, b"\x00" * 400))      # y+h > 240
+    with pytest.raises(ValueError):
+        asyncio.run(p.send_rect(0, 0, 0, 10, 10, b"\x00" * 100))        # wrong body size
+
+
+def test_send_rect_patches_last_bytes_and_hash():
+    """After a full send, a rect upload patches those rows into _last_bytes, so a
+    later full refresh only resends the tube if the full picture really differs."""
+    session = FakeSession()
+    p = _pusher(session)
+    full = [_payload(i) for i in range(TUBE_COUNT)]
+    asyncio.run(p.send_tubes(full))
+    # rect on tube 1, rows 40..79, all pixels 0xAB
+    rect = _rect_payload(135, 40, 0xAB)
+    assert asyncio.run(p.send_rect(1, 0, 40, 135, 40, rect)) is True
+    # the patched bytes equal a full tube with rows 40..79 replaced
+    expected = bytearray(_payload(1))
+    for row in range(40, 80):
+        expected[row * 135 * 2:(row + 1) * 135 * 2] = b"\xab" * (135 * 2)
+    assert p._last_bytes[1] == bytes(expected)
+    assert p._last_hash[1] == p._hash(bytes(expected))
+    # a full refresh with exactly that picture sends nothing for tube 1
+    full[1] = bytes(expected)
+    sent = asyncio.run(p.send_tubes(full))
+    assert sent == []
+    # a full refresh with a different picture resends tube 1
+    full[1] = _payload(42)
+    sent = asyncio.run(p.send_tubes(full))
+    assert sent == [1]
+
+
+def test_send_rect_small_region_patches_only_those_pixels():
+    session = FakeSession()
+    p = _pusher(session)
+    full = [_payload(3)] * TUBE_COUNT
+    asyncio.run(p.send_tubes(full))
+    # 10x5 rect at (20, 100) on tube 4
+    rect = _rect_payload(10, 5, 0x11)
+    assert asyncio.run(p.send_rect(4, 20, 100, 10, 5, rect)) is True
+    last = p._last_bytes[4]
+    assert len(last) == 135 * 240 * 2
+    # inside the rect: 0x11, outside: 0x03
+    def px(x, y):
+        off = (y * 135 + x) * 2
+        return last[off]
+    assert px(20, 100) == 0x11 and px(29, 104) == 0x11
+    assert px(19, 100) == 0x03 and px(30, 100) == 0x03 and px(20, 99) == 0x03 and px(20, 105) == 0x03
+
+
+def test_send_rect_unknown_last_bytes_sets_hash_none():
+    """When the tube's last bytes are unknown (never sent / reset), a successful rect
+    sets the hash to None so a later full refresh resends the whole tube."""
+    session = FakeSession()
+    p = _pusher(session)
+    assert p._last_bytes[0] is None and p._last_hash[0] is None
+    assert asyncio.run(p.send_rect(0, 0, 0, 135, 40, _rect_payload(135, 40, 1))) is True
+    assert p._last_hash[0] is None
+    # a full refresh now resends tube 0 even if the bytes would match the rect
+    sent = asyncio.run(p.send_tubes([_payload(9)] * TUBE_COUNT))
+    assert 0 in sent
+
+
+def test_send_rect_409_and_503_handled_like_full_send():
+    published = []
+
+    async def publish_display(mode):
+        published.append(mode)
+
+    session = FakeSession(statuses=[409, 503, 200])
+    p = _pusher(session, publish_display=publish_display)
+    ok = asyncio.run(p.send_rect(3, 0, 0, 135, 40, _rect_payload(135, 40, 5)))
+    assert ok is True
+    assert published == [4]                      # 409 -> display=4 re-published
+    assert len(session.posts) == 3               # 409, 503, 200
+    assert all(params["tube"] == 3 for params, _ in session.posts)
+
+
+def test_send_rect_connection_error_marks_unreachable_and_returns_false():
+    import aiohttp
+
+    class DeadSession(FakeSession):
+        def post(self, *a, **kw):
+            raise aiohttp.ClientConnectionError("clock offline")
+
+    p = _pusher(DeadSession())
+    ok = asyncio.run(p.send_rect(0, 0, 0, 10, 10, b"\x00" * 200))
+    assert ok is False
+    assert p.reachable is False
+    assert p.last_error is not None
+    # the last bytes/hash are untouched by the failed rect
+    assert p._last_bytes[0] is None and p._last_hash[0] is None

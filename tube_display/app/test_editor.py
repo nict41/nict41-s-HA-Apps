@@ -699,3 +699,149 @@ def test_api_clocks_and_status_with_no_controllers(tmp_path):
             assert (await (await client.get("/api/clocks")).json()) == {"clocks": []}
             assert (await (await client.get("/api/status")).json()) == {"clocks": {}}
     asyncio.run(wrapper())
+
+
+# ----------------------------------------------------------------------
+# live mirror: POST/DELETE api/mirror, POST api/mirror/end
+# ----------------------------------------------------------------------
+
+class MirrorController:
+    """Records mirror()/end_mirror() calls like the real Controller."""
+
+    def __init__(self, name="main"):
+        self.name = name
+        self.clock = FakeClock("clock-" + name + ".local")
+        self.rotation_enabled = True
+        self.mirrors = []       # (screen, seconds)
+        self.ends = 0
+
+    def mirror(self, screen, seconds=120):
+        self.mirrors.append((screen, seconds))
+
+    def end_mirror(self):
+        self.ends += 1
+
+    def status(self):
+        return {"current": "x", "mirroring": bool(self.mirrors), "online": True}
+
+
+def _mirror_client(tmp_path, controllers=None):
+    screens_file = _write(tmp_path)
+    if controllers is None:
+        controllers = {"main": MirrorController("main")}
+    app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=True,
+                                controllers=controllers)
+    return TestClient(TestServer(app)), screens_file, controllers
+
+
+GOOD_SCREEN = {"tubes": [{"type": "text", "text": "hi"}] * 6}
+
+
+def test_api_mirror_post_shows_screen_on_default_clock(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            assert resp.status == 200, await resp.text()
+            body = await resp.json()
+            assert body["ok"] is True and body["clock"] == "main" and body["seconds"] == 120
+            ctl = controllers["main"]
+            assert len(ctl.mirrors) == 1
+            screen, seconds = ctl.mirrors[0]
+            assert screen.name == "__mirror__" and seconds == 120.0
+            assert screen.tubes[0]["text"] == "hi"
+            # each call replaces the screen and restarts the timer
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": 600})
+            assert resp.status == 200
+            assert (await resp.json())["seconds"] == 600.0
+            assert len(ctl.mirrors) == 2 and ctl.mirrors[1][1] == 600.0
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_seconds_capped_and_validated(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": 99999})
+            assert resp.status == 200
+            assert (await resp.json())["seconds"] == 600.0     # capped at 600
+            assert controllers["main"].mirrors[-1][1] == 600.0
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": -5})
+            assert resp.status == 400
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": "soon"})
+            assert resp.status == 400
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_invalid_screen_is_400_with_errors(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": {"tubes": [{"type": "nope"}] * 6}})
+            assert resp.status == 400
+            body = await resp.json()
+            assert "errors" in body and any("unknown widget type" in e for e in body["errors"])
+            assert controllers["main"].mirrors == []           # nothing mirrored
+            resp = await client.post("/api/mirror", json={})
+            assert resp.status == 400
+            resp = await client.post("/api/mirror", data="not json",
+                                     headers={"Content-Type": "application/json"})
+            assert resp.status == 400
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_unknown_clock_is_404_and_named_clock_used(tmp_path):
+    async def wrapper():
+        controllers = {"main": MirrorController("main"), "kitchen": MirrorController("kitchen")}
+        client, screens_file, controllers = _mirror_client(tmp_path, controllers)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "clock": "ghost"})
+            assert resp.status == 404
+            assert "ghost" in (await resp.json())["error"]
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "clock": "kitchen"})
+            assert resp.status == 200 and (await resp.json())["clock"] == "kitchen"
+            assert controllers["kitchen"].mirrors and not controllers["main"].mirrors
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_delete_and_end_alias(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            resp = await client.delete("/api/mirror", json={})
+            assert resp.status == 200 and (await resp.json())["ok"] is True
+            assert controllers["main"].ends == 1
+            # the POST alias (for sendBeacon, which cannot DELETE)
+            await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            resp = await client.post("/api/mirror/end", json={})
+            assert resp.status == 200
+            assert controllers["main"].ends == 2
+            # unknown clock -> 404
+            resp = await client.delete("/api/mirror", json={"clock": "ghost"})
+            assert resp.status == 404
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_no_clocks_is_404(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path, controllers={})
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            assert resp.status == 404
+            resp = await client.delete("/api/mirror", json={})
+            assert resp.status == 404
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_ingress_only(tmp_path):
+    """Without test_allow_local the mirror routes are refused like the others."""
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=False,
+                                    controllers={"main": MirrorController("main")})
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.post("/api/mirror", json={"screen": GOOD_SCREEN})).status == 403
+            assert (await client.delete("/api/mirror", json={})).status == 403
+            assert (await client.post("/api/mirror/end", json={})).status == 403
+    asyncio.run(wrapper())
