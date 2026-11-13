@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import io
 import logging
 import json
 import os
@@ -38,7 +39,8 @@ import night as night_mod
 import render as render_mod
 import animate as animate_mod
 import fonts
-from clock import DISPLAY_CLOCK, DISPLAY_PANELS, ClockPusher
+from clock import (DISPLAY_CLOCK, DISPLAY_PANELS, GIF_MAX_BYTES, GIF_TD_PREFIX, ClockPusher,
+                   gif_clock_name)
 from rgb565 import STRIP_H, STRIP_W, TUBE_COUNT, TUBE_H, TUBE_W, image_to_rgb565, strip_to_tube_bytes
 from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY, Screen,
                      ScreensConfig, ScreensError, load_screens)
@@ -62,6 +64,7 @@ WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
 ANIM_MAX_RECTS_PER_SEC = 10         # cap on partial (send_rect) uploads per second
 MIRROR_DEFAULT_SECONDS = 120.0
 MIRROR_MAX_SECONDS = 600.0
+GIF_CLEANUP_INTERVAL = 3600.0       # delete unused td-*.gif files from the clock at most hourly
 
 
 class Controller:
@@ -138,6 +141,10 @@ class Controller:
         self._anim_next: dict[int, float] = {}             # tube -> next frame due (monotonic)
         self._anim_rect_times: list[float] = []            # recent send_rect times (rate cap)
         self._transitioning = False
+        # gif tubes of the showing screen (tube -> resolved widget), played on the clock
+        self._gif_tubes: dict[int, dict] = {}
+        self._gif_played = False                          # the showing screen's GIFs were started
+        self._last_gif_cleanup = -1e9                      # monotonic time of the last td- cleanup
 
     @property
     def mqtt_id(self) -> str:
@@ -434,6 +441,10 @@ class Controller:
             "live": bool(self.live),
             "mirroring": self._mirror is not None
                           and self._now() < self._mirror[1],
+            "upload_format": (self._pusher.upload_format if self._pusher is not None
+                              and hasattr(self._pusher, "upload_format") else "rgb565"),
+            "bytes_per_minute": (self._pusher.bytes_per_minute() if self._pusher is not None
+                                 and hasattr(self._pusher, "bytes_per_minute") else 0),
         }
 
     async def render_preview(self, name: str) -> Image.Image:
@@ -616,19 +627,24 @@ class Controller:
         t = transition if transition is not None else screen.resolved_transition(default_t)
         delay_ms = screen.resolved_transition_delay(DEFAULT_TRANSITION_DELAY)
         if t == "none" or self._interrupted or self._stop:
-            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK,
+                                          photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         else:
-            await self._run_transition(t, tube_bytes, delay_ms)
+            await self._run_transition(t, tube_bytes, delay_ms,
+                                      photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         self.current = screen.name
+        await self._start_gifs(screen)
         self._publish_state()
 
-    async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int) -> None:
+    async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int,
+                              photo_tubes: set[int] | None = None) -> None:
         """Send the tubes one by one (or band by band for a wipe), aborting as soon
         as an interrupt/stop/OTA/unreachable arrives. All sends still go through the
         pusher's lock, so only one upload runs at a time."""
         p = self._pusher
         if p is None:
             return
+        photo = photo_tubes or set()
         self._transitioning = True
         try:
             delay = delay_ms / 1000.0
@@ -648,7 +664,8 @@ class Controller:
                         y = band * WIPE_BAND_H
                         h = WIPE_BAND_H if band < WIPE_BANDS - 1 else TUBE_H - y
                         ok = await p.send_rect(tube, 0, y, TUBE_W, h,
-                                               data[y * TUBE_W * 2:(y + h) * TUBE_W * 2])
+                                               data[y * TUBE_W * 2:(y + h) * TUBE_W * 2],
+                                               photo=tube in photo)
                         if not ok:
                             return
                         if band < WIPE_BANDS - 1 and delay > 0 and not aborted():
@@ -658,7 +675,7 @@ class Controller:
                 for i, tube in enumerate(order):
                     if aborted():
                         return
-                    ok = await p.send_tube(tube, tube_bytes[tube])
+                    ok = await p.send_tube(tube, tube_bytes[tube], photo=tube in photo)
                     if not ok:
                         return
                     if i < len(order) - 1 and delay > 0 and not aborted():
@@ -684,6 +701,139 @@ class Controller:
                 interval = animator.interval(w)
                 if interval and interval > 0:
                     self._anim_next[i] = now + interval
+
+    # ------------------------------------------------------------------
+    # gif tubes: play the GIF on the clock (HA Tubes 2.4+), else the static
+    # first frame is all there is
+    # ------------------------------------------------------------------
+
+    def _gif_widgets(self, screen: Screen) -> dict[int, dict]:
+        """The showing screen's gif tubes: tube index -> resolved widget."""
+        out: dict[int, dict] = {}
+        for i, w in enumerate(self._tubes or []):
+            if isinstance(w, dict) and w.get("type") == "gif":
+                out[i] = w
+        return out
+
+    def _gif_bg_hex(self, w: dict, screen: Screen) -> str | None:
+        """The colour behind the GIF on the clock: the widget's background, else the
+        screen's, as RRGGBB (None when the screen background is a template)."""
+        raw = w.get("background")
+        if raw is None:
+            raw = screen.background
+        if not isinstance(raw, str) or "{" in raw:
+            return None
+        c = render_mod.parse_color(raw, (0, 0, 0))
+        return "%02X%02X%02X" % tuple(c)
+
+    async def _start_gifs(self, screen: Screen) -> None:
+        """After the screen's tubes are pushed (and any transition ended): for each
+        gif tube, make sure the file is on the clock and POST /gif/play for it.
+        Does nothing when the clock does not support GIFs or no gif tube is showing."""
+        self._gif_tubes = self._gif_widgets(screen)
+        self._gif_played = False
+        p = self._pusher
+        if not self._gif_tubes or p is None or self._ota_busy():
+            return
+        if not getattr(p, "gif_supported", False):
+            return
+        if not getattr(p, "reachable", True):
+            return
+        for tube, w in sorted(self._gif_tubes.items()):
+            source = str(w.get("source") or "")
+            name = gif_clock_name(source[len("file:"):]) if source.startswith("file:") else None
+            if name is None:
+                continue
+            try:
+                path = render_mod.image_path(self._ctx.images_dir, source[len("file:"):])
+                with open(path, "rb") as f:
+                    data = f.read()
+            except (OSError, ValueError) as err:
+                _LOG.warning("GIF tube %d: cannot read %s: %s", tube, source, err)
+                continue
+            if len(data) > GIF_MAX_BYTES:
+                _LOG.warning("GIF tube %d: %s is %d bytes, the clock takes at most %d - "
+                             "showing the first frame only", tube, source, len(data), GIF_MAX_BYTES)
+                continue
+            if not await self._gif_ensure_on_clock(p, name, data):
+                continue
+            loop = w.get("loop", True)
+            if isinstance(loop, str):
+                loop = loop.strip().lower() not in ("false", "0", "no", "off")
+            x = w.get("x")
+            y = w.get("y")
+            ok = await p.gif_play(
+                tube, name, loop=bool(loop), bg=self._gif_bg_hex(w, screen),
+                x=int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None,
+                y=int(y) if isinstance(y, (int, float)) and not isinstance(y, bool) else None)
+            if ok:
+                _LOG.info("Clock %s: playing %s on tube %d", self.name, name, tube)
+        self._gif_played = True
+        await self._gif_cleanup()
+
+    async def _gif_ensure_on_clock(self, p, name: str, data: bytes) -> bool:
+        """Make sure the GIF file is on the clock (GET /gif; upload when missing or
+        the size differs)."""
+        listing = await p.gif_list()
+        if listing is not None:
+            files = listing.get("files") if isinstance(listing, dict) else None
+            if isinstance(files, list):
+                for f in files:
+                    if isinstance(f, dict) and f.get("name") == name:
+                        if f.get("size") == len(data):
+                            return True
+                        break
+        return await p.gif_upload(name, data)
+
+    async def _stop_gifs(self, tubes=None) -> None:
+        """POST /gif/stop for the given tubes (default: the showing screen's gif
+        tubes) - used when the clock's own display takes over (pause/quiet clock
+        mode), so nothing keeps decoding. The next /panel upload to a tube stops
+        its GIF anyway."""
+        p = self._pusher
+        if p is None or not getattr(p, "gif_supported", False):
+            return
+        if not getattr(p, "reachable", True):
+            return
+        targets = list(tubes) if tubes is not None else sorted(self._gif_tubes)
+        for tube in targets:
+            await p.gif_stop(tube)
+        self._gif_played = False
+
+    async def _gif_cleanup(self) -> None:
+        """Delete td-*.gif files from the clock that no screen uses any more,
+        at most once an hour."""
+        p = self._pusher
+        now = self._now()
+        if p is None or not getattr(p, "gif_supported", False):
+            return
+        if now - self._last_gif_cleanup < GIF_CLEANUP_INTERVAL:
+            return
+        self._last_gif_cleanup = now
+        if not getattr(p, "reachable", True):
+            return
+        cfg = self._config
+        used: set[str] = set()
+        if cfg is not None:
+            for screen in cfg.screens.values():
+                for w in screen.tubes:
+                    if isinstance(w, dict) and w.get("type") == "gif":
+                        src = w.get("source")
+                        if isinstance(src, str) and src.startswith("file:"):
+                            used.add(gif_clock_name(src[len("file:"):]))
+        listing = await p.gif_list()
+        if listing is None:
+            return
+        files = listing.get("files") if isinstance(listing, dict) else None
+        if not isinstance(files, list):
+            return
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name")
+            if isinstance(name, str) and name.startswith(GIF_TD_PREFIX) and name not in used:
+                _LOG.info("Clock %s: deleting unused %s", self.name, name)
+                await p.gif_delete(name)
 
     def _anim_blocked(self) -> bool:
         """Nothing animates while OTA is busy, the pusher is unreachable, paused,
@@ -739,10 +889,12 @@ class Controller:
                 break
 
     async def _activate_clock(self) -> None:
+        await self._stop_gifs()
         await self._publish_display(DISPLAY_CLOCK)
         self.current = CLOCK_ENTRY
         self.last_strip = None
         self._tubes = None
+        self._gif_tubes = {}
         self._anim_next = {}
         self._publish_state()
 
@@ -775,6 +927,7 @@ class Controller:
         """Pause: hand the tubes back to the clock once, then just wait."""
         if not self._pause_shown:
             self._pause_shown = True
+            await self._stop_gifs()
             await self._publish_display(DISPLAY_CLOCK)
             self.current = CLOCK_ENTRY
             self.last_strip = None
@@ -833,7 +986,8 @@ class Controller:
                 needed = int(needed, 0)
             except ValueError:
                 needed = 0
-        sent = await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=needed)
+        sent = await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=needed,
+                                             photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         if sent:
             _LOG.debug("Refreshed screen '%s', sent tubes %s", self.current, sent)
 

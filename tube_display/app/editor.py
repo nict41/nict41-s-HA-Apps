@@ -232,6 +232,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             ctx = copy.copy(controller._ctx)
             if ha is not None:
                 ctx.renderer = ha.render_template
+            if not ctx.images_dir:
+                ctx.images_dir = images_dir
         else:
             ctx = render_mod.RenderContext(
                 ha.render_template if ha is not None else _async_none,
@@ -883,6 +885,24 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                     img.verify()
             except Exception:
                 return web.json_response({"error": "not a picture Pillow can read"}, status=400)
+            if ext == ".gif":
+                # a GIF is also uploaded to the clock for the gif widget (max 600 KB,
+                # at most 135x240 - the clock's panel size)
+                from clock import GIF_MAX_BYTES
+                from rgb565 import TUBE_W, TUBE_H
+                if len(data) > GIF_MAX_BYTES:
+                    return web.json_response(
+                        {"error": f"a GIF for the clock must be at most {GIF_MAX_BYTES // 1024} KB, "
+                                  f"this one is {len(data) // 1024} KB"}, status=400)
+                try:
+                    with Image.open(io.BytesIO(bytes(data))) as img:
+                        w, h = img.size
+                except Exception:
+                    return web.json_response({"error": "not a GIF Pillow can read"}, status=400)
+                if w > TUBE_W or h > TUBE_H:
+                    return web.json_response(
+                        {"error": f"a GIF for the clock must be at most {TUBE_W}x{TUBE_H} pixels, "
+                                  f"this one is {w}x{h}"}, status=400)
             os.makedirs(images_dir, exist_ok=True)
             name = clean + ext
             n = 2
@@ -1014,24 +1034,31 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         """GET [?clock=<name>]: {"enabled": bool}. POST {"enabled": bool, "clock"?}: on =
         cycle automatically, off = the clock's button changes screens. `clock` picks
         one of the app's controllers (query string for GET, JSON body for POST)."""
+        def pick(name):
+            """The named clock, else the default one, else the first; None if there are none."""
+            if name is not None:
+                return app["controllers"].get(str(name))
+            if app["controller"] is not None:
+                return app["controller"]
+            return next(iter(app["controllers"].values()), None)
+
         async def handler(req: web.Request) -> web.Response:
             name = req.query.get("clock")
+            body = {}
             if req.method == "POST":
                 body = await req.json()
                 if name is None and isinstance(body, dict):
                     name = body.get("clock")
-                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
-                if ctl is None:
-                    return web.json_response(
-                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
-                        status=404)
+            ctl = pick(name)
+            if ctl is None and name is None:
+                # No clock configured yet (first run, the setup wizard is showing): not an error
+                return web.json_response({"enabled": True, "no_clock": True})
+            if ctl is None:
+                return web.json_response(
+                    {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                    status=404)
+            if req.method == "POST":
                 ctl.set_rotation_enabled(bool(body.get("enabled")))
-            else:
-                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
-                if ctl is None:
-                    return web.json_response(
-                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
-                        status=404)
             return web.json_response({"enabled": bool(ctl.rotation_enabled)})
         return await ingress_only(request, handler)
 

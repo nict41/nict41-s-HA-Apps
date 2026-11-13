@@ -194,6 +194,7 @@ _WIDGET_TEMPLATE_FIELDS = {
     "bar": ("value", "max", "label", "unit", "color", "font"),
     "icon": ("icon", "text", "color", "font"),
     "image": ("source",),
+    "gif": ("source", "background"),
     "sparkline": ("entity", "hours", "unit", "color", "font"),
     "graph": ("entity", "hours", "style", "color", "label", "unit", "show_value",
               "min", "max", "points", "font"),
@@ -678,6 +679,24 @@ async def draw_image(w: dict, ctx: RenderContext, bg) -> Image.Image:
         return draw_builtin_claude(bg)
     src = await _fetch_image(source, ctx)
     return _placed(src, w, TUBE_W, TUBE_H, bg)
+
+
+async def draw_gif(w: dict, ctx: RenderContext, bg) -> Image.Image:
+    """A gif tube shows the GIF's FIRST frame, centred on the background (that is
+    what the preview, old firmware and the editor show; on HA Tubes 2.4+ the clock
+    plays the whole GIF itself - see controller.py)."""
+    source = str(w.get("source") or "")
+    bg = parse_color(w.get("background"), bg)
+    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    try:
+        src = await _fetch_image(source, ctx)   # _fetch_image seeks to frame 0
+    except Exception as err:
+        ctx.note_error(f"gif {source}", str(err))
+        return _draw_error(img)
+    # centred, whole frame, no cropping (fit "contain" at zoom 1)
+    tile = _fit_image(src, TUBE_W, TUBE_H, "contain", bg=bg)
+    img.paste(tile, (0, 0))
+    return img
 
 
 # ---------------------------------------------------------------------------
@@ -1357,6 +1376,7 @@ _WIDGET_DRAW = {
 _WIDGET_DRAW_ASYNC = {
     "custom": draw_custom,
     "image": draw_image,
+    "gif": draw_gif,
     "sparkline": draw_sparkline,
     "graph": draw_graph,
     "weather": draw_weather,
@@ -1512,6 +1532,27 @@ async def resolved_tubes(screen: Screen, ctx: RenderContext) -> list[dict | None
         return [None] * 6
     resolved = await resolve_templates(screen, ctx)
     return [_resolved_widget(w, resolved) for w in screen.tubes]
+
+
+def is_photo_source(source: Any) -> bool:
+    """A camera / entity_picture / http(s) source: a photo, which JPEG often
+    compresses much better than QOI (the clock decides per upload)."""
+    return isinstance(source, str) and (
+        source.startswith("camera:") or source.startswith("entity_picture:")
+        or source.startswith("http://") or source.startswith("https://"))
+
+
+def photo_tubes(screen: Screen, tubes: list[dict | None] | None) -> set[int]:
+    """Indices of the tubes that show a photo: a strip screen with a photo source
+    (all six tubes), or an image tube with a camera:/entity_picture:/http source.
+    Those tubes may be uploaded as JPEG when the clock supports it."""
+    if screen.strip is not None:
+        return set(range(6)) if is_photo_source(screen.strip.get("source")) else set()
+    out: set[int] = set()
+    for i, w in enumerate(tubes or []):
+        if isinstance(w, dict) and w.get("type") == "image" and is_photo_source(w.get("source")):
+            out.add(i)
+    return out
 
 
 # ---------------------------------------------------------------------------

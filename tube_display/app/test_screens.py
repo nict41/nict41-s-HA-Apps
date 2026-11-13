@@ -124,7 +124,7 @@ def test_sparkline_needs_entity():
 
 def test_new_widget_types_accepted():
     from screens import WIDGET_TYPES
-    for t in ("graph", "progress", "analog_clock", "weather", "ticker"):
+    for t in ("graph", "progress", "analog_clock", "weather", "ticker", "gif"):
         assert t in WIDGET_TYPES
     # one new type per screen (a screen has exactly 6 tubes)
     widgets = [
@@ -511,3 +511,56 @@ def test_known_fields_cover_every_editor_field():
     wtypes = re.search(r"const WIDGET_TYPES = \[([^\]]*)\]", js).group(1)
     for t in re.findall(r'"([^"]+)"', wtypes):
         assert t in KNOWN_FIELDS, t
+
+
+# ======================================================================
+# gif widget validation
+# ======================================================================
+
+def _gif_tubes(n, **extra):
+    return [{"type": "gif", "source": "file:party.gif", **extra}] * n + \
+           [{"type": "blank"}] * (6 - n)
+
+
+def test_gif_widget_accepted():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": _gif_tubes(1, loop=False,
+                                                                background="#112233", x=10, y=20)}}))
+    assert cfg.errors == []
+    w = cfg.screens["a"].tubes[0]
+    assert w["type"] == "gif" and w["source"] == "file:party.gif"
+    assert w["loop"] is False and w["background"] == "#112233" and w["x"] == 10 and w["y"] == 20
+
+
+def test_gif_two_tubes_ok_three_is_error():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": _gif_tubes(2)}}))
+    assert cfg.errors == []
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": _gif_tubes(3)}}))
+    assert any("at most 2 gif tubes" in e for e in cfg.errors)
+    assert "a" not in cfg.screens          # the bad screen is skipped
+
+
+def test_gif_source_must_be_a_file_gif():
+    for bad in ("builtin:claude", "camera:camera.x", "file:photo.png", "http://x/y.gif", "party.gif", ""):
+        tubes = [{"type": "blank"}] * 5 + [{"type": "gif", "source": bad}]
+        cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+        assert any("gif" in e and "file:" in e for e in cfg.errors), bad
+    # no source at all
+    tubes = [{"type": "blank"}] * 5 + [{"type": "gif"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("gif widget needs a 'source'" in e for e in cfg.errors)
+
+
+def test_gif_loop_and_xy_validated():
+    tubes = [{"type": "blank"}] * 5 + [{"type": "gif", "source": "file:a.gif", "loop": "yes"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("'loop' must be true or false" in e for e in cfg.errors)
+    tubes = [{"type": "blank"}] * 5 + [{"type": "gif", "source": "file:a.gif", "x": "left"}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert any("'x' must be a number" in e for e in cfg.errors)
+
+
+def test_gif_unknown_field_warns():
+    tubes = [{"type": "blank"}] * 5 + [{"type": "gif", "source": "file:a.gif", "zoom": 2}]
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": tubes}}))
+    assert cfg.errors == []
+    assert any("unknown field 'zoom'" in w for w in cfg.warnings)

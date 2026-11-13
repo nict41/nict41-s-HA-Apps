@@ -21,12 +21,13 @@ CLOCK_ENTRY = "clock"  # rotation entry that hands the tubes back to the clock
 # Order matters: it is the order of the type <select> in the editor (graph sits next to
 # sparkline, the rest before custom/blank)
 WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline", "graph",
-                "progress", "analog_clock", "weather", "ticker", "custom", "blank")
+                "progress", "analog_clock", "weather", "ticker", "gif", "custom", "blank")
 ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
 TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe")
 DEFAULT_TRANSITION = "none"
 DEFAULT_TRANSITION_DELAY = 90   # ms between tubes during a transition
+MAX_GIF_TUBES = 2               # the clock plays at most two GIFs at once
 
 
 class ScreensError(Exception):
@@ -65,6 +66,7 @@ KNOWN_FIELDS: dict[str, frozenset[str]] = {
                        *_TEXT_COMMON}),
     "image": frozenset({"type", "source", "fit", "zoom", "offset_x", "offset_y", "rotate",
                         "background"}),
+    "gif": frozenset({"type", "source", "loop", "background", "x", "y"}),
     "sparkline": frozenset({"type", "entity", "hours", "unit", "color", *_TEXT_COMMON}),
     "graph": frozenset({"type", "entity", "hours", "style", "label", "unit", "show_value",
                         "min", "max", "points", "color", "value_size", "value_color",
@@ -230,6 +232,21 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object,
         if fit not in FITS:
             errors.append(f"{where}: image 'fit' must be one of {', '.join(FITS)}, got {fit!r}")
             return False
+    if wtype == "gif":
+        src = w.get("source")
+        if not isinstance(src, str) or not src:
+            errors.append(f"{where}: gif widget needs a 'source' (file:<uploaded .gif from the picture library>)")
+            return False
+        if not src.startswith("file:") or not src[len("file:"):].lower().endswith(".gif"):
+            errors.append(f"{where}: gif 'source' must be a file:<name>.gif from the picture library, got {src!r}")
+            return False
+        if "loop" in w and not isinstance(w["loop"], bool):
+            errors.append(f"{where}: gif 'loop' must be true or false, got {w['loop']!r}")
+            return False
+        for k in ("x", "y"):
+            if k in w and (isinstance(w[k], bool) or not isinstance(w[k], (int, float))):
+                errors.append(f"{where}: gif '{k}' must be a number, got {w[k]!r}")
+                return False
     if wtype in ("sparkline", "graph", "weather"):
         if not isinstance(w.get("entity"), str) or not w["entity"]:
             errors.append(f"{where}: {wtype} widget needs an 'entity'")
@@ -366,6 +383,11 @@ def _parse_screen(name: str, raw: object, errors: list[str],
         for i, w in enumerate(tubes):
             if not _check_widget(errors, name, i, w, warnings):
                 return None
+        n_gif = sum(1 for w in tubes if isinstance(w, dict) and w.get("type") == "gif")
+        if n_gif > MAX_GIF_TUBES:
+            _err(errors, name, f"at most {MAX_GIF_TUBES} gif tubes per screen (the clock plays "
+                                f"at most {MAX_GIF_TUBES} GIFs at once), got {n_gif}")
+            return None
         screen.tubes = list(tubes)
     return screen
 

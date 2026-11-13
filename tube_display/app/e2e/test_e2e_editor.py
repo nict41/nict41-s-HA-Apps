@@ -296,7 +296,9 @@ def test_canvas_designer_tube_lines_and_drag(page, screens_file):
 
     # dragging the first item changes its x in the state
     before = page.evaluate("state.data.screens.canvas.canvas.items[0].x")
-    box = page.locator(".designer-overlay .item-box").first.bounding_box()
+    item = page.locator(".designer-overlay .item-box").first
+    item.scroll_into_view_if_needed()   # on a phone the designer is below the fold
+    box = item.bounding_box()
     x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     page.mouse.move(x, y)
     page.mouse.down()

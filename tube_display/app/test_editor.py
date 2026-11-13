@@ -1236,3 +1236,108 @@ def test_new_routes_ingress_only(tmp_path):
             assert (await client.get("/api/suggest")).status == 403
             assert (await client.get("/when.js")).status == 403
     asyncio.run(wrapper())
+
+
+def _gif_upload_bytes(size=(60, 40), frames=((255, 0, 0), (0, 255, 0)), pad=0):
+    import io
+    from PIL import Image
+    imgs = [Image.new("RGB", size, c) for c in frames]
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:])
+    return buf.getvalue() + b"\x00" * pad
+
+
+def test_gif_upload_accepted_and_listed(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(), filename="party.gif", content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 200, await resp.text()
+        body = await resp.json()
+        assert body["name"] == "party.gif" and body["source"] == "file:party.gif"
+        names = (await (await client.get("/api/images")).json())["images"]
+        assert "party.gif" in names
+    _with_client(tmp_path, check)
+
+
+def test_gif_upload_rejects_too_large_and_too_big_dimensions(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        # over 600 KB
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(pad=600 * 1024), filename="big.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 400
+        assert "600 KB" in (await resp.json())["error"]
+        # larger than 135x240
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(size=(200, 100)), filename="wide.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 400
+        assert "135x240" in (await resp.json())["error"]
+        # exactly 135x240 is fine
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(size=(135, 240)), filename="exact.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 200, await resp.text()
+    _with_client(tmp_path, check)
+
+
+def test_gif_widget_preview_shows_first_frame(tmp_path):
+    async def check(client, screens_file):
+        import io
+        from PIL import Image
+        images_dir = os.path.join(os.path.dirname(screens_file), "images")
+        os.makedirs(images_dir, exist_ok=True)
+        with open(os.path.join(images_dir, "anim.gif"), "wb") as f:
+            f.write(_gif_upload_bytes(frames=((255, 0, 0), (0, 255, 0))))
+        screen = {"tubes": [{"type": "gif", "source": "file:anim.gif"}] + [{"type": "blank"}] * 5}
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert resp.status == 200
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (STRIP_W, STRIP_H)
+        # tube 0 shows the red first frame (scaled to fill the width), tube 1 is black
+        assert img.getpixel((67, 120))[:3] == (255, 0, 0)
+        assert img.getpixel((67 + 135, 120))[:3] == (0, 0, 0)
+    _with_client(tmp_path, check)
+
+
+
+def test_rotation_falls_back_to_first_clock_and_handles_no_clock(tmp_path):
+    """GET/POST api/rotation without ?clock: the default controller, else the first one; with no
+    clocks at all the GET answers 200 {"no_clock": true} (first run) rather than a 404."""
+    from types import SimpleNamespace
+
+    class Ctl:
+        def __init__(self, name):
+            self.name = name
+            self.clock = SimpleNamespace(host="h", name=name)
+            self.rotation_enabled = True
+        def set_rotation_enabled(self, v):
+            self.rotation_enabled = v
+        def status(self):
+            return {"name": self.name}
+
+    f = tmp_path / "screens.yaml"
+    f.write_text(USER_SCREENS_YAML)
+    kitchen = Ctl("kitchen")
+
+    async def check():
+        app = editor_mod.create_app(None, StubHa(), str(f), test_allow_local=True,
+                                    controllers={"kitchen": kitchen})
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/rotation")
+            assert (resp.status, await resp.json()) == (200, {"enabled": True})
+            resp = await client.post("/api/rotation", json={"enabled": False})
+            assert resp.status == 200 and kitchen.rotation_enabled is False
+            assert (await client.get("/api/rotation?clock=nope")).status == 404
+        empty = editor_mod.create_app(None, StubHa(), str(f), test_allow_local=True, controllers={})
+        async with TestClient(TestServer(empty)) as client:
+            resp = await client.get("/api/rotation")
+            assert (resp.status, await resp.json()) == (200, {"enabled": True, "no_clock": True})
+
+    asyncio.run(check())

@@ -40,21 +40,30 @@ class FakePusher:
         self.sent = []          # (tube_bytes, needed_mask)
         self.rects = []         # (tube, x, y, w, h, data) partial uploads
         self.tubes_sent = []    # (tube, data) unconditional single-tube uploads
+        self.photo_tubes = []   # photo_tubes kwarg of each send_tubes call
         self.last_error = None
         self.reachable = reachable
         self.probes = 0
         self.resets = 0
         self.probe_results = None   # optional list/queue of results; default: succeed
+        # gif support (HA Tubes 2.4+); tests set gif_supported=True to exercise playback
+        self.gif_supported = False
+        self.gif_files = {}             # name -> bytes on the "clock"
+        self.gif_plays = []             # (tube, name, loop, bg, x, y)
+        self.gif_stops = []             # tube or None
+        self.gif_deletes = []           # names
+        self.upload_format = "rgb565"
 
-    async def send_tubes(self, tube_bytes, needed_mask=0):
+    async def send_tubes(self, tube_bytes, needed_mask=0, photo_tubes=None):
         self.sent.append((tube_bytes, needed_mask))
+        self.photo_tubes.append(set(photo_tubes or ()))
         return list(range(TUBE_COUNT))
 
-    async def send_tube(self, tube, data):
+    async def send_tube(self, tube, data, photo=False):
         self.tubes_sent.append((tube, data))
         return True
 
-    async def send_rect(self, tube, x, y, w, h, data):
+    async def send_rect(self, tube, x, y, w, h, data, photo=False):
         self.rects.append((tube, x, y, w, h, data))
         return True
 
@@ -72,6 +81,30 @@ class FakePusher:
             ok = True
         self.reachable = bool(ok)
         return bool(ok)
+
+    def bytes_per_minute(self):
+        return 0
+
+    async def gif_list(self):
+        return {"files": [{"name": n, "size": len(d)} for n, d in self.gif_files.items()],
+                "free": 1024 * 1024}
+
+    async def gif_upload(self, name, data):
+        self.gif_files[name] = bytes(data)
+        return True
+
+    async def gif_play(self, tube, name, *, loop=True, bg=None, x=None, y=None):
+        self.gif_plays.append((tube, name, loop, bg, x, y))
+        return True
+
+    async def gif_stop(self, tube=None):
+        self.gif_stops.append(tube)
+        return True
+
+    async def gif_delete(self, name):
+        self.gif_deletes.append(name)
+        self.gif_files.pop(name, None)
+        return True
 
 
 class FakeMqtt:
@@ -1217,3 +1250,156 @@ def test_load_config_collects_warnings_and_status(tmp_path, caplog):
     summary = [r for r in caplog.records if "Loaded" in r.getMessage() and "warnings" in r.getMessage()]
     assert len(summary) == 1
     assert "2 screens (0 errors, 2 warnings)" in summary[0].getMessage()
+
+
+# ======================================================================
+# gif tubes: upload / play / skip-refresh / stop / cleanup (fake pusher)
+# ======================================================================
+
+def _gif_bytes(frames=((255, 0, 0), (0, 255, 0)), size=(60, 40)):
+    import io
+    from PIL import Image
+    imgs = [Image.new("RGB", size, c) for c in frames]
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:])
+    return buf.getvalue()
+
+
+def _gif_screens(tmp_path, gif_tubes=((0, "file:anim.gif"),), **widget_extra):
+    """A screens file with a gif tube (and the gif file in the images folder)."""
+    images = tmp_path / "images"
+    images.mkdir(exist_ok=True)
+    (images / "anim.gif").write_bytes(_gif_bytes())
+    tubes = [{"type": "blank"}] * 6
+    for idx, src in gif_tubes:
+        tubes[idx] = {"type": "gif", "source": src, **widget_extra}
+    data = {
+        "rotation": ["a"],
+        "screens": {"a": {"duration": 1000, "refresh": 1000, "tubes": tubes}},
+    }
+    return data
+
+
+def test_gif_screen_plays_on_gif_clock(tmp_path):
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path, gif_tubes=((2, "file:anim.gif"),),
+                               loop=False, background="#102030", x=5, y=7),
+        pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    # the file was uploaded (td- prefix) and played on tube 2 with bg/loop/x/y
+    assert "td-anim.gif" in pusher.gif_files
+    assert pusher.gif_plays == [(2, "td-anim.gif", False, "102030", 5, 7)]
+    assert controller._gif_tubes == {2: controller._tubes[2]}
+    # the static first frame was still pushed first (all tubes, mask=all)
+    assert pusher.sent and pusher.sent[0][1] == 0b111111
+
+
+def test_gif_not_played_without_gif_support(tmp_path):
+    pusher = FakePusher()          # gif_supported=False (old firmware)
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path), pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert pusher.gif_plays == [] and pusher.gif_files == {}
+    assert pusher.sent and pusher.sent[0][1] == 0b111111   # static first frame only
+
+
+def test_gif_refresh_skips_playing_tube(tmp_path):
+    """A refresh must not re-send the static first frame over a playing GIF."""
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path, gif_tubes=((1, "file:anim.gif"),)), pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert pusher.gif_plays and pusher.gif_plays[0][0] == 1
+    # the pusher knows tube 1 is playing (as GET /panel "playing" would say)
+    pusher._playing = {1}
+    n = len(pusher.sent)
+    asyncio.run(controller._refresh())
+    # the refresh re-rendered and called send_tubes...
+    assert len(pusher.sent) == n + 1
+    # ...and the real pusher's send_tubes drops playing tubes (tested against the
+    # real ClockPusher in test_clock.py); here the fake records what it was given
+    assert pusher.sent[-1][1] == 0          # no needed mask on a plain refresh
+
+
+def test_gif_stopped_when_clock_mode_taken_over(tmp_path):
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path, gif_tubes=((3, "file:anim.gif"),)), pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert pusher.gif_plays
+    asyncio.run(controller._activate_clock())          # pause / quiet clock mode
+    assert pusher.gif_stops == [3]
+    assert mqtt.display_modes[-1] == 0
+    # pause does it too
+    pusher.gif_stops.clear()
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    asyncio.run(controller._show_paused())
+    assert pusher.gif_stops == [3]
+
+
+def test_gif_upload_skipped_when_already_on_clock_with_same_size(tmp_path):
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    data = _gif_bytes()
+    pusher.gif_files["td-anim.gif"] = data          # already there, same size
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path), pusher=pusher)
+    uploads_before = len(pusher.gif_files)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert pusher.gif_plays == [(0, "td-anim.gif", True, "000000", None, None)]
+    # no re-upload happened (gif_upload would have re-set the entry; count via a marker)
+    assert len(pusher.gif_files) == uploads_before
+
+
+def test_gif_cleanup_deletes_unused_td_files_hourly(tmp_path):
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    pusher.gif_files["td-anim.gif"] = _gif_bytes()       # used by screen "a"
+    pusher.gif_files["td-old.gif"] = b"GIF89a-old"       # used by nothing
+    pusher.gif_files["user.gif"] = b"GIF89a-user"        # not ours: never deleted
+    controller, time, pusher, mqtt = _make_controller(
+        tmp_path, _gif_screens(tmp_path), pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert "td-old.gif" not in pusher.gif_files
+    assert "td-anim.gif" in pusher.gif_files
+    assert "user.gif" in pusher.gif_files
+    assert pusher.gif_deletes == ["td-old.gif"]
+    # at most once an hour: a second activation does not clean up again
+    pusher.gif_files["td-stale.gif"] = b"x"
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert "td-stale.gif" in pusher.gif_files
+    time.t += 3700
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert "td-stale.gif" not in pusher.gif_files
+
+
+def test_gif_oversized_file_not_uploaded(tmp_path):
+    pusher = FakePusher()
+    pusher.gif_supported = True
+    images = tmp_path / "images"
+    images.mkdir(exist_ok=True)
+    (images / "big.gif").write_bytes(b"GIF89a" + b"\x00" * (600 * 1024))   # over 600 KB
+    data = {"rotation": ["a"], "screens": {"a": {"tubes": [
+        {"type": "gif", "source": "file:big.gif"}] + [{"type": "blank"}] * 5}}}
+    controller, time, pusher, mqtt = _make_controller(tmp_path, data, pusher=pusher)
+    asyncio.run(controller._activate_screen(controller._config.screens["a"]))
+    assert pusher.gif_plays == [] and pusher.gif_files == {}
+    assert pusher.sent and pusher.sent[0][1] == 0b111111   # first frame still shown
+
+
+def test_status_has_upload_format_and_bytes_per_minute(tmp_path):
+    pusher = FakePusher()
+    pusher.upload_format = "qoi"
+    controller, time, pusher, mqtt = _make_controller(tmp_path, _base_screens(), pusher=pusher)
+    status = controller.status()
+    assert status["upload_format"] == "qoi"
+    assert status["bytes_per_minute"] == 0
+    # without a pusher the keys are still there
+    controller2, *_ = _make_controller(tmp_path, _base_screens(), pusher=None)
+    controller2._pusher = None
+    s2 = controller2.status()
+    assert s2["upload_format"] == "rgb565" and s2["bytes_per_minute"] == 0

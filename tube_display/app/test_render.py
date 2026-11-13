@@ -5,6 +5,7 @@ used. MDI icon tests are skipped when the MDI font is absent (no network).
 """
 
 import asyncio
+import io
 
 import pytest
 
@@ -964,3 +965,100 @@ def test_file_font_renders_differently(tmp_path):
         assert any(img.getpixel((x, y)) != (0, 0, 0) for x in range(TUBE_W) for y in range(TUBE_H))
     finally:
         fonts.set_user_dir(None)
+
+
+# ======================================================================
+# gif widget: the first frame, centred on the background
+# ======================================================================
+
+def _gif_bytes(tmp_path, name="anim.gif", size=(60, 40), frames=((255, 0, 0), (0, 255, 0))):
+    from PIL import Image
+    imgs = [Image.new("RGB", size, c) for c in frames]
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:])
+    (tmp_path / name).write_bytes(buf.getvalue())
+    return buf.getvalue()
+
+
+def test_gif_widget_draws_first_frame_centred(tmp_path):
+    import asyncio
+    import render
+    _gif_bytes(tmp_path, frames=((255, 0, 0), (0, 255, 0)))
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    w = {"type": "gif", "source": "file:anim.gif"}
+    img = asyncio.run(render.draw_gif(w, ctx, (0, 0, 0)))
+    assert img.size == (render.TUBE_W, render.TUBE_H) and img.mode == "RGB"
+    # first frame (red) centred: 60x40 scaled by 2.25 -> 135x90 at y 75..164
+    assert img.getpixel((67, 120)) == (255, 0, 0)
+    assert img.getpixel((0, 75)) == (255, 0, 0) and img.getpixel((134, 164)) == (255, 0, 0)
+    # background above and below the frame
+    assert img.getpixel((67, 74)) == (0, 0, 0)
+    assert img.getpixel((67, 165)) == (0, 0, 0)
+    assert img.getpixel((0, 0)) == (0, 0, 0) and img.getpixel((134, 239)) == (0, 0, 0)
+    # the widget's own background wins over the screen's
+    img2 = asyncio.run(render.draw_gif({**w, "background": "#0000FF"}, ctx, (0, 0, 0)))
+    assert img2.getpixel((0, 0)) == (0, 0, 255)
+    assert img2.getpixel((67, 120)) == (255, 0, 0)
+
+
+def test_gif_widget_in_render_screen_and_resolved_tubes(tmp_path):
+    import asyncio
+    import render
+    from screens import parse_screens
+    _gif_bytes(tmp_path)
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "tubes": [{"type": "gif", "source": "file:anim.gif"}] + [{"type": "blank"}] * 5}}})
+    assert cfg.errors == []
+    strip = asyncio.run(render.render_screen(cfg.screens["a"], ctx))
+    assert strip.size == (render.STRIP_W, render.STRIP_H)
+    # tube 0 shows the red first frame centred, tube 1 is blank/black
+    assert strip.getpixel((67, 120)) == (255, 0, 0)
+    assert strip.getpixel((67 + 135, 120)) == (0, 0, 0)
+    tubes = asyncio.run(render.resolved_tubes(cfg.screens["a"], ctx))
+    assert tubes[0]["type"] == "gif" and tubes[1]["type"] == "blank"
+
+
+def test_gif_widget_missing_file_shows_error_tile(tmp_path):
+    import asyncio
+    import render
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    img = asyncio.run(render.draw_gif({"type": "gif", "source": "file:nope.gif"}, ctx, (0, 0, 0)))
+    assert img.size == (render.TUBE_W, render.TUBE_H)
+    # the red "!" error tile, not a crash
+    assert img.getpixel((render.TUBE_W // 2, render.TUBE_H // 2)) == (255, 80, 80)
+
+
+def test_gif_widget_registered_and_template_fields_cover_it():
+    import render
+    from screens import WIDGET_TYPES
+    assert "gif" in render._WIDGET_DRAW_ASYNC
+    assert "gif" in render._WIDGET_TEMPLATE_FIELDS
+    assert set(render._WIDGET_TEMPLATE_FIELDS) == set(WIDGET_TYPES)
+
+
+def test_photo_tubes_helper():
+    import render
+    from screens import parse_screens
+    # strip with a camera source: all six tubes are photo tubes
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "strip": {"source": "camera:camera.door"}}}})
+    assert render.photo_tubes(cfg.screens["a"], None) == set(range(6))
+    # strip with a file source: none
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "strip": {"source": "file:photo.png"}}}})
+    assert render.photo_tubes(cfg.screens["a"], None) == set()
+    # tubes: only the image tubes with camera:/entity_picture:/http sources
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {"tubes": [
+        {"type": "image", "source": "camera:camera.x"},
+        {"type": "image", "source": "file:pic.png"},
+        {"type": "image", "source": "https://example.com/p.jpg"},
+        {"type": "image", "source": "entity_picture:camera.y"},
+        {"type": "text", "text": "hi"},
+        {"type": "gif", "source": "file:a.gif"},
+    ]}}})
+    assert cfg.errors == []
+    assert render.photo_tubes(cfg.screens["a"], cfg.screens["a"].tubes) == {0, 2, 3}

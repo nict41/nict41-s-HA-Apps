@@ -4,7 +4,7 @@
 
 // Order = the type <select>: graph sits next to sparkline, the new types before custom/blank
 const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "sparkline", "graph",
-  "progress", "analog_clock", "weather", "ticker", "custom", "blank"];
+  "progress", "analog_clock", "weather", "ticker", "gif", "custom", "blank"];
 // fields per widget type, mirroring render._WIDGET_TEMPLATE_FIELDS plus the
 // other keys screens.py / render.py read
 const FIELDS = {
@@ -14,6 +14,7 @@ const FIELDS = {
   bar:        ["value", "max", "label", "unit", "color"],
   icon:       ["icon", "text", "color"],
   image:      ["source"],
+  gif:        ["source", "loop"],
   sparkline:  ["entity", "hours", "unit", "color"],
   graph:      ["entity", "hours", "style", "label", "unit", "show_value", "color"],
   progress:   ["value", "max", "label", "finish", "eta_format", "color", "track"],
@@ -30,6 +31,7 @@ const MORE = {
   ring:       ["radius", "thickness", "value_size", "unit_size", "label_size", "value_color", "label_color", "font"],
   bar:        ["value_size", "label_size", "value_color", "label_color", "font"],
   icon:       ["icon_size", "text_size", "text_color", "font"],
+  gif:        ["background", "x", "y"],
   graph:      ["min", "max", "points", "value_size", "value_color", "label_color", "font"],
   progress:   ["value_size", "value_color", "label_size", "label_color", "eta_color", "font"],
   analog_clock: ["label_color", "font"],
@@ -70,7 +72,7 @@ const SELECTS = {                         // first option = the default, not wri
   show: ["today", "now"],                  // weather
 };
 const MULTILINE = ["label", "unit"];      // Enter adds a line
-const BOOL_FIELDS = ["show_value", "seconds", "numerals"];   // checkboxes, default = first
+const BOOL_FIELDS = ["show_value", "seconds", "numerals", "loop"];   // checkboxes, default = first
 const HINTS = {
   size: "auto", value_size: "auto", unit_size: "auto", label_size: "auto", icon_size: "auto", text_size: "auto",
   radius: "52", thickness: "12", max: "100", start: "-90", sweep: "360",
@@ -1605,8 +1607,13 @@ function buildTubeFields(w) {
   if (type !== "blank") {
     const hint = document.createElement("p");
     hint.className = "hint";
-    hint.textContent = "Need something this type can't do? Change the type to custom: the tube keeps its " +
-      "contents as separate pieces you can move, resize and add to.";
+    if (type === "gif") {
+      hint.textContent = "Plays on the clock (HA Tubes 2.4+): the whole GIF animates on its tube; " +
+        "here and on older firmware you see its first frame. At most 2 gif tubes per screen.";
+    } else {
+      hint.textContent = "Need something this type can't do? Change the type to custom: the tube keeps its " +
+        "contents as separate pieces you can move, resize and add to.";
+    }
     box.appendChild(hint);
   }
 }
@@ -1644,7 +1651,8 @@ function fieldRow(w, f, opts) {
   } else if (f === "icon") {
     row.appendChild(iconField(w, f));
   } else if (f === "source") {
-    row.appendChild(imageSourceField(w, f, (opts && opts.cw) || TUBE_W, (opts && opts.ch) || TUBE_H));
+    row.appendChild(imageSourceField(w, f, (opts && opts.cw) || TUBE_W, (opts && opts.ch) || TUBE_H,
+                                     w.type === "gif"));
   } else {
     row.appendChild(smartField(w, f));
   }
@@ -1693,14 +1701,16 @@ function iconField(w, f) {
 }
 
 // ---- image source: picture library (file:<name>), Claude logo, or anything typed in ----------
-function imageSourceField(w, f, cw, ch) {
+// gifOnly: the gif widget - the picker is filtered to .gif files
+function imageSourceField(w, f, cw, ch, gifOnly) {
   const wrap = document.createElement("div");
   wrap.className = "field wide";
   const grid = document.createElement("div");
   grid.className = "image-grid";
   const input = document.createElement("input");
   input.type = "text";
-  input.placeholder = "file:name.png, builtin:claude, camera:camera.x, https://...";
+  input.placeholder = gifOnly ? "file:name.gif (from the picture library)"
+                              : "file:name.png, builtin:claude, camera:camera.x, https://...";
   input.value = w[f] != null ? String(w[f]) : "";
   const msg = document.createElement("span");
   msg.className = "status";
@@ -1708,14 +1718,14 @@ function imageSourceField(w, f, cw, ch) {
   const place = document.createElement("div");
   function drawPlace() {
     place.innerHTML = "";
-    if (w[f] && w[f] !== "builtin:claude") place.appendChild(positioner(w, f, cw, ch));
+    if (w[f] && w[f] !== "builtin:claude" && !gifOnly) place.appendChild(positioner(w, f, cw, ch));
   }
 
   function choose(src) {
     w[f] = src; input.value = src;
     // a different picture starts whole and centred
     ["zoom", "offset_x", "offset_y", "rotate"].forEach((k) => delete w[k]);
-    if (src !== "builtin:claude") w.fit = "contain";
+    if (src !== "builtin:claude" && !gifOnly) w.fit = "contain";
     markDirty(); schedulePreview(); drawGrid(); drawPlace();
   }
 
@@ -1749,18 +1759,22 @@ function imageSourceField(w, f, cw, ch) {
   async function drawGrid() {
     const { body } = await api("api/images");
     grid.innerHTML = "";
-    const claude = tile("Claude logo", "builtin:claude", null, false);
-    const glyph = document.createElement("div");
-    glyph.className = "builtin-thumb"; glyph.textContent = "\u2733";   // stands in for the starburst
-    claude.insertBefore(glyph, claude.firstChild);
-    grid.appendChild(claude);
-    ((body && body.images) || []).forEach((n) =>
-      grid.appendChild(tile(n, "file:" + n, "api/images/" + encodeURIComponent(n), true)));
+    if (!gifOnly) {
+      const claude = tile("Claude logo", "builtin:claude", null, false);
+      const glyph = document.createElement("div");
+      glyph.className = "builtin-thumb"; glyph.textContent = "\u2733";   // stands in for the starburst
+      claude.insertBefore(glyph, claude.firstChild);
+      grid.appendChild(claude);
+    }
+    ((body && body.images) || [])
+      .filter((n) => !gifOnly || n.toLowerCase().endsWith(".gif"))
+      .forEach((n) =>
+        grid.appendChild(tile(n, "file:" + n, "api/images/" + encodeURIComponent(n), true)));
     const up = document.createElement("label");
     up.className = "image-tile upload";
     up.textContent = "+ Upload";
     const file = document.createElement("input");
-    file.type = "file"; file.accept = "image/*"; file.hidden = true;
+    file.type = "file"; file.accept = gifOnly ? ".gif,image/gif" : "image/*"; file.hidden = true;
     file.addEventListener("change", async () => {
       if (!file.files.length) return;
       const fd = new FormData();
