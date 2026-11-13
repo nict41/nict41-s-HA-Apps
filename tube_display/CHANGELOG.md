@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.0
+
+- **New widgets:** `graph` (history as a line, area or bars), `progress` (a gauge with an ETA, for prints and washing machines), `analog_clock` (with a ticking seconds hand), `weather` (condition icon, temperature and today's high/low), `ticker` (scrolling text) and `gif` (an animated GIF played by the clock itself).
+- **Animation:** screens can appear with a transition (cascade, from the right, from the centre, wipe); tickers scroll and analogue clocks tick between refreshes by updating only the part of the tube that moves.
+- **Fonts:** ten bundled fonts (Bebas Neue, Orbitron, Share Tech Mono, Oswald, JetBrains Mono, Nunito, Playfair Display, Press Start 2P, Roboto Condensed, Audiowide) and your own `.ttf`/`.otf`, per widget or as the default.
+- **Free design across all six tubes** (`canvas`), with the drag-and-drop designer, tube boundaries and snap to tube centres.
+- **Editor:** a gallery of ready-made screens, import and export of screens, a setup wizard, a condition builder for `when`, *Show on clock* while editing, and warnings with did-you-mean suggestions for mistyped fields.
+- **HA Tubes 2.4 support:** compressed uploads (QOI, and JPEG for photos), about three times faster; GIFs played by the clock; the `ipstube_ha` firmware variant.
+- New icon and logo.
+- The editor no longer reports an error when no clock is set up yet (first run).
+- Browser tests of the editor run in CI.
+
 ## 0.6.2
 
 - Entity names no longer repeat the device name: *Tube Display Pause* instead of *Tube Display Tube Display Pause* (Home Assistant already puts the device name in front). Entity ids that already exist are kept; new installs get `select.tube_display_screen`, `switch.tube_display_pause` and so on.

@@ -5,6 +5,7 @@ used. MDI icon tests are skipped when the MDI font is absent (no network).
 """
 
 import asyncio
+import io
 
 import pytest
 
@@ -193,6 +194,49 @@ def test_template_bytes_reply_is_decoded():
             return b"42\nunder"
 
     assert asyncio.run(Fake().render_template("x")) == "42\nunder"
+
+
+def test_ha_state_and_forecast_daily():
+    import asyncio
+    from ha import HaClient, HaError
+
+    class Fake(HaClient):
+        def __init__(self, replies):
+            self.replies = replies
+            self.calls = []
+
+        async def _request(self, method, path, **kwargs):
+            self.calls.append((method, path, kwargs))
+            r = self.replies.get((method, path))
+            if isinstance(r, Exception):
+                raise r
+            return r
+
+    async def main():
+        # state(): the full state object, None on a 404-ish HaError
+        ha = Fake({("GET", "/states/weather.home"): {"state": "sunny", "attributes": {"temperature": 21}}})
+        assert await ha.state("weather.home") == {"state": "sunny", "attributes": {"temperature": 21}}
+        ha404 = Fake({("GET", "/states/weather.gone"): HaError("404")})
+        assert await ha404.state("weather.gone") is None
+
+        # forecast_daily(): the wrapped service_response shape
+        wrapped = {"service_response": {"weather.home": {"forecast": [
+            {"datetime": "2026-11-12T00:00:00+00:00", "temperature": 14, "templow": 6}]}}}
+        ha2 = Fake({("POST", "/services/weather/get_forecasts"): wrapped})
+        fc = await ha2.forecast_daily("weather.home")
+        assert fc == [{"datetime": "2026-11-12T00:00:00+00:00", "temperature": 14, "templow": 6}]
+        method, path, kwargs = ha2.calls[0]
+        assert method == "POST" and path == "/services/weather/get_forecasts"
+        assert kwargs["json"] == {"entity_id": "weather.home", "type": "daily"}
+        assert kwargs["params"] == {"return_response": "true"}
+        # the bare {"<entity>": {...}} shape is accepted too
+        ha3 = Fake({("POST", "/services/weather/get_forecasts"): {"weather.home": {"forecast": [{"temperature": 1}]}}})
+        assert await ha3.forecast_daily("weather.home") == [{"temperature": 1}]
+        # a failing call -> [] (the widget then just shows no high/low)
+        ha4 = Fake({("POST", "/services/weather/get_forecasts"): HaError("500")})
+        assert await ha4.forecast_daily("weather.home") == []
+
+    asyncio.run(main())
 
 
 def test_file_image_source_with_transparency(tmp_path):
@@ -441,3 +485,580 @@ def test_render_message_long_text_wraps_to_at_most_3_lines():
     assert px
     assert min(p[0] for p in px) >= 8 - 2 and max(p[0] for p in px) <= STRIP_W - 8 + 2
     assert min(p[1] for p in px) >= 8 - 2 and max(p[1] for p in px) <= STRIP_H - 8 + 2
+
+
+# ----------------------------------------------------------------------
+# the five new widget types: graph, progress, analog_clock, weather, ticker
+# ----------------------------------------------------------------------
+
+class _FakeHa:
+    """history + state + forecast for the graph/weather tests."""
+
+    def __init__(self, states=None, weather=None, forecast=None):
+        self._states = states if states is not None else [{"state": str(v)} for v in (1, 5, 3, 9, 4, "unavailable", 7)]
+        self._weather = weather
+        self._forecast = forecast if forecast is not None else []
+        self.forecast_calls = 0
+
+    async def history(self, entity, hours):
+        return self._states
+
+    async def state(self, entity):
+        return self._weather
+
+    async def forecast_daily(self, entity):
+        self.forecast_calls += 1
+        return self._forecast
+
+
+def _ctx_ha(ha):
+    return render.RenderContext(lambda t: asyncio.sleep(0, result=t), ha=ha)
+
+
+def test_new_widget_types_are_registered():
+    for t in ("graph", "progress", "analog_clock", "weather", "ticker"):
+        assert t in render._WIDGET_DRAW or t in render._WIDGET_DRAW_ASYNC, t
+        assert t in render._WIDGET_TEMPLATE_FIELDS, t
+
+
+def test_widget_template_fields_cover_every_type():
+    # the editor mirrors this table; every widget type must have an entry
+    from screens import WIDGET_TYPES
+    assert set(render._WIDGET_TEMPLATE_FIELDS) == set(WIDGET_TYPES)
+
+
+def test_graph_renders_all_styles_and_skips_non_numeric():
+    ha = _FakeHa()
+    ctx = _ctx_ha(ha)
+    for style in ("line", "area", "bars"):
+        w = {"type": "graph", "entity": "sensor.temp", "hours": 24, "style": style,
+             "label": "Temp", "unit": "°", "color": "#D97757"}
+        img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0)), f"{style} must draw something"
+
+
+def test_graph_no_data_and_no_ha():
+    ctx = _ctx_ha(_FakeHa(states=[]))
+    img = asyncio.run(render.draw_graph({"type": "graph", "entity": "sensor.x"}, ctx, (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    assert _non_bg_pixels(img, (0, 0, 0))          # "no data"
+    # no HA client at all: raises, render_screen turns that into the "!" tile
+    with pytest.raises(ValueError):
+        asyncio.run(render.draw_graph({"type": "graph", "entity": "x"}, _ctx(), (0, 0, 0)))
+
+
+def test_graph_fixed_axis_and_resample():
+    values = list(range(500))                       # far more than the 120 point cap
+    ha = _FakeHa(states=[{"state": str(v)} for v in values])
+    ctx = _ctx_ha(ha)
+    w = {"type": "graph", "entity": "sensor.x", "style": "line", "min": 0, "max": 600,
+         "points": 120, "show_value": False}
+    img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    rs = render._resample(values, 120)
+    assert len(rs) == 120                            # capped at `points`
+    assert abs(sum(rs) / len(rs) - sum(values) / len(values)) < 1.0   # bucket means keep the average
+    assert render._resample([1, 2, 3], 120) == [1, 2, 3]   # fewer points than the cap: unchanged
+
+
+def test_graph_area_fill_is_35_percent_blend():
+    ha = _FakeHa(states=[{"state": str(v)} for v in (0, 10, 0)])
+    ctx = _ctx_ha(ha)
+    w = {"type": "graph", "entity": "sensor.x", "style": "area", "color": "#FF0000", "show_value": False}
+    img = asyncio.run(render.draw_graph(w, ctx, (0, 0, 0)))
+    # somewhere inside the filled area the pixel is red blended 35% into black
+    assert (89, 0, 0) in [img.getpixel((x, y)) for x in range(TUBE_W) for y in range(TUBE_H)]
+
+
+def test_progress_renders_and_clamps():
+    ctx = _ctx()
+    for value in ("42", "150", "junk"):
+        img = render.draw_progress({"type": "progress", "value": value, "max": 100,
+                                    "label": "Print", "finish": "2999-01-01T00:00:00+00:00"}, ctx, (0, 0, 0))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_format_eta_remaining():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+    assert render.format_eta("2026-11-12T12:23:00+00:00", now, "remaining") == "23 min"
+    assert render.format_eta("2026-11-12T13:05:00+00:00", now, "remaining") == "1 h 05"
+    assert render.format_eta("2026-11-12T12:00:30+00:00", now, "remaining") == "<1 min"
+    assert render.format_eta("2026-11-12T11:00:00Z", now, "remaining") == "done"     # past
+    assert render.format_eta("2026-11-12T12:00:00+00:00", now, "remaining") == "done"  # <= 0
+    assert render.format_eta("garbage", now, "remaining") == ""
+    assert render.format_eta("", now, "remaining") == ""
+    assert render.format_eta(None, now, "remaining") == ""
+
+
+def test_format_eta_time_and_epoch_and_hhmm():
+    from datetime import datetime, timezone, timedelta
+    now = datetime(2026, 11, 12, 12, 0, 0, tzinfo=timezone.utc)
+    assert render.format_eta("2026-11-12T14:23:00+00:00", now, "time") == "14:23"
+    assert render.format_eta("2026-11-12T11:00:00Z", now, "time") == "done"
+    epoch = int((now + timedelta(minutes=65)).timestamp())
+    assert render.format_eta(str(epoch), now, "remaining") == "1 h 05"
+    assert render.format_eta(f"{epoch}.5", now, "remaining") == "1 h 05"     # float epoch string
+    assert render.format_eta("13:30", now, "time") == "13:30"                # later today
+    # HH:MM already past today means tomorrow: still in the future, so "time" shows it
+    assert render.format_eta("11:30", now, "time") == "11:30"
+    assert render.format_eta("11:30", now, "remaining") == "23 h 30"
+    # naive ISO is read as local time; compare against the same instant in UTC
+    local_finish = datetime(2026, 11, 12, 12, 30, 0).astimezone(timezone.utc)
+    assert render.format_eta("2026-11-12T12:30:00", now, "remaining") == \
+        render.format_eta(local_finish.isoformat(), now, "remaining") == "30 min"
+    # naive now + aware finish must not crash (draw_progress passes datetime.now())
+    naive = datetime(2026, 11, 12, 12, 0, 0)
+    assert render.format_eta("2026-11-12T14:23:00+00:00", naive, "remaining") == "2 h 23"
+    assert render.format_eta("2026-11-12T12:30:00", naive, "time") == "12:30"
+
+
+def test_hand_angles():
+    from datetime import datetime
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 0, 0, 0))
+    assert (h, m, s) == (0.0, 0.0, 0.0)
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 3, 30, 15))
+    assert h == 105.125 and m == 181.5 and s == 90.0
+    h, m, s = render.hand_angles(datetime(2026, 11, 12, 23, 59, 59))
+    assert abs(h - (11 + 59 / 60 + 59 / 3600) * 30) < 1e-9
+    assert abs(m - (59 + 59 / 60) * 6) < 1e-9 and abs(s - 59 * 6) < 1e-9
+
+
+def test_analog_clock_renders_with_and_without_extras():
+    ctx = _ctx()
+    for w in ({"type": "analog_clock"},
+              {"type": "analog_clock", "tz": "Europe/Berlin", "label": "Berlin", "numerals": True},
+              {"type": "analog_clock", "seconds": False, "tz": "not/a-zone", "color": "#00FF00",
+               "accent": "#FF0000", "face": "#101010"}):
+        img = render.draw_analog_clock(w, ctx, (0, 0, 0))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_weather_icon_map_covers_all_conditions():
+    conditions = ("sunny", "cloudy", "partlycloudy", "rainy", "pouring", "snowy", "snowy-rainy",
+                  "fog", "hail", "lightning", "lightning-rainy", "windy", "windy-variant",
+                  "clear-night", "exceptional")
+    for c in conditions:
+        assert render.WEATHER_ICONS[c].startswith("mdi:weather-") or c == "exceptional"
+    assert render.WEATHER_ICONS["exceptional"] == "mdi:alert-circle-outline"
+    assert render.WEATHER_ICONS.get("made-up", render.WEATHER_ICONS["cloudy"]) == "mdi:weather-cloudy"
+
+
+def test_weather_renders_today_and_now():
+    from datetime import datetime
+    today = datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "partlycloudy",
+                          "attributes": {"temperature": 12.3, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 14, "templow": 6}])
+    ctx = _ctx_ha(ha)
+    for show in ("today", "now"):
+        img = asyncio.run(render.draw_weather(
+            {"type": "weather", "entity": "weather.home", "show": show, "label": "Home"}, ctx, (0, 0, 0)))
+        assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+        assert _non_bg_pixels(img, (0, 0, 0))
+    # unknown condition falls back to the cloudy icon, missing temperature shows "--"
+    ha2 = _FakeHa(weather={"state": "weird", "attributes": {}})
+    img = asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.x"}, _ctx_ha(ha2), (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H)
+    # entity gone -> "no data", no raise
+    img = asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.gone"},
+                                          _ctx_ha(_FakeHa(weather=None)), (0, 0, 0)))
+    assert img.size == (TUBE_W, TUBE_H) and _non_bg_pixels(img, (0, 0, 0))
+
+
+def test_weather_forecast_cached_10_minutes():
+    from datetime import datetime
+    today = datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "sunny", "attributes": {"temperature": 20, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 21, "templow": 9}])
+    ctx = _ctx_ha(ha)
+    ticks = iter([1000.0, 1000.0, 1000.0 + 599, 1000.0 + 600])   # injectable clock
+    ctx.now_monotonic = lambda: next(ticks)
+    for _ in range(3):
+        asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.home"}, ctx, (0, 0, 0)))
+    assert ha.forecast_calls == 1                       # 2nd and 3rd call within 10 min: cache
+    asyncio.run(render.draw_weather({"type": "weather", "entity": "weather.home"}, ctx, (0, 0, 0)))
+    assert ha.forecast_calls == 2                       # after 10 min: fetched again
+
+
+def test_ticker_band_and_cycle():
+    long_text = "headline one • headline two • headline three • " * 3
+    w = {"type": "ticker", "text": long_text, "size": 28, "y": 120, "speed": 40}
+    band, box = render.ticker_band(w, 0)
+    assert band.size == (TUBE_W, 28 + 12)
+    assert box == (0, 120 - 20, TUBE_W, 40)          # (x, y, width, height) like every animator rect
+    cycle = render.ticker_cycle(w)
+    assert cycle > 0
+    # one full loop of the offset must give the same band again (seamless loop)
+    band2, _ = render.ticker_band(w, cycle * 40)       # offset = cycle * speed px
+    assert band.tobytes() == band2.tobytes()
+    # short text: centred, no scrolling
+    short = {"type": "ticker", "text": "hi", "size": 28, "speed": 40}
+    assert render.ticker_cycle(short) == 0.0
+    band3, box3 = render.ticker_band(short, 999)
+    band4, _ = render.ticker_band(short, 0)
+    assert band3.tobytes() == band4.tobytes()           # offset is ignored
+    # band position follows y, clamped to the tube
+    _, box5 = render.ticker_band({"text": "hi", "size": 28, "y": 5}, 0)
+    assert box5[1] == 0
+    _, box6 = render.ticker_band({"text": "hi", "size": 28, "y": 239}, 0)
+    assert box6[1] + box6[3] == TUBE_H
+
+
+def test_ticker_draw_static():
+    ctx = _ctx()
+    img = render.draw_ticker({"type": "ticker", "text": "news " * 30, "size": 28,
+                              "label": "News", "background": "#101010"}, ctx, (0, 0, 0))
+    assert img.size == (TUBE_W, TUBE_H) and img.mode == "RGB"
+    # the band's background colour fills the band (top row of the band, left edge)
+    assert img.getpixel((2, 120 - 20)) == (0x10, 0x10, 0x10)
+    assert img.getpixel((2, 120 + 20 - 1)) == (0x10, 0x10, 0x10)
+    # empty text still draws the band, no raise
+    img = render.draw_ticker({"type": "ticker", "text": ""}, ctx, (0, 0, 0))
+    assert img.size == (TUBE_W, TUBE_H)
+
+
+def test_new_widgets_in_a_full_screen_with_templates():
+    async def renderer(t):
+        return {"{{ temp }}": "21.5", "{{ headlines }}": "a • b • c " * 10,
+                "{{ pct }}": "63", "{{ when_done }}": "2999-01-01T10:00:00+00:00"}.get(t, t)
+
+    today = __import__("datetime").datetime.now().date().isoformat()
+    ha = _FakeHa(weather={"state": "rainy", "attributes": {"temperature": 8, "temperature_unit": "°C"}},
+                 forecast=[{"datetime": today + "T00:00:00+00:00", "temperature": 9, "templow": 4}])
+    ctx = render.RenderContext(renderer, ha=ha)
+    screen = Screen(name="s", tubes=[
+        {"type": "graph", "entity": "sensor.temp", "hours": "{{ h }}", "label": "{{ lbl }}",
+         "unit": "°", "color": "{{ col }}"},
+        {"type": "progress", "value": "{{ pct }}", "max": 100, "finish": "{{ when_done }}",
+         "label": "Print"},
+        {"type": "analog_clock", "tz": "Europe/Berlin", "label": "Berlin"},
+        {"type": "weather", "entity": "weather.home", "label": "{{ lbl }}"},
+        {"type": "ticker", "text": "{{ headlines }}", "size": 28, "speed": 40},
+        {"type": "blank"},
+    ])
+    # templates in the new widgets' fields are collected like any other field
+    assert "{{ h }}" in render.collect_templates(screen)
+    assert "{{ lbl }}" in render.collect_templates(screen)
+    assert "{{ col }}" in render.collect_templates(screen)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H) and strip.mode == "RGB"
+    assert ctx.last_errors == {}
+# resolved_tubes: the screen's six widgets with templates resolved
+# ----------------------------------------------------------------------
+
+def test_resolved_tubes_resolves_templates_like_render_screen():
+    async def renderer(t):
+        return {"{{ v }}" : "42"}.get(t, t)
+    ctx = render.RenderContext(renderer)
+    screen = Screen(name="s", tubes=[
+        {"type": "text", "text": "{{ v }}"},
+        {"type": "big_number", "value": "{{ v }}", "unit": "%"},
+        {"type": "blank"},
+        {"type": "custom", "items": [{"type": "text", "text": "{{ v }}", "x": 1, "y": 2}]},
+        {"type": "ring", "value": "{{ v }}", "max": 100},
+        {"type": "text", "text": "plain"},
+    ])
+    tubes = asyncio.run(render.resolved_tubes(screen, ctx))
+    assert len(tubes) == 6
+    assert tubes[0]["text"] == "42"
+    assert tubes[1]["value"] == "42"
+    assert tubes[3]["items"][0]["text"] == "42"     # nested inside custom items
+    assert tubes[4]["value"] == "42"
+    assert tubes[5]["text"] == "plain"
+    # the original widget dicts are not mutated
+    assert screen.tubes[0]["text"] == "{{ v }}"
+
+
+def test_resolved_tubes_strip_screen_is_six_nones():
+    ctx = _ctx()
+    screen = Screen(name="s", strip={"source": "camera:x"})
+    assert asyncio.run(render.resolved_tubes(screen, ctx)) == [None] * 6
+
+
+
+def test_ticker_and_clock_animators_registered_and_sized():
+    """The animation engine uploads exactly the (x, y, w, h) an animator returns."""
+    import asyncio
+    import animate
+    from render import ticker_band
+    w = {"type": "ticker", "text": "A long headline that certainly does not fit one tube", "size": 28, "y": 120}
+    band, (x, y, bw, bh) = ticker_band(w, 0)
+    assert (bw, bh) == band.size == (135, 40)
+    assert y == 100
+    ticker = animate.ANIMATORS["ticker"]
+    assert ticker.interval(w) > 0
+    assert ticker.interval({"type": "ticker", "text": "hi"}) == 0
+    img, rect = asyncio.run(ticker.frame(w, None, 1.0, (10, 20, 30)))
+    assert img.size == (rect[2], rect[3])
+    assert img.getpixel((134, 0)) == (10, 20, 30)          # band takes the screen background
+    clk = animate.ANIMATORS["analog_clock"]
+    assert clk.interval({"type": "analog_clock"}) == 1.0
+    assert clk.interval({"type": "analog_clock", "seconds": False}) == 30.0
+    img, rect = asyncio.run(clk.frame({"type": "analog_clock"}, None, 0, None))
+    assert img.size == (135, 240) and rect == (0, 0, 135, 240)
+
+
+# ----------------------------------------------------------------------
+# canvas screens (free design across all six tubes) and the font field
+# ----------------------------------------------------------------------
+
+def _canvas_screen(items, name="wide"):
+    return Screen(name=name, canvas={"background": "#000000", "items": items})
+
+
+def test_canvas_renders_items_at_strip_coordinates():
+    ctx = _ctx()
+    ctx.record_boxes = {}
+    screen = _canvas_screen([
+        {"type": "rect", "x": 607, "y": 200, "width": 380, "height": 12, "color": "#0000FF"},
+        {"type": "rect", "x": 100, "y": 40, "width": 60, "height": 20, "color": "#FF0000"},
+        {"type": "text", "x": 405, "y": 120, "text": "hi", "size": 30, "color": "#FFFFFF"},
+    ])
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H)
+    # the bar-like rect spans tubes 4 and 5 (x 417..796 of the 810-wide strip)
+    assert strip.getpixel((610, 200)) == (0, 0, 255)
+    assert strip.getpixel((790, 200)) == (0, 0, 255)
+    assert strip.getpixel((800, 200)) == (0, 0, 0)          # past the rect's right edge
+    assert strip.getpixel((100, 200)) == (0, 0, 0)          # outside the rect: background
+    assert strip.getpixel((110, 45)) == (255, 0, 0)         # second rect in tube 0
+    assert strip.getpixel((300, 45)) == (0, 0, 0)
+    # text centred at x=405 (the strip centre) has ink around it
+    assert any(strip.getpixel((x, y)) == (255, 255, 255)
+               for x in range(380, 430) for y in range(100, 140))
+    assert ctx.last_errors == {}
+    # record_boxes under "<screen>:canvas"
+    boxes = ctx.record_boxes["wide:canvas"]
+    assert len(boxes) == 3
+    assert boxes[0] == (417, 194, 797, 206)                 # rect centred at 607, width 380
+    assert boxes[1] == (70, 30, 130, 50)                    # rect centred at 100, 60x20
+
+
+def test_canvas_templates_in_items_are_resolved():
+    async def renderer(t):
+        return {"{{ temp }}": "21.5", "{{ pct }}": "60"}.get(t, t)
+
+    screen = _canvas_screen([
+        {"type": "text", "x": 202, "y": 120, "text": "{{ temp }}°", "size": 60},
+        {"type": "bar", "x": 607, "y": 200, "width": 380, "height": 12, "value": "{{ pct }}", "max": 100},
+    ])
+    assert set(render.collect_templates(screen)) == {"{{ temp }}°", "{{ pct }}"}
+    ctx = _ctx(renderer)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert ctx.last_errors == {}
+    # bar filled to 60% of 380 px from x=417: 417+228=645
+    assert strip.getpixel((500, 200)) == (255, 165, 0) or strip.getpixel((500, 200))[0] > 200
+    assert strip.getpixel((700, 200)) == (60, 60, 60)       # track beyond the fill
+    # the text rendered the template, not the raw "{{ temp }}"
+    assert any(strip.getpixel((x, y)) != (0, 0, 0)
+               for x in range(150, 260) for y in range(90, 150))
+
+
+def test_canvas_failed_template_shows_bang():
+    async def bad(t):
+        raise RuntimeError("boom")
+
+    screen = _canvas_screen([{"type": "text", "x": 405, "y": 120, "text": "{{ bad }}"}])
+    ctx = _ctx(bad)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H)
+    assert "wide:canvas" in ctx.last_errors
+    colors = strip.getcolors(maxcolors=100000)
+    assert any(c > 0 and rgb[0] > 200 and rgb[1] < 120 for c, rgb in colors)
+
+
+def test_canvas_bad_item_marks_only_that_item():
+    ctx = _ctx()
+    screen = _canvas_screen([
+        {"type": "rect", "x": 100, "y": 40, "width": 60, "height": 20, "color": "#00FF00"},
+        {"type": "nope", "x": 400, "y": 120},
+    ])
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.getpixel((110, 45)) == (0, 255, 0)
+    assert any("item 1" in k for k in ctx.last_errors)
+
+
+def test_canvas_resolved_tubes_are_six_nones():
+    ctx = _ctx()
+    tubes = asyncio.run(render.resolved_tubes(_canvas_screen([]), ctx))
+    assert tubes == [None] * 6
+    strip_screen = Screen(name="s", strip={"source": "builtin:claude"})
+    assert asyncio.run(render.resolved_tubes(strip_screen, ctx)) == [None] * 6
+
+
+def test_canvas_background_field():
+    ctx = _ctx()
+    screen = Screen(name="c", canvas={"background": "#102030", "items": [
+        {"type": "rect", "x": 405, "y": 120, "width": 20, "height": 20, "color": "#FFFFFF"}]})
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.getpixel((10, 10)) == (0x10, 0x20, 0x30)
+    assert strip.getpixel((405, 120)) == (255, 255, 255)
+
+
+def test_font_field_threads_through_widgets(monkeypatch):
+    """A widget's `font` reaches load_font; the context default is used when the
+    widget has none. Uses a spy on fonts.load_font (no real font file needed)."""
+    calls = []
+    real = fonts.load_font
+
+    def spy(size, bold=False, family=None):
+        calls.append(family)
+        return real(size, bold=bold, family=family)
+
+    monkeypatch.setattr(render.fonts, "load_font", spy)
+    ctx = _ctx()
+    ctx.default_font = "nunito"
+    render.draw_text({"type": "text", "text": "hi", "font": "orbitron", "size": 20}, ctx, (0, 0, 0))
+    assert "orbitron" in calls
+    calls.clear()
+    render.draw_text({"type": "text", "text": "hi", "size": 20}, ctx, (0, 0, 0))   # no font -> the default
+    assert "nunito" in calls
+    calls.clear()
+    ctx.default_font = None
+    render.draw_text({"type": "text", "text": "hi", "size": 20, "font": "default"}, ctx, (0, 0, 0))
+    assert None in calls and "default" not in calls
+
+
+def test_font_field_on_custom_text_item(monkeypatch):
+    calls = []
+    real = fonts.load_font
+
+    def spy(size, bold=False, family=None):
+        calls.append(family)
+        return real(size, bold=bold, family=family)
+
+    monkeypatch.setattr(render.fonts, "load_font", spy)
+    ctx = _ctx()
+    ctx.default_font = "oswald"
+    w = {"type": "custom", "items": [
+        {"type": "text", "x": 67, "y": 60, "text": "a", "font": "bebas-neue"},
+        {"type": "text", "x": 67, "y": 160, "text": "b"},
+    ]}
+    asyncio.run(render.draw_custom(w, ctx, (0, 0, 0)))
+    assert "bebas-neue" in calls and "oswald" in calls
+
+
+def test_file_font_renders_differently(tmp_path):
+    """With a real .ttf in the user dir, a file: font is loaded and used (skip
+    when no .ttf exists in this environment)."""
+    import os
+    src = os.environ.get("TD_TEST_FONT") or next(
+        (p for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                     "/tmp/td/fonts/DejaVuSans.ttf") if os.path.isfile(p)), None)
+    if src is None:
+        pytest.skip("no .ttf available in this environment")
+    import shutil
+    udir = tmp_path / "fonts"
+    udir.mkdir()
+    shutil.copy(src, udir / "Test.ttf")
+    fonts.set_user_dir(str(udir))
+    try:
+        ctx = _ctx()
+        w = {"type": "text", "text": "Ag", "size": 40, "font": "file:Test.ttf"}
+        img = _render_widget(w)
+        assert img.size == (TUBE_W, TUBE_H)
+        assert any(img.getpixel((x, y)) != (0, 0, 0) for x in range(TUBE_W) for y in range(TUBE_H))
+    finally:
+        fonts.set_user_dir(None)
+
+
+# ======================================================================
+# gif widget: the first frame, centred on the background
+# ======================================================================
+
+def _gif_bytes(tmp_path, name="anim.gif", size=(60, 40), frames=((255, 0, 0), (0, 255, 0))):
+    from PIL import Image
+    imgs = [Image.new("RGB", size, c) for c in frames]
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:])
+    (tmp_path / name).write_bytes(buf.getvalue())
+    return buf.getvalue()
+
+
+def test_gif_widget_draws_first_frame_centred(tmp_path):
+    import asyncio
+    import render
+    _gif_bytes(tmp_path, frames=((255, 0, 0), (0, 255, 0)))
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    w = {"type": "gif", "source": "file:anim.gif"}
+    img = asyncio.run(render.draw_gif(w, ctx, (0, 0, 0)))
+    assert img.size == (render.TUBE_W, render.TUBE_H) and img.mode == "RGB"
+    # first frame (red) centred: 60x40 scaled by 2.25 -> 135x90 at y 75..164
+    assert img.getpixel((67, 120)) == (255, 0, 0)
+    assert img.getpixel((0, 75)) == (255, 0, 0) and img.getpixel((134, 164)) == (255, 0, 0)
+    # background above and below the frame
+    assert img.getpixel((67, 74)) == (0, 0, 0)
+    assert img.getpixel((67, 165)) == (0, 0, 0)
+    assert img.getpixel((0, 0)) == (0, 0, 0) and img.getpixel((134, 239)) == (0, 0, 0)
+    # the widget's own background wins over the screen's
+    img2 = asyncio.run(render.draw_gif({**w, "background": "#0000FF"}, ctx, (0, 0, 0)))
+    assert img2.getpixel((0, 0)) == (0, 0, 255)
+    assert img2.getpixel((67, 120)) == (255, 0, 0)
+
+
+def test_gif_widget_in_render_screen_and_resolved_tubes(tmp_path):
+    import asyncio
+    import render
+    from screens import parse_screens
+    _gif_bytes(tmp_path)
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "tubes": [{"type": "gif", "source": "file:anim.gif"}] + [{"type": "blank"}] * 5}}})
+    assert cfg.errors == []
+    strip = asyncio.run(render.render_screen(cfg.screens["a"], ctx))
+    assert strip.size == (render.STRIP_W, render.STRIP_H)
+    # tube 0 shows the red first frame centred, tube 1 is blank/black
+    assert strip.getpixel((67, 120)) == (255, 0, 0)
+    assert strip.getpixel((67 + 135, 120)) == (0, 0, 0)
+    tubes = asyncio.run(render.resolved_tubes(cfg.screens["a"], ctx))
+    assert tubes[0]["type"] == "gif" and tubes[1]["type"] == "blank"
+
+
+def test_gif_widget_missing_file_shows_error_tile(tmp_path):
+    import asyncio
+    import render
+    ctx = render.RenderContext(lambda t: asyncio.sleep(0, result=t))
+    ctx.images_dir = str(tmp_path)
+    img = asyncio.run(render.draw_gif({"type": "gif", "source": "file:nope.gif"}, ctx, (0, 0, 0)))
+    assert img.size == (render.TUBE_W, render.TUBE_H)
+    # the red "!" error tile, not a crash
+    assert img.getpixel((render.TUBE_W // 2, render.TUBE_H // 2)) == (255, 80, 80)
+
+
+def test_gif_widget_registered_and_template_fields_cover_it():
+    import render
+    from screens import WIDGET_TYPES
+    assert "gif" in render._WIDGET_DRAW_ASYNC
+    assert "gif" in render._WIDGET_TEMPLATE_FIELDS
+    assert set(render._WIDGET_TEMPLATE_FIELDS) == set(WIDGET_TYPES)
+
+
+def test_photo_tubes_helper():
+    import render
+    from screens import parse_screens
+    # strip with a camera source: all six tubes are photo tubes
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "strip": {"source": "camera:camera.door"}}}})
+    assert render.photo_tubes(cfg.screens["a"], None) == set(range(6))
+    # strip with a file source: none
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {
+        "strip": {"source": "file:photo.png"}}}})
+    assert render.photo_tubes(cfg.screens["a"], None) == set()
+    # tubes: only the image tubes with camera:/entity_picture:/http sources
+    cfg = parse_screens({"rotation": ["a"], "screens": {"a": {"tubes": [
+        {"type": "image", "source": "camera:camera.x"},
+        {"type": "image", "source": "file:pic.png"},
+        {"type": "image", "source": "https://example.com/p.jpg"},
+        {"type": "image", "source": "entity_picture:camera.y"},
+        {"type": "text", "text": "hi"},
+        {"type": "gif", "source": "file:a.gif"},
+    ]}}})
+    assert cfg.errors == []
+    assert render.photo_tubes(cfg.screens["a"], cfg.screens["a"].tubes) == {0, 2, 3}

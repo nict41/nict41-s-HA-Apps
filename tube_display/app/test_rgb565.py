@@ -41,6 +41,19 @@ def test_image_to_rgb565_size_and_content():
     assert data == b"\xf8\x00" * 8
 
 
+def test_image_to_rgb565_any_size_and_mode():
+    # any size works, not just tube-sized; RGBA drops the alpha channel
+    img = Image.new("RGBA", (7, 3), (0, 255, 0, 128))
+    data = image_to_rgb565(img)
+    assert len(data) == 7 * 3 * 2
+    assert data == b"\x07\xe0" * 21          # pure green, alpha ignored
+    # a single pixel
+    assert image_to_rgb565(Image.new("RGB", (1, 1), (0, 0, 255))) == b"\x00\x1f"
+    # and it matches what a tube tile conversion produces for the same pixels
+    tile = Image.new("RGB", (TUBE_W, TUBE_H), (255, 255, 255))
+    assert image_to_rgb565(tile) == b"\xff\xff" * (TUBE_W * TUBE_H)
+
+
 def test_strip_split_into_six_tiles():
     # each tube a different colour so tiles are distinguishable
     strip = Image.new("RGB", (STRIP_W, STRIP_H))

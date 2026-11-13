@@ -46,6 +46,27 @@ def image_to_rgb565(img) -> bytes:
     return bytes(out)
 
 
+def rgb565_to_image(data: bytes, width: int, height: int):
+    """Rebuild the exact RGB image the RGB565 bytes encode (the inverse of
+    image_to_rgb565: each channel is expanded back with bit replication, so
+    converting the result again gives the same bytes - round-trip exact)."""
+    _require_pil()
+    if len(data) != width * height * 2:
+        raise ValueError(f"rgb565 body must be {width * height * 2} bytes, got {len(data)}")
+    img = Image.new("RGB", (width, height))
+    px = img.load()
+    i = 0
+    for y in range(height):
+        for x in range(width):
+            v = (data[i] << 8) | data[i + 1]
+            r = ((v >> 8) & 0xF8) | ((v >> 13) & 0x07)
+            g = ((v >> 3) & 0xFC) | ((v >> 9) & 0x03)
+            b = ((v & 0x1F) << 3) | ((v >> 2) & 0x07)
+            px[x, y] = (r, g, b)
+            i += 2
+    return img
+
+
 def strip_to_tiles(strip) -> list:
     """Split an 810x240 strip image into six 135x240 tube images, left to right."""
     _require_pil()

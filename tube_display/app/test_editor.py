@@ -135,12 +135,14 @@ def test_api_validate_ok_and_bad(tmp_path):
         resp = await client.post("/api/validate", json={"data": {
             "rotation": ["a"], "screens": {"a": {"tubes": [{"type": "blank"}] * 6}}}})
         assert resp.status == 200
-        assert (await resp.json()) == {"errors": []}
+        assert (await resp.json()) == {"errors": [], "warnings": []}
         resp = await client.post("/api/validate", json={"data": {
             "rotation": ["a"], "screens": {"a": {"tubes": [{"type": "nope"}] * 6}}}})
         assert resp.status == 200
-        errors = (await resp.json())["errors"]
+        body = await resp.json()
+        errors = body["errors"]
         assert errors and "unknown widget type" in errors[0]
+        assert body["warnings"] == []
         resp = await client.post("/api/validate", json={"data": ["not", "a", "map"]})
         assert resp.status == 200
         assert (await resp.json())["errors"]
@@ -699,3 +701,643 @@ def test_api_clocks_and_status_with_no_controllers(tmp_path):
             assert (await (await client.get("/api/clocks")).json()) == {"clocks": []}
             assert (await (await client.get("/api/status")).json()) == {"clocks": {}}
     asyncio.run(wrapper())
+
+
+# ----------------------------------------------------------------------
+# live mirror: POST/DELETE api/mirror, POST api/mirror/end
+# ----------------------------------------------------------------------
+
+class MirrorController:
+    """Records mirror()/end_mirror() calls like the real Controller."""
+
+    def __init__(self, name="main"):
+        self.name = name
+        self.clock = FakeClock("clock-" + name + ".local")
+        self.rotation_enabled = True
+        self.mirrors = []       # (screen, seconds)
+        self.ends = 0
+
+    def mirror(self, screen, seconds=120):
+        self.mirrors.append((screen, seconds))
+
+    def end_mirror(self):
+        self.ends += 1
+
+    def status(self):
+        return {"current": "x", "mirroring": bool(self.mirrors), "online": True}
+
+
+def _mirror_client(tmp_path, controllers=None):
+    screens_file = _write(tmp_path)
+    if controllers is None:
+        controllers = {"main": MirrorController("main")}
+    app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=True,
+                                controllers=controllers)
+    return TestClient(TestServer(app)), screens_file, controllers
+
+
+GOOD_SCREEN = {"tubes": [{"type": "text", "text": "hi"}] * 6}
+
+
+def test_api_mirror_post_shows_screen_on_default_clock(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            assert resp.status == 200, await resp.text()
+            body = await resp.json()
+            assert body["ok"] is True and body["clock"] == "main" and body["seconds"] == 120
+            ctl = controllers["main"]
+            assert len(ctl.mirrors) == 1
+            screen, seconds = ctl.mirrors[0]
+            assert screen.name == "__mirror__" and seconds == 120.0
+            assert screen.tubes[0]["text"] == "hi"
+            # each call replaces the screen and restarts the timer
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": 600})
+            assert resp.status == 200
+            assert (await resp.json())["seconds"] == 600.0
+            assert len(ctl.mirrors) == 2 and ctl.mirrors[1][1] == 600.0
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_seconds_capped_and_validated(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": 99999})
+            assert resp.status == 200
+            assert (await resp.json())["seconds"] == 600.0     # capped at 600
+            assert controllers["main"].mirrors[-1][1] == 600.0
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": -5})
+            assert resp.status == 400
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "seconds": "soon"})
+            assert resp.status == 400
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_invalid_screen_is_400_with_errors(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": {"tubes": [{"type": "nope"}] * 6}})
+            assert resp.status == 400
+            body = await resp.json()
+            assert "errors" in body and any("unknown widget type" in e for e in body["errors"])
+            assert controllers["main"].mirrors == []           # nothing mirrored
+            resp = await client.post("/api/mirror", json={})
+            assert resp.status == 400
+            resp = await client.post("/api/mirror", data="not json",
+                                     headers={"Content-Type": "application/json"})
+            assert resp.status == 400
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_unknown_clock_is_404_and_named_clock_used(tmp_path):
+    async def wrapper():
+        controllers = {"main": MirrorController("main"), "kitchen": MirrorController("kitchen")}
+        client, screens_file, controllers = _mirror_client(tmp_path, controllers)
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "clock": "ghost"})
+            assert resp.status == 404
+            assert "ghost" in (await resp.json())["error"]
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN, "clock": "kitchen"})
+            assert resp.status == 200 and (await resp.json())["clock"] == "kitchen"
+            assert controllers["kitchen"].mirrors and not controllers["main"].mirrors
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_delete_and_end_alias(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path)
+        async with client:
+            await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            resp = await client.delete("/api/mirror", json={})
+            assert resp.status == 200 and (await resp.json())["ok"] is True
+            assert controllers["main"].ends == 1
+            # the POST alias (for sendBeacon, which cannot DELETE)
+            await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            resp = await client.post("/api/mirror/end", json={})
+            assert resp.status == 200
+            assert controllers["main"].ends == 2
+            # unknown clock -> 404
+            resp = await client.delete("/api/mirror", json={"clock": "ghost"})
+            assert resp.status == 404
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_no_clocks_is_404(tmp_path):
+    async def wrapper():
+        client, screens_file, controllers = _mirror_client(tmp_path, controllers={})
+        async with client:
+            resp = await client.post("/api/mirror", json={"screen": GOOD_SCREEN})
+            assert resp.status == 404
+            resp = await client.delete("/api/mirror", json={})
+            assert resp.status == 404
+    asyncio.run(wrapper())
+
+
+def test_api_mirror_ingress_only(tmp_path):
+    """Without test_allow_local the mirror routes are refused like the others."""
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(None, StubHa(), screens_file, test_allow_local=False,
+                                    controllers={"main": MirrorController("main")})
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.post("/api/mirror", json={"screen": GOOD_SCREEN})).status == 403
+            assert (await client.delete("/api/mirror", json={})).status == 403
+            assert (await client.post("/api/mirror/end", json={})).status == 403
+    asyncio.run(wrapper())
+
+
+# ----------------------------------------------------------------------
+# font library: api/fonts, api/font_preview, and save round-trips
+# ----------------------------------------------------------------------
+
+def _test_ttf() -> str | None:
+    import os
+    env = os.environ.get("TD_TEST_FONT")
+    for p in (env, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/dejavu/DejaVuSans.ttf", "/tmp/td/fonts/DejaVuSans.ttf"):
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def test_api_fonts_lists_bundled_families(tmp_path):
+    async def check(client, screens_file):
+        body = await (await client.get("/api/fonts")).json()
+        assert body["files"] == []
+        ids = [b["id"] for b in body["bundled"]]
+        assert ids[0] == "default"
+        assert "bebas-neue" in ids and "orbitron" in ids and "audiowide" in ids
+        names = {b["id"]: b["name"] for b in body["bundled"]}
+        assert names["bebas-neue"] == "Bebas Neue"
+    _with_client(tmp_path, check)
+
+
+def test_font_upload_rejects_non_fonts(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", b"not a font", filename="x.ttf", content_type="font/ttf")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+        form = aiohttp.FormData()
+        form.add_field("file", _png_bytes(), filename="x.png", content_type="image/png")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+        form = aiohttp.FormData()                      # no file part at all
+        form.add_field("other", "x")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_font_upload_list_get_delete_preview(tmp_path):
+    src = _test_ttf()
+    if src is None:
+        pytest.skip("no .ttf available in this environment")
+    async def check(client, screens_file):
+        import aiohttp
+        data = open(src, "rb").read()
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename="My Font!.ttf", content_type="font/ttf")
+        resp = await client.post("/api/fonts", data=form)
+        assert resp.status == 200, await resp.text()
+        body = await resp.json()
+        assert body["name"] == "My_Font.ttf" and body["family"] == "file:My_Font.ttf"
+        fonts_dir = os.path.join(os.path.dirname(screens_file), "fonts")
+        assert os.path.isfile(os.path.join(fonts_dir, "My_Font.ttf"))
+        # listed with its size, and downloadable
+        listing = await (await client.get("/api/fonts")).json()
+        assert listing["files"] == [{"name": "My_Font.ttf", "size": len(data)}]
+        assert (await client.get("/api/fonts/My_Font.ttf")).status == 200
+        assert (await client.get("/api/fonts/..%2Fscreens.yaml")).status == 404
+        # preview: a PNG, white text on dark, cached (same bytes twice)
+        resp = await client.get("/api/font_preview?font=file:My_Font.ttf&text=Ag&size=28")
+        assert resp.status == 200 and resp.content_type == "image/png"
+        png1 = await resp.read()
+        resp = await client.get("/api/font_preview?font=file:My_Font.ttf&text=Ag&size=28")
+        assert await resp.read() == png1
+        img = Image.open(io.BytesIO(png1))
+        assert img.size[1] >= 28
+        assert any(img.convert("RGB").getpixel((x, y)) == (255, 255, 255)
+                   for x in range(img.width) for y in range(img.height))
+        # bundled family preview works too (falls back to the default font here)
+        resp = await client.get("/api/font_preview?font=bebas-neue&text=Ag&size=28")
+        assert resp.status == 200 and resp.content_type == "image/png"
+        # delete
+        assert (await client.delete("/api/fonts/My_Font.ttf")).status == 200
+        assert not os.path.exists(os.path.join(fonts_dir, "My_Font.ttf"))
+        assert (await client.get("/api/fonts")).json() and (await (await client.get("/api/fonts")).json())["files"] == []
+        assert (await client.delete("/api/fonts/My_Font.ttf")).status == 404
+    _with_client(tmp_path, check)
+
+
+def test_font_endpoints_ingress_only(tmp_path):
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(StubController(), StubHa(), screens_file, test_allow_local=False)
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get("/api/fonts")).status == 403
+            assert (await client.get("/api/font_preview?font=default")).status == 403
+            assert (await client.get("/api/fonts/x.ttf")).status == 403
+            assert (await client.delete("/api/fonts/x.ttf")).status == 403
+    asyncio.run(wrapper())
+
+
+def test_preview_canvas_screen_returns_item_boxes(tmp_path):
+    async def check(client, screens_file):
+        import json
+        screen = {"canvas": {"background": "#000000", "items": [
+            {"type": "rect", "x": 607, "y": 200, "width": 380, "height": 12, "color": "#0000FF"},
+            {"type": "text", "x": 202, "y": 120, "text": "21.5", "size": 60},
+        ]}}
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert resp.status == 200 and resp.content_type == "image/png"
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (STRIP_W, STRIP_H)
+        boxes = json.loads(resp.headers["X-Item-Boxes"])
+        assert boxes[0] == [417, 194, 797, 206]
+        # a tube param on a canvas screen still crops, but boxes stay the canvas ones
+        resp = await client.post("/api/preview", json={"screen": screen, "tube": 4})
+        assert resp.status == 200
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (TUBE_W, TUBE_H)
+    _with_client(tmp_path, check)
+
+
+def test_preview_honours_top_level_font(tmp_path):
+    """The editor posts the file's top-level `font`; the preview uses it as the
+    context default (spy on RenderContext.font_family via a widget without font)."""
+    async def check(client, screens_file):
+        import render as render_mod
+        seen = []
+        orig = render_mod.RenderContext.font_family
+
+        def spy(self, w):
+            fam = orig(self, w)
+            seen.append(fam)
+            return fam
+
+        render_mod.RenderContext.font_family = spy
+        try:
+            screen = {"tubes": [{"type": "text", "text": "hi", "size": 20}] + [{"type": "blank"}] * 5}
+            resp = await client.post("/api/preview", json={"screen": screen, "font": "orbitron"})
+            assert resp.status == 200
+            assert "orbitron" in seen
+            seen.clear()
+            resp = await client.post("/api/preview", json={"screen": screen, "font": "default"})
+            assert resp.status == 200
+            assert seen and all(f is None for f in seen)
+        finally:
+            render_mod.RenderContext.font_family = orig
+    _with_client(tmp_path, check)
+
+
+def test_save_round_trip_keeps_font_and_canvas(tmp_path):
+    async def check(client, screens_file):
+        cfg = await (await client.get("/api/config")).json()
+        data = cfg["data"]
+        data["font"] = "bebas-neue"                       # new top-level key
+        data["screens"]["wide"] = {"canvas": {"background": "#000000", "items": [
+            {"type": "text", "text": "21.5°", "x": 202, "y": 120, "size": 120, "font": "bebas-neue"},
+            {"type": "bar", "value": "60", "max": 100, "x": 607, "y": 200, "width": 380, "height": 12},
+        ]}}
+        data["rotation"].append("wide")
+        resp = await client.post("/api/save", json={"data": data, "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text   # comments kept
+        loaded = yaml.safe_load(text)
+        assert loaded["font"] == "bebas-neue"
+        assert loaded["screens"]["wide"]["canvas"]["items"][0]["font"] == "bebas-neue"
+        assert loaded["screens"]["wide"]["canvas"]["items"][1]["x"] == 607
+        assert "wide" in loaded["rotation"]
+        # saving again without the font removes the key again
+        cfg = await (await client.get("/api/config")).json()
+        del cfg["data"]["font"]
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200
+        assert "font:" not in open(screens_file, encoding="utf-8").read().split("screens:")[0]
+    _with_client(tmp_path, check)
+
+
+# ----------------------------------------------------------------------
+# gallery / import / export / suggest / warnings / is_example
+# ----------------------------------------------------------------------
+
+def test_api_gallery_lists_templates(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/gallery")
+        assert resp.status == 200
+        body = await resp.json()
+        ids = [t["id"] for t in body["templates"]]
+        assert ids == ["clock", "weather", "now_playing", "printer", "energy",
+                       "next_event", "doorbell", "analog_clock"]
+        for t in body["templates"]:
+            assert set(t) == {"id", "name", "description", "inputs"}
+            assert "screen" not in t
+    _with_client(tmp_path, check)
+
+
+def test_api_gallery_build_returns_screen_not_saved(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.post("/api/gallery/build", json={
+            "id": "now_playing", "values": {"player": "media_player.spotify"}, "name": "Music"})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["name"] == "Music"
+        assert body["screen"]["tubes"][3]["source"] == "entity_picture:media_player.spotify"
+        # not saved: the file is unchanged
+        assert open(screens_file, encoding="utf-8").read() == USER_SCREENS_YAML
+        # a name that exists gets " 2"
+        resp = await client.post("/api/gallery/build", json={
+            "id": "clock", "values": {}, "name": "claude"})
+        assert resp.status == 200
+        assert (await resp.json())["name"] == "claude 2"
+        # missing input -> 400
+        resp = await client.post("/api/gallery/build", json={"id": "now_playing", "values": {}})
+        assert resp.status == 400
+        assert "missing input" in (await resp.json())["error"]
+        # bad entity id -> 400
+        resp = await client.post("/api/gallery/build", json={
+            "id": "now_playing", "values": {"player": "nope"}})
+        assert resp.status == 400
+        # unknown template -> 400
+        resp = await client.post("/api/gallery/build", json={"id": "nope", "values": {}})
+        assert resp.status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_gallery_preview_png(tmp_path):
+    async def check(client, screens_file):
+        # no values: placeholder entities are substituted, still a PNG
+        resp = await client.post("/api/gallery/preview", json={"id": "clock", "values": {}})
+        assert resp.status == 200
+        assert resp.content_type == "image/png"
+        png = await resp.read()
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        img = Image.open(io.BytesIO(png))
+        assert (img.width, img.height) == (STRIP_W, STRIP_H)
+        # with values
+        resp = await client.post("/api/gallery/preview", json={
+            "id": "doorbell", "values": {"camera": "camera.front"}})
+        assert resp.status == 200
+        # unknown template -> 400
+        resp = await client.post("/api/gallery/preview", json={"id": "nope"})
+        assert resp.status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_export_yaml_shape(tmp_path):
+    async def check(client, screens_file):
+        screen = {"background": "#000000", "tubes": [
+            {"type": "text", "text": "line one\nline two", "color": "#FFFFFF"},
+            {"type": "ring", "value": "{{ states('sensor.x') | float(0) }}", "max": 100},
+        ] + [{"type": "blank"}] * 4}
+        resp = await client.post("/api/export", json={"name": "my screen", "screen": screen})
+        assert resp.status == 200
+        text = (await resp.json())["yaml"]
+        assert text.startswith("my screen:\n")
+        assert "  tubes:" in text
+        loaded = yaml.safe_load(text)
+        assert loaded == {"my screen": screen}
+        # multi-line strings come out as a literal block, like the saver writes them
+        assert "|-" in text
+        # a time-of-day string stays quoted
+        resp = await client.post("/api/export", json={
+            "name": "t", "screen": {"tubes": [{"type": "text", "text": "23:00"}] + [{"type": "blank"}] * 5}})
+        assert '"23:00"' in (await resp.json())["yaml"]
+        # bad bodies -> 400
+        assert (await client.post("/api/export", json={"name": "x"})).status == 400
+        assert (await client.post("/api/export", json={"screen": {}})).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_import_single_and_full_file_and_dedup(tmp_path):
+    async def check(client, screens_file):
+        one = "my screen:\n  tubes:\n    - {type: blank}\n" + "    - {type: blank}\n" * 5
+        resp = await client.post("/api/import", json={"yaml": one})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["errors"] == []
+        assert list(body["screens"]) == ["my screen"]
+        assert body["screens"]["my screen"]["tubes"][0] == {"type": "blank"}
+        # a full screens file with `screens:` works too
+        full = "rotation: [x]\nscreens:\n  x:\n    tubes:\n" + "      - {type: blank}\n" * 6
+        resp = await client.post("/api/import", json={"yaml": full})
+        assert resp.status == 200
+        assert list((await resp.json())["screens"]) == ["x"]
+        # a name that already exists in the file gets " 2"
+        resp = await client.post("/api/import", json={"yaml": "claude:\n  tubes:\n" + "    - {type: blank}\n" * 6})
+        assert resp.status == 200
+        assert list((await resp.json())["screens"]) == ["claude 2"]
+        # invalid screen -> errors, not added
+        bad = "bad:\n  tubes:\n" + "    - {type: nope}\n" * 6
+        resp = await client.post("/api/import", json={"yaml": bad})
+        assert resp.status == 200
+        body = await resp.json()
+        assert body["screens"] == {}
+        assert body["errors"] and "unknown widget type" in body["errors"][0]
+        # broken YAML -> 400
+        assert (await client.post("/api/import", json={"yaml": "a: [unclosed"})).status == 400
+        assert (await client.post("/api/import", json={"yaml": "   "})).status == 400
+        assert (await client.post("/api/import", json={"yaml": "- just\n- a\n- list"})).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_api_suggest_from_stub_ha(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/suggest")
+        assert resp.status == 200
+        suggestions = (await resp.json())["suggestions"]
+        ids = [s["id"] for s in suggestions]
+        assert ids[0] == "clock"          # always suggested
+        assert "weather" not in ids       # StubHa has no weather entity
+        assert "now_playing" not in ids
+    _with_client(tmp_path, check)
+
+
+def test_api_suggest_no_ha_is_503(tmp_path):
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(StubController(), None, screens_file, test_allow_local=True)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/suggest")
+            assert resp.status == 503
+            resp = await client.get("/api/entities")
+            assert resp.status == 503
+    asyncio.run(wrapper())
+
+
+def test_api_config_warnings_and_is_example(tmp_path):
+    from screens import example_screens_yaml
+    warn_yaml = USER_SCREENS_YAML.replace(
+        '- {type: ring, value: "{{ states(\'sensor.claude_usage_nick_pro_session_usage\') | float(0) | round(0) | int }}",',
+        '- {type: ring, value: "1", colour: "#fff",')
+    assert warn_yaml != USER_SCREENS_YAML
+
+    async def check(client, screens_file):
+        resp = await client.get("/api/config")
+        body = await resp.json()
+        assert body["errors"] == []
+        assert len(body["warnings"]) == 1
+        assert "unknown field 'colour'" in body["warnings"][0]
+        assert "did you mean 'color'?" in body["warnings"][0]
+        assert body["is_example"] is False
+        # validate reports warnings too
+        resp = await client.post("/api/validate", json={"data": body["data"]})
+        vbody = await resp.json()
+        assert vbody["errors"] == []
+        assert len(vbody["warnings"]) == 1
+    _with_client(tmp_path, check, text=warn_yaml)
+
+    async def check_example(client, screens_file):
+        resp = await client.get("/api/config")
+        body = await resp.json()
+        assert body["is_example"] is True
+        assert body["errors"] == []
+    _with_client(tmp_path, check_example, text=example_screens_yaml())
+
+
+def test_api_entities_include_domain_and_device_class(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/api/entities?q=")
+        items = await resp.json()
+        by_id = {i["entity_id"]: i for i in items}
+        assert by_id["sensor.gpu_temp"]["domain"] == "sensor"
+        assert by_id["sensor.gpu_temp"]["device_class"] is None
+        assert by_id["light.living_room"]["domain"] == "light"
+    _with_client(tmp_path, check)
+
+
+def test_when_js_served_and_index_references_it(tmp_path):
+    async def check(client, screens_file):
+        resp = await client.get("/when.js")
+        assert resp.status == 200
+        assert resp.content_type == "text/javascript"
+        js = await resp.text()
+        assert "whenToTemplate" in js and "module.exports" in js
+        resp = await client.get("/")
+        html = await resp.text()
+        assert 'src="when.js?v=' in html
+        assert html.index("when.js") < html.index("editor.js")
+        assert "__VERSION__" not in html
+    _with_client(tmp_path, check)
+
+
+def test_new_routes_ingress_only(tmp_path):
+    async def wrapper():
+        client, screens_file = _make_client(tmp_path, allow_local=False)
+        async with client:
+            assert (await client.get("/api/gallery")).status == 403
+            assert (await client.post("/api/gallery/build", json={"id": "clock", "values": {}})).status == 403
+            assert (await client.post("/api/gallery/preview", json={"id": "clock"})).status == 403
+            assert (await client.post("/api/export", json={"name": "x", "screen": {}})).status == 403
+            assert (await client.post("/api/import", json={"yaml": "x: {}"})).status == 403
+            assert (await client.get("/api/suggest")).status == 403
+            assert (await client.get("/when.js")).status == 403
+    asyncio.run(wrapper())
+
+
+def _gif_upload_bytes(size=(60, 40), frames=((255, 0, 0), (0, 255, 0)), pad=0):
+    import io
+    from PIL import Image
+    imgs = [Image.new("RGB", size, c) for c in frames]
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:])
+    return buf.getvalue() + b"\x00" * pad
+
+
+def test_gif_upload_accepted_and_listed(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(), filename="party.gif", content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 200, await resp.text()
+        body = await resp.json()
+        assert body["name"] == "party.gif" and body["source"] == "file:party.gif"
+        names = (await (await client.get("/api/images")).json())["images"]
+        assert "party.gif" in names
+    _with_client(tmp_path, check)
+
+
+def test_gif_upload_rejects_too_large_and_too_big_dimensions(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        # over 600 KB
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(pad=600 * 1024), filename="big.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 400
+        assert "600 KB" in (await resp.json())["error"]
+        # larger than 135x240
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(size=(200, 100)), filename="wide.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 400
+        assert "135x240" in (await resp.json())["error"]
+        # exactly 135x240 is fine
+        form = aiohttp.FormData()
+        form.add_field("file", _gif_upload_bytes(size=(135, 240)), filename="exact.gif",
+                       content_type="image/gif")
+        resp = await client.post("/api/images", data=form)
+        assert resp.status == 200, await resp.text()
+    _with_client(tmp_path, check)
+
+
+def test_gif_widget_preview_shows_first_frame(tmp_path):
+    async def check(client, screens_file):
+        import io
+        from PIL import Image
+        images_dir = os.path.join(os.path.dirname(screens_file), "images")
+        os.makedirs(images_dir, exist_ok=True)
+        with open(os.path.join(images_dir, "anim.gif"), "wb") as f:
+            f.write(_gif_upload_bytes(frames=((255, 0, 0), (0, 255, 0))))
+        screen = {"tubes": [{"type": "gif", "source": "file:anim.gif"}] + [{"type": "blank"}] * 5}
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert resp.status == 200
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (STRIP_W, STRIP_H)
+        # tube 0 shows the red first frame (scaled to fill the width), tube 1 is black
+        assert img.getpixel((67, 120))[:3] == (255, 0, 0)
+        assert img.getpixel((67 + 135, 120))[:3] == (0, 0, 0)
+    _with_client(tmp_path, check)
+
+
+
+def test_rotation_falls_back_to_first_clock_and_handles_no_clock(tmp_path):
+    """GET/POST api/rotation without ?clock: the default controller, else the first one; with no
+    clocks at all the GET answers 200 {"no_clock": true} (first run) rather than a 404."""
+    from types import SimpleNamespace
+
+    class Ctl:
+        def __init__(self, name):
+            self.name = name
+            self.clock = SimpleNamespace(host="h", name=name)
+            self.rotation_enabled = True
+        def set_rotation_enabled(self, v):
+            self.rotation_enabled = v
+        def status(self):
+            return {"name": self.name}
+
+    f = tmp_path / "screens.yaml"
+    f.write_text(USER_SCREENS_YAML)
+    kitchen = Ctl("kitchen")
+
+    async def check():
+        app = editor_mod.create_app(None, StubHa(), str(f), test_allow_local=True,
+                                    controllers={"kitchen": kitchen})
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/api/rotation")
+            assert (resp.status, await resp.json()) == (200, {"enabled": True})
+            resp = await client.post("/api/rotation", json={"enabled": False})
+            assert resp.status == 200 and kitchen.rotation_enabled is False
+            assert (await client.get("/api/rotation?clock=nope")).status == 404
+        empty = editor_mod.create_app(None, StubHa(), str(f), test_allow_local=True, controllers={})
+        async with TestClient(TestServer(empty)) as client:
+            resp = await client.get("/api/rotation")
+            assert (resp.status, await resp.json()) == (200, {"enabled": True, "no_clock": True})
+
+    asyncio.run(check())

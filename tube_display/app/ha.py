@@ -78,6 +78,39 @@ class HaClient:
             return result[0]
         return []
 
+    async def state(self, entity_id: str) -> dict | None:
+        """The full state object of an entity (state + attributes), or None if it doesn't exist."""
+        try:
+            result = await self._request("GET", f"/states/{entity_id}")
+        except HaError:
+            return None
+        return result if isinstance(result, dict) else None
+
+    async def forecast_daily(self, entity_id: str) -> list[dict]:
+        """The daily forecast of a weather entity via the weather.get_forecasts service.
+
+        Returns the list of forecast dicts (datetime, temperature, templow, ...), newest
+        first as HA sends them; empty when the entity has none or the call fails."""
+        try:
+            result = await self._request(
+                "POST", "/services/weather/get_forecasts",
+                params={"return_response": "true"},
+                json={"entity_id": entity_id, "type": "daily"},
+            )
+        except HaError:
+            return []
+        # HA wraps the answer: {"service_response": {"<entity>": {"forecast": [...]}}};
+        # accept the bare {"<entity>": {...}} / {"forecast": [...]} shapes too
+        if isinstance(result, dict):
+            resp = result.get("service_response", result)
+            if isinstance(resp, dict):
+                entry = resp.get(entity_id)
+                if isinstance(entry, dict) and isinstance(entry.get("forecast"), list):
+                    return entry["forecast"]
+                if isinstance(resp.get("forecast"), list):
+                    return resp["forecast"]
+        return []
+
     async def camera_image(self, entity_id: str) -> bytes:
         """Current snapshot of a camera entity via /api/camera_proxy."""
         return await self._request("GET", f"/camera_proxy/{entity_id}")

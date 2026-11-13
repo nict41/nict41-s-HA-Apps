@@ -1,0 +1,3 @@
+# screenshots of failed e2e tests (uploaded as a CI artifact)
+artifacts/
+__pycache__/

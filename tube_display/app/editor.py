@@ -7,9 +7,15 @@ everything at the root of its own site.
 
 - GET  /                     the editor page (editor_static/index.html)
 - GET  /editor.js, /editor.css
-- GET  api/config            {"yaml", "data", "mtime", "errors"}
-- POST api/validate          {"data": {...}} -> {"errors": [...]}
+- GET  api/config            {"yaml", "data", "mtime", "errors", "warnings", "is_example"}
+- POST api/validate          {"data": {...}} -> {"errors": [...], "warnings": [...]}
 - POST api/preview           {"screen": {...}, "tube": optional int} -> PNG
+- GET  api/gallery           {"templates": [{id, name, description, inputs}]}
+- POST api/gallery/build     {"id", "values", "name"?} -> {"name", "screen"} (not saved)
+- POST api/gallery/preview   {"id", "values"?} -> PNG of the built screen
+- POST api/export            {"name", "screen"} -> {"yaml"}
+- POST api/import            {"yaml"} -> {"screens": {name: screen}, "errors": [...]}
+- GET  api/suggest           {"suggestions": [...]} gallery templates fillable from HA
 - POST api/source_image      {"source": "..."} -> PNG of the picture itself (for placing it)
 - POST api/template          {"template": "..."} -> {"result"|"error"}
 - GET  api/entities?q=<text> up to 50 matching entities (cached ~10 s)
@@ -20,6 +26,8 @@ everything at the root of its own site.
 - POST api/history/{id}/restore  {"mtime": ...} -> write a snapshot back
 - GET  api/clocks            {"clocks": [{"name", "host", "online", "rotation_enabled"}]}
 - GET  api/status            {"clocks": {name: controller.status()}}
+- POST api/mirror            {"screen": {...}, "clock"?, "seconds"?} -> show on a clock
+- DELETE api/mirror          {"clock"?} -> stop mirroring (POST api/mirror/end is an alias)
 
 The 8098 API (api.py) is untouched and has no write routes.
 
@@ -41,8 +49,10 @@ import yaml
 from aiohttp import web
 
 from render import IMAGE_EXTS, safe_image_name
-from screens import ScreensError, parse_screens
+from screens import ScreensError, example_screens_yaml, parse_screens
 from history import SaveHistory
+import fonts
+import gallery
 
 _LOG = logging.getLogger(__name__)
 
@@ -99,7 +109,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
 
     async def _index(request: web.Request) -> web.Response:
         # ?v=<file times> on the CSS/JS links so a phone never mixes an old cached file with a new one
-        stamp = str(int(max((STATIC_DIR / n).stat().st_mtime for n in ("editor.js", "editor.css"))))
+        stamp = str(int(max((STATIC_DIR / n).stat().st_mtime
+                            for n in ("editor.js", "editor.css", "when.js"))))
         html = (STATIC_DIR / "index.html").read_text(encoding="utf-8").replace("__VERSION__", stamp)
         return web.Response(text=html, content_type="text/html", headers={"Cache-Control": "no-cache"})
 
@@ -107,7 +118,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
         name = request.match_info["name"]
 
         async def handler(req: web.Request) -> web.Response:
-            if name not in ("editor.js", "editor.css"):
+            if name not in ("editor.js", "editor.css", "when.js"):
                 raise web.HTTPNotFound()
             ctype = "text/javascript" if name.endswith(".js") else "text/css"
             return web.Response(body=(STATIC_DIR / name).read_bytes(), content_type=ctype,
@@ -126,19 +137,26 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             mtime = os.path.getmtime(path)
         except OSError as err:
             return {"yaml": "", "data": None, "mtime": None,
-                    "errors": [f"cannot read {path}: {err}"]}
+                    "errors": [f"cannot read {path}: {err}"], "warnings": [],
+                    "is_example": False}
         try:
             data = yaml.safe_load(text)
         except yaml.YAMLError as err:
             return {"yaml": text, "data": None, "mtime": mtime,
-                    "errors": [f"YAML parse error: {err}"]}
+                    "errors": [f"YAML parse error: {err}"], "warnings": [],
+                    "is_example": False}
         errors: list[str] = []
+        warnings: list[str] = []
         if data is not None:
             try:
-                errors = list(parse_screens(data).errors)
+                cfg = parse_screens(data)
+                errors = list(cfg.errors)
+                warnings = list(cfg.warnings)
             except ScreensError as err:
                 errors = [str(err)]
-        return {"yaml": text, "data": data, "mtime": mtime, "errors": errors}
+        return {"yaml": text, "data": data, "mtime": mtime, "errors": errors,
+                "warnings": warnings,
+                "is_example": text == example_screens_yaml()}
 
     async def api_config(request: web.Request) -> web.Response:
         async def handler(req: web.Request) -> web.Response:
@@ -156,15 +174,96 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             if data is None:
                 return web.json_response({"errors": ["body needs a 'data' field"]}, status=400)
             try:
-                errors = list(parse_screens(data).errors)
+                cfg = parse_screens(data)
+                errors = list(cfg.errors)
+                warnings = list(cfg.warnings)
             except ScreensError as err:
-                errors = [str(err)]
-            return web.json_response({"errors": errors})
+                errors, warnings = [str(err)], []
+            return web.json_response({"errors": errors, "warnings": warnings})
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------
     # preview / template / entities
     # ------------------------------------------------------------------
+
+    async def _preview_response(body) -> web.Response:
+        """Render {"screen": {...}, "tube"?, "font"?} to a PNG, exactly like api/preview."""
+        import render as render_mod
+        from screens import _parse_screen
+
+        raw = body.get("screen") if isinstance(body, dict) else None
+        if not isinstance(raw, dict):
+            return web.json_response({"error": "body needs a 'screen' mapping"}, status=400)
+        tube = body.get("tube")
+        if tube is not None:
+            try:
+                tube = int(tube)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "'tube' must be an int"}, status=400)
+            if not 0 <= tube < 6:
+                return web.json_response({"error": "'tube' must be 0..5"}, status=400)
+        # Parse the posted screen with the real parser (raw widget dicts are
+        # kept as-is; templates render later, at render time).
+        errors: list[str] = []
+        screen = _parse_screen("__preview__", raw, errors)
+        if screen is None and isinstance(raw.get("tubes"), list):
+            # A tube that's still being typed in shouldn't blank the whole preview: draw a
+            # red "!" in its place and say why in a header, so the rest stays editable
+            from screens import _check_widget
+            tubes = []
+            for i, w in enumerate(raw["tubes"]):
+                werr: list[str] = []
+                ok = _check_widget(werr, "__preview__", i, w)
+                tubes.append(w if ok and not werr else {"type": "text", "text": "!", "color": "#F44336"})
+            fixed = dict(raw, tubes=tubes)
+            retry: list[str] = []
+            screen = _parse_screen("__preview__", fixed, retry)
+        if screen is None:
+            return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
+        # A copy, so a preview running at the same time doesn't share the box recorder.
+        # The preview NEVER uses the controller's (possibly cached) renderer: typing in
+        # the editor would create hundreds of websocket subscriptions. With no
+        # controller at all, build a context of our own around the plain REST renderer.
+        import copy
+        import render as render_mod
+        ha = app["ha"]
+        controller = app["controller"]
+        if controller is not None:
+            ctx = copy.copy(controller._ctx)
+            if ha is not None:
+                ctx.renderer = ha.render_template
+            if not ctx.images_dir:
+                ctx.images_dir = images_dir
+        else:
+            ctx = render_mod.RenderContext(
+                ha.render_template if ha is not None else _async_none,
+                session=None, ha=ha)
+            ctx.images_dir = images_dir
+        # the top-level `font` of the file being edited, if the editor sent it
+        if isinstance(body, dict) and "font" in body:
+            top_font = body.get("font")
+            ctx.default_font = (top_font if isinstance(top_font, str) and top_font
+                                and top_font != "default" else None)
+        headers: dict[str, str] = {}
+        if errors:
+            headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
+        # For the designer: where each item of a custom tube (or canvas) ended up
+        ctx.record_boxes = {}
+        strip = await render_mod.render_screen(screen, ctx)
+        import json
+        if tube is not None:
+            boxes = ctx.record_boxes.get(f"__preview__:tube{tube}")
+            from rgb565 import TUBE_W
+            strip = strip.crop((tube * TUBE_W, 0, (tube + 1) * TUBE_W, strip.height))
+            if boxes is not None:
+                headers["X-Item-Boxes"] = json.dumps(boxes)
+        elif screen.canvas is not None:
+            boxes = ctx.record_boxes.get("__preview__:canvas")
+            if boxes is not None:
+                headers["X-Item-Boxes"] = json.dumps(boxes)
+        buf = io.BytesIO()
+        strip.save(buf, format="PNG")
+        return web.Response(body=buf.getvalue(), content_type="image/png", headers=headers or None)
 
     async def api_preview(request: web.Request) -> web.Response:
         try:
@@ -173,71 +272,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return web.json_response({"error": "body must be JSON"}, status=400)
 
         async def handler(req: web.Request) -> web.Response:
-            import render as render_mod
-            from screens import _parse_screen
-
-            raw = body.get("screen") if isinstance(body, dict) else None
-            if not isinstance(raw, dict):
-                return web.json_response({"error": "body needs a 'screen' mapping"}, status=400)
-            tube = body.get("tube")
-            if tube is not None:
-                try:
-                    tube = int(tube)
-                except (TypeError, ValueError):
-                    return web.json_response({"error": "'tube' must be an int"}, status=400)
-                if not 0 <= tube < 6:
-                    return web.json_response({"error": "'tube' must be 0..5"}, status=400)
-            # Parse the posted screen with the real parser (raw widget dicts are
-            # kept as-is; templates render later, at render time).
-            errors: list[str] = []
-            screen = _parse_screen("__preview__", raw, errors)
-            if screen is None and isinstance(raw.get("tubes"), list):
-                # A tube that's still being typed in shouldn't blank the whole preview: draw a
-                # red "!" in its place and say why in a header, so the rest stays editable
-                from screens import _check_widget
-                tubes = []
-                for i, w in enumerate(raw["tubes"]):
-                    werr: list[str] = []
-                    ok = _check_widget(werr, "__preview__", i, w)
-                    tubes.append(w if ok and not werr else {"type": "text", "text": "!", "color": "#F44336"})
-                fixed = dict(raw, tubes=tubes)
-                retry: list[str] = []
-                screen = _parse_screen("__preview__", fixed, retry)
-            if screen is None:
-                return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
-            # A copy, so a preview running at the same time doesn't share the box recorder.
-            # The preview NEVER uses the controller's (possibly cached) renderer: typing in
-            # the editor would create hundreds of websocket subscriptions. With no
-            # controller at all, build a context of our own around the plain REST renderer.
-            import copy
-            import render as render_mod
-            ha = app["ha"]
-            controller = app["controller"]
-            if controller is not None:
-                ctx = copy.copy(controller._ctx)
-                if ha is not None:
-                    ctx.renderer = ha.render_template
-            else:
-                ctx = render_mod.RenderContext(
-                    ha.render_template if ha is not None else _async_none,
-                    session=None, ha=ha)
-                ctx.images_dir = images_dir
-            headers: dict[str, str] = {}
-            if errors:
-                headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
-            # For the designer: where each item of a custom tube ended up
-            ctx.record_boxes = {}
-            strip = await render_mod.render_screen(screen, ctx)
-            boxes = ctx.record_boxes.get(f"__preview__:tube{tube}")
-            if tube is not None:
-                from rgb565 import TUBE_W
-                strip = strip.crop((tube * TUBE_W, 0, (tube + 1) * TUBE_W, strip.height))
-                if boxes is not None:
-                    import json
-                    headers["X-Item-Boxes"] = json.dumps(boxes)
-            buf = io.BytesIO()
-            strip.save(buf, format="PNG")
-            return web.Response(body=buf.getvalue(), content_type="image/png", headers=headers or None)
+            return await _preview_response(body)
         return await ingress_only(request, handler)
 
     async def api_source_image(request: web.Request) -> web.Response:
@@ -318,16 +353,212 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                     name = (s.get("attributes") or {}).get("friendly_name", "")
                     if q and q not in eid.lower() and q not in str(name).lower():
                         continue
+                    attrs = s.get("attributes") or {}
                     items.append({
                         "entity_id": eid,
                         "name": name,
                         "state": s.get("state"),
-                        "unit": (s.get("attributes") or {}).get("unit_of_measurement"),
+                        "unit": attrs.get("unit_of_measurement"),
+                        "device_class": attrs.get("device_class"),
+                        "domain": eid.split(".", 1)[0] if "." in eid else "",
                     })
                     if len(items) >= 50:
                         break
                 cache["q"], cache["at"], cache["items"] = q, now, items
             return web.json_response(cache["items"])
+        return await ingress_only(request, handler)
+
+    # ------------------------------------------------------------------
+    # gallery: ready-made screens, import/export, entity suggestions
+    # ------------------------------------------------------------------
+
+    def _unique_screen_name(name: str, existing) -> str:
+        """A screen name that doesn't collide: " 2", " 3", ... appended."""
+        name = (name or "").strip() or "screen"
+        if name not in existing:
+            return name
+        n = 2
+        while f"{name} {n}" in existing:
+            n += 1
+        return f"{name} {n}"
+
+    async def api_gallery(request: web.Request) -> web.Response:
+        """GET: {"templates": [{id, name, description, inputs}]}."""
+        async def handler(req: web.Request) -> web.Response:
+            return web.json_response({"templates": gallery.list_templates()})
+        return await ingress_only(request, handler)
+
+    async def api_gallery_build(request: web.Request) -> web.Response:
+        """POST {"id", "values", "name"?} -> {"name", "screen"} - the built screen,
+        NOT saved; the editor adds it to its state and the user saves."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            if not isinstance(body, dict) or not isinstance(body.get("id"), str):
+                return web.json_response({"error": "body needs an 'id' string"}, status=400)
+            values = body.get("values")
+            if values is not None and not isinstance(values, dict):
+                return web.json_response({"error": "'values' must be a mapping"}, status=400)
+            try:
+                screen = gallery.build(body["id"], values or {})
+            except ValueError as err:
+                return web.json_response({"error": str(err)}, status=400)
+            existing = set()
+            try:
+                with open(app["screens_file"], encoding="utf-8") as f:
+                    data = yaml.safe_load(f.read())
+                if isinstance(data, dict) and isinstance(data.get("screens"), dict):
+                    existing = set(data["screens"])
+            except (OSError, yaml.YAMLError):
+                pass
+            name = _unique_screen_name(str(body.get("name") or ""), existing)
+            return web.json_response({"name": name, "screen": screen})
+        return await ingress_only(request, handler)
+
+    async def api_gallery_preview(request: web.Request) -> web.Response:
+        """POST {"id", "values"?} -> PNG of the built screen. Missing inputs are
+        filled with a placeholder entity (domain.example) so a template can be
+        previewed before its inputs are chosen."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            if not isinstance(body, dict) or not isinstance(body.get("id"), str):
+                return web.json_response({"error": "body needs an 'id' string"}, status=400)
+            values = body.get("values")
+            if values is not None and not isinstance(values, dict):
+                return web.json_response({"error": "'values' must be a mapping"}, status=400)
+            values = dict(values or {})
+            try:
+                template = gallery.get_template(body["id"])
+            except KeyError:
+                return web.json_response({"error": f"unknown gallery template {body['id']!r}"},
+                                         status=400)
+            for inp in template["inputs"]:
+                key = inp["key"]
+                if not str(values.get(key) or "").strip():
+                    values[key] = inp.get("domain", "sensor") + ".example"
+            try:
+                screen = gallery.build(body["id"], values)
+            except ValueError as err:
+                return web.json_response({"error": str(err)}, status=400)
+            return await _preview_response({"screen": screen})
+        return await ingress_only(request, handler)
+
+    async def api_export(request: web.Request) -> web.Response:
+        """POST {"name", "screen"} -> {"yaml"}: the screen as it would appear under
+        `screens:` in the file (same ruamel settings as the round-trip saver)."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            if not isinstance(body, dict):
+                return web.json_response({"error": "body must be a JSON mapping"}, status=400)
+            name = body.get("name")
+            screen = body.get("screen")
+            if not isinstance(name, str) or not name.strip():
+                return web.json_response({"error": "body needs a 'name' string"}, status=400)
+            if not isinstance(screen, dict):
+                return web.json_response({"error": "body needs a 'screen' mapping"}, status=400)
+            from ruamel.yaml import YAML
+            from ruamel.yaml.scalarstring import LiteralScalarString, DoubleQuotedScalarString
+
+            def _set_str(value):
+                if isinstance(value, str) and "\n" in value:
+                    return LiteralScalarString(value)
+                if isinstance(value, str) and re.fullmatch(r"\d{1,2}:\d{2}(:\d{2})?", value):
+                    return DoubleQuotedScalarString(value)
+                return value
+
+            def _convert(obj):
+                if isinstance(obj, dict):
+                    return {k: _convert(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_convert(v) for v in obj]
+                return _set_str(obj)
+
+            ryaml = YAML()
+            ryaml.preserve_quotes = True
+            ryaml.indent(mapping=2, sequence=4, offset=2)
+            ryaml.width = 4096
+            buf = io.StringIO()
+            ryaml.dump({name: _convert(screen)}, buf)
+            return web.json_response({"yaml": buf.getvalue()})
+        return await ingress_only(request, handler)
+
+    async def api_import(request: web.Request) -> web.Response:
+        """POST {"yaml"} -> {"screens": {name: raw screen}, "errors": [...]}.
+
+        Accepts one or more `name: {...}` mappings, or a whole screens file with a
+        `screens:` key. Every screen is checked with the real parser; names that
+        already exist in the file get " 2", " 3", ... appended."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            from screens import _parse_screen
+
+            text = body.get("yaml") if isinstance(body, dict) else None
+            if not isinstance(text, str) or not text.strip():
+                return web.json_response({"error": "body needs a 'yaml' string"}, status=400)
+            try:
+                data = yaml.safe_load(text)
+            except yaml.YAMLError as err:
+                return web.json_response({"error": "invalid YAML", "errors": [str(err)]},
+                                         status=400)
+            if not isinstance(data, dict):
+                return web.json_response({"error": "not a mapping of screens",
+                                          "errors": ["expected `name: {...}` or a `screens:` file"]},
+                                         status=400)
+            raw_screens = data.get("screens") if isinstance(data.get("screens"), dict) else data
+            if not isinstance(raw_screens, dict) or not raw_screens:
+                return web.json_response({"error": "no screens found",
+                                          "errors": ["expected `name: {...}` or a `screens:` mapping"]},
+                                         status=400)
+            existing = set()
+            try:
+                with open(app["screens_file"], encoding="utf-8") as f:
+                    cur = yaml.safe_load(f.read())
+                if isinstance(cur, dict) and isinstance(cur.get("screens"), dict):
+                    existing = set(cur["screens"])
+            except (OSError, yaml.YAMLError):
+                pass
+            out: dict[str, dict] = {}
+            errors: list[str] = []
+            for name, raw in raw_screens.items():
+                if not isinstance(name, str) or not isinstance(raw, dict):
+                    errors.append(f"screen {name!r}: not a mapping")
+                    continue
+                werr: list[str] = []
+                wwarn: list[str] = []
+                if _parse_screen(name, raw, werr, wwarn) is None:
+                    errors.extend(werr or [f"screen '{name}': invalid"])
+                    continue
+                out[_unique_screen_name(name, existing | set(out))] = raw
+            return web.json_response({"screens": out, "errors": errors})
+        return await ingress_only(request, handler)
+
+    async def api_suggest(request: web.Request) -> web.Response:
+        """GET: {"suggestions": [gallery.suggest(...)]} - gallery templates that can be
+        filled automatically from HA's entity list (the setup wizard's step 2)."""
+        async def handler(req: web.Request) -> web.Response:
+            ha = app["ha"]
+            if ha is None:
+                return web.json_response({"error": "no HA client"}, status=503)
+            try:
+                states = await ha._request("GET", "/states")
+            except Exception as err:
+                return web.json_response({"error": str(err)}, status=502)
+            return web.json_response({"suggestions": gallery.suggest(states)})
         return await ingress_only(request, handler)
 
     # ------------------------------------------------------------------
@@ -455,7 +686,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return new
 
         new = _convert(data)
-        for key in ("rotation", "clock", "screens", "night", "clocks"):
+        for key in ("rotation", "clock", "screens", "night", "clocks", "font"):
             if key in new:
                 root[key] = _merge(root[key], new[key]) if key in root else new[key]
             elif key in root:
@@ -594,6 +825,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     # picture library: <screens file folder>/images, used as source "file:<name>"
     # ------------------------------------------------------------------
     images_dir = os.path.join(os.path.dirname(screens_file) or ".", "images")
+    fonts_dir = os.path.join(os.path.dirname(screens_file) or ".", "fonts")
+    fonts.set_user_dir(fonts_dir)
     max_image_bytes = 10 * 1024 * 1024
 
     async def api_images(request: web.Request) -> web.Response:
@@ -652,6 +885,24 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                     img.verify()
             except Exception:
                 return web.json_response({"error": "not a picture Pillow can read"}, status=400)
+            if ext == ".gif":
+                # a GIF is also uploaded to the clock for the gif widget (max 600 KB,
+                # at most 135x240 - the clock's panel size)
+                from clock import GIF_MAX_BYTES
+                from rgb565 import TUBE_W, TUBE_H
+                if len(data) > GIF_MAX_BYTES:
+                    return web.json_response(
+                        {"error": f"a GIF for the clock must be at most {GIF_MAX_BYTES // 1024} KB, "
+                                  f"this one is {len(data) // 1024} KB"}, status=400)
+                try:
+                    with Image.open(io.BytesIO(bytes(data))) as img:
+                        w, h = img.size
+                except Exception:
+                    return web.json_response({"error": "not a GIF Pillow can read"}, status=400)
+                if w > TUBE_W or h > TUBE_H:
+                    return web.json_response(
+                        {"error": f"a GIF for the clock must be at most {TUBE_W}x{TUBE_H} pixels, "
+                                  f"this one is {w}x{h}"}, status=400)
             os.makedirs(images_dir, exist_ok=True)
             name = clean + ext
             n = 2
@@ -665,28 +916,149 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return web.json_response({"ok": True, "name": name, "source": "file:" + name})
         return await ingress_only(request, handler)
 
+    # ------------------------------------------------------------------
+    # font library: <screens file folder>/fonts, used as family "file:<name>"
+    # ------------------------------------------------------------------
+    max_font_bytes = 3 * 1024 * 1024
+    _font_preview_cache: dict[tuple, bytes] = {}
+
+    async def api_fonts(request: web.Request) -> web.Response:
+        """GET: {"bundled": [{"id","name"}], "files": [{"name","size"}]}."""
+        async def handler(req: web.Request) -> web.Response:
+            files = []
+            if os.path.isdir(fonts_dir):
+                for n in sorted(os.listdir(fonts_dir)):
+                    if fonts.safe_font_name(n):
+                        try:
+                            files.append({"name": n, "size": os.path.getsize(os.path.join(fonts_dir, n))})
+                        except OSError:
+                            pass
+            return web.json_response({"bundled": fonts.bundled_families(), "files": files})
+        return await ingress_only(request, handler)
+
+    async def api_font_get(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = fonts.safe_font_name(req.match_info["name"])
+            path = os.path.join(fonts_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            return web.FileResponse(path)
+        return await ingress_only(request, handler)
+
+    async def api_font_delete(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = fonts.safe_font_name(req.match_info["name"])
+            path = os.path.join(fonts_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            os.remove(path)
+            fonts._load.cache_clear()
+            return web.json_response({"ok": True})
+        return await ingress_only(request, handler)
+
+    async def api_font_upload(request: web.Request) -> web.Response:
+        """multipart field "file": a .ttf/.otf font (max 3 MB), checked with Pillow,
+        saved under a safe name."""
+        async def handler(req: web.Request) -> web.Response:
+            from PIL import ImageFont
+            try:
+                reader = await req.multipart()
+            except Exception:
+                return web.json_response({"error": "body must be multipart form data"}, status=400)
+            part = await reader.next()
+            while part is not None and part.name != "file":
+                part = await reader.next()
+            if part is None or not part.filename:
+                return web.json_response({"error": "no file"}, status=400)
+            from urllib.parse import unquote
+            base, ext = os.path.splitext(os.path.basename(unquote(part.filename)))
+            ext = ext.lower()
+            if ext not in fonts.FONT_EXTS:
+                return web.json_response({"error": "use a .ttf or .otf font file"}, status=400)
+            clean = "".join(c if (c.isascii() and c.isalnum()) or c in "-_" else "_" for c in base).strip("_") or "font"
+            data = bytearray()
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > max_font_bytes:
+                    return web.json_response({"error": "font is over 3 MB"}, status=400)
+            try:
+                ImageFont.truetype(io.BytesIO(bytes(data)), 20)
+            except Exception:
+                return web.json_response({"error": "not a font file Pillow can read"}, status=400)
+            os.makedirs(fonts_dir, exist_ok=True)
+            name = clean + ext
+            n = 2
+            while os.path.exists(os.path.join(fonts_dir, name)):
+                name = f"{clean}-{n}{ext}"
+                n += 1
+            tmp = os.path.join(fonts_dir, "." + name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, os.path.join(fonts_dir, name))
+            fonts._load.cache_clear()
+            return web.json_response({"ok": True, "name": name, "family": "file:" + name})
+        return await ingress_only(request, handler)
+
+    async def api_font_preview(request: web.Request) -> web.Response:
+        """GET ?font=<family id or file:name>&text=<sample>&size=<n>: a small PNG of the
+        sample in white on dark, cached per (font, text, size)."""
+        async def handler(req: web.Request) -> web.Response:
+            from PIL import Image, ImageDraw
+            fam = req.query.get("font", "default")
+            text = (req.query.get("text") or "Ag 123")[:80]
+            try:
+                size = max(8, min(120, int(req.query.get("size", "28"))))
+            except ValueError:
+                size = 28
+            key = (fam, text, size)
+            png = _font_preview_cache.get(key)
+            if png is None:
+                img = Image.new("RGB", (min(400, 24 + size * len(text) // 2 + 40), size + 24), (24, 24, 24))
+                draw = ImageDraw.Draw(img)
+                font = fonts.load_font(size, bold=False, family=fam)
+                draw.text((12, 12), text, font=font, fill=(255, 255, 255))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                png = buf.getvalue()
+                if len(_font_preview_cache) > 256:
+                    _font_preview_cache.clear()
+                _font_preview_cache[key] = png
+            return web.Response(body=png, content_type="image/png",
+                                headers={"Cache-Control": "max-age=3600"})
+        return await ingress_only(request, handler)
+
     async def api_rotation(request: web.Request) -> web.Response:
         """GET [?clock=<name>]: {"enabled": bool}. POST {"enabled": bool, "clock"?}: on =
         cycle automatically, off = the clock's button changes screens. `clock` picks
         one of the app's controllers (query string for GET, JSON body for POST)."""
+        def pick(name):
+            """The named clock, else the default one, else the first; None if there are none."""
+            if name is not None:
+                return app["controllers"].get(str(name))
+            if app["controller"] is not None:
+                return app["controller"]
+            return next(iter(app["controllers"].values()), None)
+
         async def handler(req: web.Request) -> web.Response:
             name = req.query.get("clock")
+            body = {}
             if req.method == "POST":
                 body = await req.json()
                 if name is None and isinstance(body, dict):
                     name = body.get("clock")
-                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
-                if ctl is None:
-                    return web.json_response(
-                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
-                        status=404)
+            ctl = pick(name)
+            if ctl is None and name is None:
+                # No clock configured yet (first run, the setup wizard is showing): not an error
+                return web.json_response({"enabled": True, "no_clock": True})
+            if ctl is None:
+                return web.json_response(
+                    {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
+                    status=404)
+            if req.method == "POST":
                 ctl.set_rotation_enabled(bool(body.get("enabled")))
-            else:
-                ctl = app["controllers"].get(str(name)) if name is not None else app["controller"]
-                if ctl is None:
-                    return web.json_response(
-                        {"error": f"unknown clock {name!r}", "clocks": sorted(app["controllers"])},
-                        status=404)
             return web.json_response({"enabled": bool(ctl.rotation_enabled)})
         return await ingress_only(request, handler)
 
@@ -732,6 +1104,82 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_get("/api/clocks", api_clocks)
     app.router.add_get("/api/status", api_status)
 
+    # ------------------------------------------------------------------
+    # live mirror: show the editor's current screen on a clock ("Show on clock")
+    # ------------------------------------------------------------------
+
+    def _mirror_controller(body) -> tuple[web.Response | None, object]:
+        """Pick the controller for a mirror request: the "clock" name if given
+        (unknown -> 404), else the first one. Returns (error_response, controller)."""
+        name = body.get("clock") if isinstance(body, dict) else None
+        controllers = app["controllers"]
+        if name is not None:
+            ctl = controllers.get(str(name))
+            if ctl is None:
+                return web.json_response(
+                    {"error": f"unknown clock {name!r}", "clocks": sorted(controllers)},
+                    status=404), None
+            return None, ctl
+        if not controllers:
+            return web.json_response({"error": "no clock configured"}, status=404), None
+        first = next(iter(controllers.values()))
+        return None, first
+
+    async def api_mirror(request: web.Request) -> web.Response:
+        """POST {"screen": {...raw screen dict, as api/preview takes...}, "clock"?,
+        "seconds"?} -> parse the screen like api/preview (errors -> 400) and show it
+        on that clock (default the first; unknown -> 404) for `seconds`
+        (default 120, max 600). Each call replaces the mirrored screen."""
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+
+        async def handler(req: web.Request) -> web.Response:
+            from screens import _parse_screen
+
+            raw = body.get("screen") if isinstance(body, dict) else None
+            if not isinstance(raw, dict):
+                return web.json_response({"error": "body needs a 'screen' mapping"}, status=400)
+            errors: list[str] = []
+            screen = _parse_screen("__mirror__", raw, errors)
+            if screen is None:
+                return web.json_response({"error": "invalid screen", "errors": errors}, status=400)
+            if errors:
+                # a screen with (non-fatal) errors is still shown, but reported
+                _LOG.warning("Mirror screen has errors: %s", errors)
+            seconds = body.get("seconds", 120)
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or seconds <= 0:
+                return web.json_response({"error": "'seconds' must be a positive number"}, status=400)
+            seconds = min(float(seconds), 600.0)     # cap at 600 s
+            err, ctl = _mirror_controller(body)
+            if err is not None:
+                return err
+            ctl.mirror(screen, seconds=seconds)
+            return web.json_response({"ok": True, "clock": getattr(ctl, "name", "main"),
+                                      "seconds": seconds})
+        return await ingress_only(request, handler)
+
+    async def api_mirror_end(request: web.Request) -> web.Response:
+        """DELETE (or POST api/mirror/end, for sendBeacon which cannot DELETE):
+        {"clock"?} -> end the mirror on that clock (default the first)."""
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+
+        async def handler(req: web.Request) -> web.Response:
+            err, ctl = _mirror_controller(body if isinstance(body, dict) else {})
+            if err is not None:
+                return err
+            ctl.end_mirror()
+            return web.json_response({"ok": True, "clock": getattr(ctl, "name", "main")})
+        return await ingress_only(request, handler)
+
+    app.router.add_post("/api/mirror", api_mirror)
+    app.router.add_delete("/api/mirror", api_mirror_end)
+    app.router.add_post("/api/mirror/end", api_mirror_end)
+
     async def api_icons(request: web.Request) -> web.Response:
         """GET ?q=<text>: up to 60 Material Design Icon names ("mdi:...") containing the text,
         names starting with it first."""
@@ -755,6 +1203,11 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_post("/api/images", api_image_upload)
     app.router.add_get("/api/images/{name}", api_image_get)
     app.router.add_delete("/api/images/{name}", api_image_delete)
+    app.router.add_get("/api/fonts", api_fonts)
+    app.router.add_post("/api/fonts", api_font_upload)
+    app.router.add_get("/api/fonts/{name}", api_font_get)
+    app.router.add_delete("/api/fonts/{name}", api_font_delete)
+    app.router.add_get("/api/font_preview", api_font_preview)
     app.router.add_get("/", index)
     app.router.add_get("/{name}", static_file)
     app.router.add_get("/api/config", api_config)
@@ -763,6 +1216,12 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_post("/api/source_image", api_source_image)
     app.router.add_post("/api/template", api_template)
     app.router.add_get("/api/entities", api_entities)
+    app.router.add_get("/api/gallery", api_gallery)
+    app.router.add_post("/api/gallery/build", api_gallery_build)
+    app.router.add_post("/api/gallery/preview", api_gallery_preview)
+    app.router.add_post("/api/export", api_export)
+    app.router.add_post("/api/import", api_import)
+    app.router.add_get("/api/suggest", api_suggest)
     app.router.add_post("/api/save", api_save)
     app.router.add_post("/api/save_yaml", api_save_yaml)
     app.router.add_get("/api/history", api_history)

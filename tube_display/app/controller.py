@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import io
 import logging
 import json
 import os
@@ -36,9 +37,13 @@ from PIL import Image
 
 import night as night_mod
 import render as render_mod
-from clock import DISPLAY_CLOCK, DISPLAY_PANELS, ClockPusher
-from rgb565 import STRIP_H, STRIP_W, strip_to_tube_bytes
-from screens import CLOCK_ENTRY, Screen, ScreensConfig, ScreensError, load_screens
+import animate as animate_mod
+import fonts
+from clock import (DISPLAY_CLOCK, DISPLAY_PANELS, GIF_MAX_BYTES, GIF_TD_PREFIX, ClockPusher,
+                   gif_clock_name)
+from rgb565 import STRIP_H, STRIP_W, TUBE_COUNT, TUBE_H, TUBE_W, image_to_rgb565, strip_to_tube_bytes
+from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY, Screen,
+                     ScreensConfig, ScreensError, load_screens)
 from settings import ClockSettings
 
 _LOG = logging.getLogger(__name__)
@@ -48,6 +53,18 @@ NIGHT_TICK = 60.0          # seconds between night-mode (brightness) updates
 OTA_TIMEOUT = 600.0        # an OTA that never reports "done" is given up after 10 min
 PROBE_BACKOFF = (5.0, 10.0, 20.0, 40.0, 60.0)   # then 60 s forever
 SUN_ELEVATION_TEMPLATE = "{{ state_attr('sun.sun','elevation') }}"
+# tube order of each transition (tubes are sent one at a time, ~218 ms each)
+TRANSITION_ORDERS = {
+    "cascade": [0, 1, 2, 3, 4, 5],
+    "cascade_right": [5, 4, 3, 2, 1, 0],
+    "center_out": [2, 3, 1, 4, 0, 5],
+}
+WIPE_BANDS = 6             # a wipe draws each tube top to bottom in this many bands
+WIPE_BAND_H = TUBE_H // WIPE_BANDS   # 40 rows per band
+ANIM_MAX_RECTS_PER_SEC = 10         # cap on partial (send_rect) uploads per second
+MIRROR_DEFAULT_SECONDS = 120.0
+MIRROR_MAX_SECONDS = 600.0
+GIF_CLEANUP_INTERVAL = 3600.0       # delete unused td-*.gif files from the clock at most hourly
 
 
 class Controller:
@@ -66,6 +83,7 @@ class Controller:
         self._renderer = renderer or (ha.render_template if ha else None)
         self._ctx = render_mod.RenderContext(self._renderer, session=session, ha=ha)
         self._ctx.images_dir = os.path.join(os.path.dirname(settings.screens_file) or ".", "images")
+        fonts.set_user_dir(os.path.join(os.path.dirname(settings.screens_file) or ".", "fonts"))
 
         # which clock this controller drives (None -> the primary/legacy one)
         self.clock = clock if clock is not None else settings.primary_clock
@@ -84,6 +102,7 @@ class Controller:
         self.last_error: str | None = None
         self.last_strip: Image.Image | None = None
         self.config_errors: list[str] = []
+        self.config_warnings: list[str] = []
         self.screens_loaded_at: float | None = None
 
         # pause / flash / health
@@ -110,6 +129,22 @@ class Controller:
         self.live_min_interval = 1.0
         self._live_dirty = False
         self._last_live = -1e9
+
+        # live mirror (the editor's "Show on clock"): an in-memory screen shown like a
+        # pinned one, just below a flash; each mirror() call replaces it and restarts
+        self._mirror: tuple[Screen, float] | None = None   # (screen, expiry)
+
+        # per-screen-show state: resolved tube widgets (for animators) and the
+        # transition currently running (None when idle)
+        self._tubes: list[dict | None] | None = None       # resolved widgets of the showing screen
+        self._screen_since = 0.0                           # when the showing screen became active
+        self._anim_next: dict[int, float] = {}             # tube -> next frame due (monotonic)
+        self._anim_rect_times: list[float] = []            # recent send_rect times (rate cap)
+        self._transitioning = False
+        # gif tubes of the showing screen (tube -> resolved widget), played on the clock
+        self._gif_tubes: dict[int, dict] = {}
+        self._gif_played = False                          # the showing screen's GIFs were started
+        self._last_gif_cleanup = -1e9                      # monotonic time of the last td- cleanup
 
     @property
     def mqtt_id(self) -> str:
@@ -139,16 +174,22 @@ class Controller:
         except (ScreensError, OSError) as err:
             _LOG.error("Could not load screens file %s: %s", path, err)
             self.config_errors = [str(err)]
+            self.config_warnings = []
             self.last_error = f"screens file: {err}"
             return self._config
         self._config = cfg
+        self._ctx.default_font = cfg.font
         self.config_errors = list(cfg.errors)
+        self.config_warnings = list(cfg.warnings)
         for e in cfg.errors:
             _LOG.error("Screens file: %s (screen skipped)", e)
+        for w in cfg.warnings:
+            _LOG.warning("Screens file: %s", w)
         if cfg.errors:
             self.last_error = "; ".join(cfg.errors)
         self.screens_loaded_at = self._now()
-        _LOG.info("Loaded %d screen(s), rotation %s", len(cfg.screens), cfg.rotation)
+        _LOG.info("Loaded %d screens (%d errors, %d warnings), rotation %s",
+                  len(cfg.screens), len(cfg.errors), len(cfg.warnings), cfg.rotation)
         return cfg
 
     async def _reload_if_changed(self) -> None:
@@ -263,6 +304,30 @@ class Controller:
         _LOG.info("Flash ended - back to %s",
                   pin[0] if pin else ("pause" if self._paused else self._reshow))
 
+    # ------------------------------------------------------------------
+    # live mirror (the editor's "Show on clock"): an in-memory screen shown
+    # like a pinned one, with priority just below a flash
+    # ------------------------------------------------------------------
+
+    def mirror(self, screen: Screen, seconds: float = MIRROR_DEFAULT_SECONDS) -> None:
+        """Show this in-memory screen (not from the screens file) like a pinned
+        screen, with priority just below a flash. Each call replaces the screen and
+        restarts the timer. The normal refresh keeps it up to date."""
+        seconds = max(1.0, min(float(seconds), MIRROR_MAX_SECONDS))
+        self._mirror = (screen, self._now() + seconds)
+        self._interrupted = True
+        self._publish_state()
+        _LOG.info("Mirroring screen '%s' for %gs", screen.name, seconds)
+
+    def end_mirror(self) -> None:
+        """End the mirror; the rotation/pin/pause resumes."""
+        if self._mirror is None:
+            return
+        self._mirror = None
+        self._interrupted = True
+        self._publish_state()
+        _LOG.info("Mirror ended")
+
     def set_rotation_enabled(self, enabled: bool) -> None:
         self.rotation_enabled = enabled
         self._interrupted = True
@@ -360,6 +425,7 @@ class Controller:
             "pinned": self._pin[0] if self._pin else None,
             "screens": sorted(cfg.screens) if cfg else [],
             "config_errors": self.config_errors,
+            "config_warnings": self.config_warnings,
             "last_error": self.last_error or (self._pusher.last_error if self._pusher else None),
             "clock_state": self.clock_state,
             "clock_host": self.clock.host if self.clock is not None else self.settings.clock_host,
@@ -373,6 +439,12 @@ class Controller:
             "ota_busy": self._ota_busy(),
             "brightness": self._brightness,
             "live": bool(self.live),
+            "mirroring": self._mirror is not None
+                          and self._now() < self._mirror[1],
+            "upload_format": (self._pusher.upload_format if self._pusher is not None
+                              and hasattr(self._pusher, "upload_format") else "rgb565"),
+            "bytes_per_minute": (self._pusher.bytes_per_minute() if self._pusher is not None
+                                 and hasattr(self._pusher, "bytes_per_minute") else 0),
         }
 
     async def render_preview(self, name: str) -> Image.Image:
@@ -530,8 +602,14 @@ class Controller:
         if self._mqtt is not None:
             await self._mqtt.publish_display(self.mqtt_id, mode)
 
-    async def _activate_screen(self, screen: Screen) -> None:
-        """Publish display=4 if needed, render, and send all six tubes."""
+    async def _activate_screen(self, screen: Screen, transition: str | None = None) -> None:
+        """Publish display=4 if needed, render, and send all six tubes.
+
+        `transition` (None = the screen's own resolved one) controls how the tubes
+        appear when the screen BECOMES active: "none" sends 0..5 straight away,
+        the others send tube by tube (or band by band for "wipe") with
+        transition_delay ms between steps. An interrupt (button, pin, flash, ...)
+        aborts a running transition."""
         if self._pusher is None or self._ota_busy():
             return      # during an OTA nothing is sent at all
         if not await self._ensure_reachable():
@@ -541,19 +619,288 @@ class Controller:
             await self._sleep(0.5)  # give the clock a moment to switch mode
         strip = self._dim(await render_mod.render_screen(screen, self._ctx))
         self.last_strip = strip
+        self._screen_since = self._now()
+        await self._cache_tubes(screen)
         tube_bytes = strip_to_tube_bytes(strip)
-        await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+        cfg = self._config
+        default_t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
+        t = transition if transition is not None else screen.resolved_transition(default_t)
+        delay_ms = screen.resolved_transition_delay(DEFAULT_TRANSITION_DELAY)
+        if t == "none" or self._interrupted or self._stop:
+            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK,
+                                          photo_tubes=render_mod.photo_tubes(screen, self._tubes))
+        else:
+            await self._run_transition(t, tube_bytes, delay_ms,
+                                      photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         self.current = screen.name
+        await self._start_gifs(screen)
         self._publish_state()
 
+    async def _run_transition(self, t: str, tube_bytes: list[bytes], delay_ms: int,
+                              photo_tubes: set[int] | None = None) -> None:
+        """Send the tubes one by one (or band by band for a wipe), aborting as soon
+        as an interrupt/stop/OTA/unreachable arrives. All sends still go through the
+        pusher's lock, so only one upload runs at a time."""
+        p = self._pusher
+        if p is None:
+            return
+        photo = photo_tubes or set()
+        self._transitioning = True
+        try:
+            delay = delay_ms / 1000.0
+
+            def aborted() -> bool:
+                return (self._interrupted or self._stop or self._ota_busy()
+                        or not getattr(p, "reachable", True))
+
+            if t == "wipe":
+                for tube in range(TUBE_COUNT):          # tubes left to right
+                    if aborted():
+                        return
+                    data = tube_bytes[tube]
+                    for band in range(WIPE_BANDS):      # top to bottom in 6 bands
+                        if aborted():
+                            return
+                        y = band * WIPE_BAND_H
+                        h = WIPE_BAND_H if band < WIPE_BANDS - 1 else TUBE_H - y
+                        ok = await p.send_rect(tube, 0, y, TUBE_W, h,
+                                               data[y * TUBE_W * 2:(y + h) * TUBE_W * 2],
+                                               photo=tube in photo)
+                        if not ok:
+                            return
+                        if band < WIPE_BANDS - 1 and delay > 0 and not aborted():
+                            await self._sleep(delay)
+            else:
+                order = TRANSITION_ORDERS.get(t, TRANSITION_ORDERS["cascade"])
+                for i, tube in enumerate(order):
+                    if aborted():
+                        return
+                    ok = await p.send_tube(tube, tube_bytes[tube], photo=tube in photo)
+                    if not ok:
+                        return
+                    if i < len(order) - 1 and delay > 0 and not aborted():
+                        await self._sleep(delay)
+        finally:
+            self._transitioning = False
+
+    async def _cache_tubes(self, screen: Screen) -> None:
+        """Re-resolve the showing screen's six tube widgets (templates resolved the
+        same way render_screen does it) so animators can look at their types."""
+        self._tubes = await render_mod.resolved_tubes(screen, self._ctx)
+        # the screen's background, for animators whose regions show it (e.g. the ticker band);
+        # a templated background is left to the animator's own default
+        self._anim_bg = render_mod.parse_color(screen.background, (0, 0, 0)) \
+            if isinstance(screen.background, str) and "{" not in screen.background else None
+        self._anim_next = {}
+        now = self._now()
+        for i, w in enumerate(self._tubes or []):
+            if w is None:
+                continue
+            animator = animate_mod.ANIMATORS.get(str(w.get("type")))
+            if animator is not None:
+                interval = animator.interval(w)
+                if interval and interval > 0:
+                    self._anim_next[i] = now + interval
+
+    # ------------------------------------------------------------------
+    # gif tubes: play the GIF on the clock (HA Tubes 2.4+), else the static
+    # first frame is all there is
+    # ------------------------------------------------------------------
+
+    def _gif_widgets(self, screen: Screen) -> dict[int, dict]:
+        """The showing screen's gif tubes: tube index -> resolved widget."""
+        out: dict[int, dict] = {}
+        for i, w in enumerate(self._tubes or []):
+            if isinstance(w, dict) and w.get("type") == "gif":
+                out[i] = w
+        return out
+
+    def _gif_bg_hex(self, w: dict, screen: Screen) -> str | None:
+        """The colour behind the GIF on the clock: the widget's background, else the
+        screen's, as RRGGBB (None when the screen background is a template)."""
+        raw = w.get("background")
+        if raw is None:
+            raw = screen.background
+        if not isinstance(raw, str) or "{" in raw:
+            return None
+        c = render_mod.parse_color(raw, (0, 0, 0))
+        return "%02X%02X%02X" % tuple(c)
+
+    async def _start_gifs(self, screen: Screen) -> None:
+        """After the screen's tubes are pushed (and any transition ended): for each
+        gif tube, make sure the file is on the clock and POST /gif/play for it.
+        Does nothing when the clock does not support GIFs or no gif tube is showing."""
+        self._gif_tubes = self._gif_widgets(screen)
+        self._gif_played = False
+        p = self._pusher
+        if not self._gif_tubes or p is None or self._ota_busy():
+            return
+        if not getattr(p, "gif_supported", False):
+            return
+        if not getattr(p, "reachable", True):
+            return
+        for tube, w in sorted(self._gif_tubes.items()):
+            source = str(w.get("source") or "")
+            name = gif_clock_name(source[len("file:"):]) if source.startswith("file:") else None
+            if name is None:
+                continue
+            try:
+                path = render_mod.image_path(self._ctx.images_dir, source[len("file:"):])
+                with open(path, "rb") as f:
+                    data = f.read()
+            except (OSError, ValueError) as err:
+                _LOG.warning("GIF tube %d: cannot read %s: %s", tube, source, err)
+                continue
+            if len(data) > GIF_MAX_BYTES:
+                _LOG.warning("GIF tube %d: %s is %d bytes, the clock takes at most %d - "
+                             "showing the first frame only", tube, source, len(data), GIF_MAX_BYTES)
+                continue
+            if not await self._gif_ensure_on_clock(p, name, data):
+                continue
+            loop = w.get("loop", True)
+            if isinstance(loop, str):
+                loop = loop.strip().lower() not in ("false", "0", "no", "off")
+            x = w.get("x")
+            y = w.get("y")
+            ok = await p.gif_play(
+                tube, name, loop=bool(loop), bg=self._gif_bg_hex(w, screen),
+                x=int(x) if isinstance(x, (int, float)) and not isinstance(x, bool) else None,
+                y=int(y) if isinstance(y, (int, float)) and not isinstance(y, bool) else None)
+            if ok:
+                _LOG.info("Clock %s: playing %s on tube %d", self.name, name, tube)
+        self._gif_played = True
+        await self._gif_cleanup()
+
+    async def _gif_ensure_on_clock(self, p, name: str, data: bytes) -> bool:
+        """Make sure the GIF file is on the clock (GET /gif; upload when missing or
+        the size differs)."""
+        listing = await p.gif_list()
+        if listing is not None:
+            files = listing.get("files") if isinstance(listing, dict) else None
+            if isinstance(files, list):
+                for f in files:
+                    if isinstance(f, dict) and f.get("name") == name:
+                        if f.get("size") == len(data):
+                            return True
+                        break
+        return await p.gif_upload(name, data)
+
+    async def _stop_gifs(self, tubes=None) -> None:
+        """POST /gif/stop for the given tubes (default: the showing screen's gif
+        tubes) - used when the clock's own display takes over (pause/quiet clock
+        mode), so nothing keeps decoding. The next /panel upload to a tube stops
+        its GIF anyway."""
+        p = self._pusher
+        if p is None or not getattr(p, "gif_supported", False):
+            return
+        if not getattr(p, "reachable", True):
+            return
+        targets = list(tubes) if tubes is not None else sorted(self._gif_tubes)
+        for tube in targets:
+            await p.gif_stop(tube)
+        self._gif_played = False
+
+    async def _gif_cleanup(self) -> None:
+        """Delete td-*.gif files from the clock that no screen uses any more,
+        at most once an hour."""
+        p = self._pusher
+        now = self._now()
+        if p is None or not getattr(p, "gif_supported", False):
+            return
+        if now - self._last_gif_cleanup < GIF_CLEANUP_INTERVAL:
+            return
+        self._last_gif_cleanup = now
+        if not getattr(p, "reachable", True):
+            return
+        cfg = self._config
+        used: set[str] = set()
+        if cfg is not None:
+            for screen in cfg.screens.values():
+                for w in screen.tubes:
+                    if isinstance(w, dict) and w.get("type") == "gif":
+                        src = w.get("source")
+                        if isinstance(src, str) and src.startswith("file:"):
+                            used.add(gif_clock_name(src[len("file:"):]))
+        listing = await p.gif_list()
+        if listing is None:
+            return
+        files = listing.get("files") if isinstance(listing, dict) else None
+        if not isinstance(files, list):
+            return
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name")
+            if isinstance(name, str) and name.startswith(GIF_TD_PREFIX) and name not in used:
+                _LOG.info("Clock %s: deleting unused %s", self.name, name)
+                await p.gif_delete(name)
+
+    def _anim_blocked(self) -> bool:
+        """Nothing animates while OTA is busy, the pusher is unreachable, paused,
+        quiet, a flash shows, or during a transition."""
+        return (self._ota_busy() or self._transitioning or self._flash is not None
+                or self._is_paused() or self._quiet_now()
+                or self._pusher is None or not getattr(self._pusher, "reachable", True))
+
+    async def _anim_tick(self) -> None:
+        """Render and send the next due frame of every animated tube (send_rect).
+        Frames are skipped (not queued) when late; at most ANIM_MAX_RECTS_PER_SEC
+        rect uploads per second in total."""
+        if self._anim_blocked() or not self._anim_next or self._tubes is None:
+            return
+        now = self._now()
+        # rate cap: drop rect timestamps older than 1 s
+        self._anim_rect_times = [t for t in self._anim_rect_times if now - t < 1.0]
+        if len(self._anim_rect_times) >= ANIM_MAX_RECTS_PER_SEC:
+            return
+        t = now - self._screen_since
+        for tube, due in sorted(self._anim_next.items()):
+            if now < due:
+                continue
+            w = self._tubes[tube] if tube < len(self._tubes) else None
+            if w is None:
+                continue
+            animator = animate_mod.ANIMATORS.get(str(w.get("type")))
+            if animator is None:
+                continue
+            interval = animator.interval(w)
+            if not interval or interval <= 0:
+                continue
+            # skip (not queue) when late: the next frame is due one interval after now
+            self._anim_next[tube] = now + interval
+            try:
+                result = await animator.frame(w, self._ctx, t, getattr(self, "_anim_bg", None))
+            except Exception as err:
+                _LOG.debug("Animator for tube %d failed: %s", tube, err)
+                continue
+            if result is None:
+                continue
+            img, (x, y, w_, h_) = result
+            if img is None or w_ <= 0 or h_ <= 0:
+                continue
+            if img.size != (w_, h_):
+                img = img.resize((w_, h_))
+            img = self._dim(img)
+            if len(self._anim_rect_times) >= ANIM_MAX_RECTS_PER_SEC:
+                break
+            ok = await self._pusher.send_rect(tube, x, y, w_, h_, image_to_rgb565(img))
+            self._anim_rect_times.append(self._now())
+            if not ok:
+                break
+
     async def _activate_clock(self) -> None:
+        await self._stop_gifs()
         await self._publish_display(DISPLAY_CLOCK)
         self.current = CLOCK_ENTRY
         self.last_strip = None
+        self._tubes = None
+        self._gif_tubes = {}
+        self._anim_next = {}
         self._publish_state()
 
     async def _show_flash(self) -> None:
-        """Render and send the flash message once (all six tubes)."""
+        """Render and send the flash message once (all six tubes), with the global
+        default transition."""
         f = self._flash
         if f is None or self._pusher is None or self._ota_busy():
             return
@@ -565,13 +912,22 @@ class Controller:
         strip = self._dim(render_mod.render_message(f["message"], self._ctx,
                                                     icon=f.get("icon"), color=f.get("color")))
         self.last_strip = strip
-        await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=ALL_TUBES_MASK)
+        self._tubes = None          # a message has no per-tube widgets to animate
+        self._anim_next = {}
+        tube_bytes = strip_to_tube_bytes(strip)
+        cfg = self._config
+        t = cfg.transition if cfg is not None else DEFAULT_TRANSITION
+        if t == "none" or self._interrupted or self._stop:
+            await self._pusher.send_tubes(tube_bytes, needed_mask=ALL_TUBES_MASK)
+        else:
+            await self._run_transition(t, tube_bytes, DEFAULT_TRANSITION_DELAY)
         self._publish_state()
 
     async def _show_paused(self) -> None:
         """Pause: hand the tubes back to the clock once, then just wait."""
         if not self._pause_shown:
             self._pause_shown = True
+            await self._stop_gifs()
             await self._publish_display(DISPLAY_CLOCK)
             self.current = CLOCK_ENTRY
             self.last_strip = None
@@ -618,20 +974,25 @@ class Controller:
             return
         if not await self._ensure_reachable():
             return
-        screen = self._config.screens.get(self.current)
+        screen = self._mirror[0] if self._mirror_active() else self._config.screens.get(self.current)
         if screen is None:
             return
         strip = self._dim(await render_mod.render_screen(screen, self._ctx))
         self.last_strip = strip
+        await self._cache_tubes(screen)      # re-resolve the widgets after every full render
         needed = self.clock_state.get("panels_needed") or 0
         if isinstance(needed, str):
             try:
                 needed = int(needed, 0)
             except ValueError:
                 needed = 0
-        sent = await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=needed)
+        sent = await self._pusher.send_tubes(strip_to_tube_bytes(strip), needed_mask=needed,
+                                             photo_tubes=render_mod.photo_tubes(screen, self._tubes))
         if sent:
             _LOG.debug("Refreshed screen '%s', sent tubes %s", self.current, sent)
+
+    def _mirror_active(self) -> bool:
+        return self._mirror is not None and self._now() < self._mirror[1]
 
     def _publish_state(self) -> None:
         if self._mqtt is None:
@@ -693,6 +1054,7 @@ class Controller:
             if self._interrupted:
                 break
             await self._night_tick()      # brightness follows the sun while a screen shows
+            await self._anim_tick()       # animated tubes send their next frame when due
             next_refresh = await self._live_refresh(next_refresh, refresh)
             if self._now() >= next_refresh - 1e-9:
                 await self._refresh()
@@ -768,14 +1130,23 @@ class Controller:
                     if self._now() >= self._flash["expiry"]:
                         self._end_flash()
                         continue
-                    await self._show_flash()
                     self._interrupted = False
+                    await self._show_flash()
                     while (self._flash is not None and not self._interrupted
                            and self._now() < self._flash["expiry"]):
                         await self._sleep(min(0.25, self._flash["expiry"] - self._now()))
                         await self._night_tick()   # brightness follows the sun during a flash
                     if self._flash is not None and self._now() >= self._flash["expiry"]:
                         self._end_flash()
+                    continue
+                if self._mirror is not None:
+                    screen, expiry = self._mirror
+                    if self._now() >= expiry:
+                        _LOG.info("Mirror expired - resuming")
+                        self._mirror = None
+                        continue
+                    self._interrupted = False
+                    await self._show_screen(screen, expiry - self._now())
                     continue
                 if self._pin is not None:
                     entry, expiry = self._pin
@@ -829,6 +1200,7 @@ class Controller:
                     while self._now() < end and not self._interrupted:
                         await self._sleep(min(0.25, end - self._now()))
                         await self._night_tick()   # brightness follows the sun with rotation off
+                        await self._anim_tick()    # animated tubes keep moving here too
                         if self._now() < end and not self._interrupted:
                             end = await self._live_refresh(end, refresh)
                     if not self._interrupted:
