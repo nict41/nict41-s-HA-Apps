@@ -1311,9 +1311,31 @@ $("defaultFont").addEventListener("change", (e) => {
   markDirty(); schedulePreview(0);
 });
 
+// the transition a screen will actually use: its own, else the top-level `transition`,
+// else none
+const CASCADE_TRANSITIONS = ["cascade", "cascade_right", "center_out"];
+const WIPE_TRANSITIONS = ["wipe", "wipe_right", "wipe_center"];
+
+function effectiveTransition(s) {
+  if (!s) return "none";
+  if (s.transition != null && s.transition !== "") return s.transition;
+  const top = state.data && state.data.transition;
+  return top != null && top !== "" ? top : "none";
+}
+
+function renderTransitionFields() {
+  const s = curScreen();
+  const t = effectiveTransition(s);
+  $("scrTransitionDelayRow").classList.toggle("hidden", !CASCADE_TRANSITIONS.includes(t));
+  $("scrTransitionDurationRow").classList.toggle("hidden", !WIPE_TRANSITIONS.includes(t));
+  $("playTransitionBtn").classList.toggle("hidden",
+    state.clocks.length === 0 || t === "none");
+}
+
 function renderScreenSettings() {
   const s = state.data.screens[state.selectedScreen];
   $("screenTitle").textContent = state.selectedScreen ? "Screen: " + state.selectedScreen : "No screen selected";
+  renderTransitionFields();
   if (!s) return;
   $("scrDuration").value = s.duration != null ? s.duration : "";
   $("scrRefresh").value = s.refresh != null ? s.refresh : "";
@@ -1321,6 +1343,8 @@ function renderScreenSettings() {
   $("scrWhen").value = s.when || "";
   $("scrLayout").value = s.strip ? "strip" : s.canvas ? "canvas" : "tubes";
   $("scrTransition").value = s.transition != null ? s.transition : "";
+  $("scrTransitionDelay").value = s.transition_delay != null ? s.transition_delay : "";
+  $("scrTransitionDuration").value = s.transition_duration != null ? s.transition_duration : "";
 }
 
 function bindScreenSettings() {
@@ -1349,6 +1373,18 @@ function bindScreenSettings() {
   $("scrTransition").addEventListener("change", (e) => {
     const s = curScreen(); if (!s) return;
     if (e.target.value) s.transition = e.target.value; else delete s.transition;  // "" = default
+    markDirty(); schedulePreview(); renderTransitionFields();
+  });
+  $("scrTransitionDelay").addEventListener("change", (e) => {
+    const s = curScreen(); if (!s) return;
+    const v = parseInt(e.target.value, 10);
+    if (v >= 0 && v <= 1000) s.transition_delay = v; else delete s.transition_delay;  // empty = default 90
+    markDirty(); schedulePreview();
+  });
+  $("scrTransitionDuration").addEventListener("change", (e) => {
+    const s = curScreen(); if (!s) return;
+    const v = parseInt(e.target.value, 10);
+    if (v >= 100 && v <= 5000) s.transition_duration = v; else delete s.transition_duration;  // empty = default 500
     markDirty(); schedulePreview();
   });
 }
@@ -1524,6 +1560,46 @@ $("mirrorBtn").addEventListener("click", async () => {
   renderMirrorBtn();
   await postMirror();       // show right away, not after the first preview refresh
   mirror.keepAlive = setInterval(() => { if (mirror.on) postMirror(); }, 60000);
+});
+
+// "Play on clock": play the CURRENT EDITOR STATE of the selected screen on the clock,
+// once, with its effective transition - through the mirror path with play_transition,
+// without saving. Disabled while the request runs; an error (e.g. no clock reachable)
+// is shown in the status line.
+$("playTransitionBtn").addEventListener("click", async () => {
+  const s = curScreen();
+  const btn = $("playTransitionBtn");
+  if (!s || btn.disabled) return;
+  const t = effectiveTransition(s);
+  if (t === "none") return;
+  btn.disabled = true;
+  try {
+    const payload = {
+      screen: s,
+      // just long enough to see it, unless "Show on clock" is on anyway
+      seconds: mirror.on ? 120 : 10,
+      play_transition: true,
+      transition: t,
+    };
+    if (s.transition_delay != null) payload.transition_delay = s.transition_delay;
+    if (s.transition_duration != null) payload.transition_duration = s.transition_duration;
+    const clock = mirrorClockName();
+    if (clock) payload.clock = clock;
+    const { status, body } = await api("api/mirror", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (status === 200) {
+      setStatus("playing '" + (state.selectedScreen || "") + "' on the clock with " + t, "ok");
+    } else {
+      setStatus("play on clock failed: " + ((body && (body.error || (body.errors || []).join(" | "))) || ("HTTP " + status)), "error");
+    }
+  } catch (e) {
+    setStatus("play on clock failed: " + e, "error");
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // hidden editor: stop mirroring (the clock keeps the last picture until it expires)
@@ -2926,6 +3002,7 @@ async function fetchClocks() {
   renderClockSelect();
   renderRotation();
   renderMirrorBtn();          // the "Show on clock" button is hidden with no clocks
+  renderTransitionFields();   // "Play on clock" too
   const chip = $("clockChip");
   chip.classList.toggle("hidden", state.clocks.length === 0);
   if (state.clocks.length) refreshClockChip();
@@ -2952,6 +3029,21 @@ function chipText(st) {
   return cur + live + bri;
 }
 
+// clock diagnostics line: per clock "fw 2.5.0 · qoi · draw 211 ms · room 63 KB ·
+// 12.3 kB/min" plus the notices as warnings. Compact, one line per clock.
+function diagText(st) {
+  const ci = (st && st.clock_info) || {};
+  const parts = [];
+  parts.push("fw " + (ci.firmware != null ? ci.firmware : "?"));
+  parts.push(ci.upload_format || "rgb565");
+  if (ci.last_draw_ms != null) parts.push("draw " + ci.last_draw_ms + " ms");
+  if (ci.batch_buffer) parts.push("room " + Math.round(ci.batch_buffer / 1024) + " KB");
+  const bpm = ci.bytes_per_minute || 0;
+  parts.push(bpm >= 1024 ? (bpm / 1024).toFixed(1) + " kB/min" : bpm + " B/min");
+  const notices = (ci.notices || []).map((n) => "warning: " + n.message);
+  return parts.join(" · ") + (notices.length ? "  |  " + notices.join("  |  ") : "");
+}
+
 async function refreshClockChip() {
   const { status, body } = await api("api/status");
   if (status !== 200 || !body || !body.clocks) return;
@@ -2959,6 +3051,14 @@ async function refreshClockChip() {
     .map((c) => c.name + ": " + chipText(body.clocks[c.name] || {}))
     .filter((p) => p);
   $("clockChip").textContent = parts.join("  |  ");
+  const diag = state.clocks
+    .map((c) => c.name + ": " + diagText(body.clocks[c.name] || {}))
+    .filter((p) => p);
+  const diagEl = $("clockDiag");
+  diagEl.classList.toggle("hidden", diag.length === 0);
+  diagEl.textContent = diag.join("  |  ");
+  diagEl.classList.toggle("has-warnings",
+    state.clocks.some((c) => ((body.clocks[c.name] || {}).clock_info || {}).notices?.length));
 }
 
 setInterval(() => { if (state.clocks.length) refreshClockChip(); }, 15000);

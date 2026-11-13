@@ -25,6 +25,7 @@ import logging
 import re
 import struct
 import time
+from collections import OrderedDict
 from typing import Awaitable, Callable
 
 import aiohttp
@@ -48,6 +49,9 @@ JPEG_QUALITY = 88
 GIF_MAX_BYTES = 600 * 1024
 GIF_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,36}\.gif$")   # at most 40 chars incl. ".gif"
 GIF_TD_PREFIX = "td-"     # prefix for files this app uploads (never the user's own)
+# encoded batch records are cached (tube, sha256 of the rgb565 bytes, x, y, w, h, format,
+# held) so an unchanged tube is not QOI/JPEG-encoded again; small LRU, cleared by reset()
+BATCH_RECORD_CACHE_MAX = 24
 
 PublishDisplay = Callable[[int], Awaitable[None]]
 
@@ -124,6 +128,7 @@ class ClockPusher:
         self._playing: set[int] = set()      # tubes whose GIF is playing (per /panel)
         self._gif_uploaded: dict[str, int] = {}   # name -> size of files we uploaded
         self._sent_log: list[tuple[float, int]] = []   # (monotonic, body bytes) per POST
+        self._record_cache: OrderedDict[tuple, bytes] = OrderedDict()   # encoded batch records
 
     def reset(self) -> None:
         """Forget what was sent (e.g. after the clock rebooted). The capabilities
@@ -138,6 +143,7 @@ class ClockPusher:
         self.transitions = set()
         self._qoi_ok = True
         self._playing = set()
+        self._record_cache.clear()
 
     # ------------------------------------------------------------------
     # capabilities (GET /panel)
@@ -453,15 +459,29 @@ class ClockPusher:
     def _batch_record(self, rect, fmt: str, held: bool = False) -> bytes:
         """One POST /panel/batch record: a 14-byte little-endian header (tube, format
         0=rgb565/1=qoi/2=jpeg, x, y, w, h, length) and then the picture. A photo rect may
-        go as JPEG, but only in a batch the clock holds in memory (`held`)."""
+        go as JPEG, but only in a batch the clock holds in memory (`held`).
+
+        Encoded records are cached (keyed by the rgb565 bytes' sha256, geometry, format
+        choice and `held`) in a small LRU, so an unchanged tube is not encoded again;
+        reset() clears the cache."""
         tube, x, y, w, h, data = rect[:6]
         photo = len(rect) > 6 and rect[6]
         use = fmt
         if photo and held and fmt == "qoi" and "jpeg" in self.formats:
             use = "auto"
+        key = (tube, self._hash(data), x, y, w, h, use, bool(held))
+        cached = self._record_cache.get(key)
+        if cached is not None:
+            self._record_cache.move_to_end(key)
+            return cached
         pic, use_fmt = self._encode_body(use, data, w, h)
         code = {"rgb565": 0, "qoi": 1, "jpeg": 2}[use_fmt]
-        return struct.pack("<BBHHHHI", tube, code, x, y, w, h, len(pic)) + pic
+        record = struct.pack("<BBHHHHI", tube, code, x, y, w, h, len(pic)) + pic
+        self._record_cache[key] = record
+        self._record_cache.move_to_end(key)
+        while len(self._record_cache) > BATCH_RECORD_CACHE_MAX:
+            self._record_cache.popitem(last=False)
+        return record
 
     def _chunk_ends(self, records: list[bytes], start: int = 0) -> int:
         """Index after the last record that fits one body (see _batch_cap) starting at

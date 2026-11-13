@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- **Transition settings in the editor:** delay (cascades) and duration (wipes) next to the transition, and **Play on clock** to try a screen's transition straight away, without saving.
+- **Instant screen changes:** the next screen of the rotation is rendered just before it's due, and pictures that haven't changed aren't compressed again.
+- **Clock diagnostics:** the editor shows each clock's firmware, upload format, draw time, room for a screen and data rate; MQTT diagnostic sensors "Firmware", "Last draw" and "Data rate".
+- **Warnings in Repairs** when a screen uses something the clock's firmware can't do (GIFs before HA Tubes 2.4, transitions played by the clock before 2.5). The integration is updated to 1.2.0 for this, so Home Assistant needs a restart once to load it.
+- Photos of a real clock in the README.
+
 ## 1.1.0
 
 - **Transitions played by the clock** (HA Tubes 2.5): the app sends a new screen in one request and the clock plays the transition itself, smoothly and exactly on time, whatever the Wi-Fi is doing. Older firmware gets the app's own transitions as before.
