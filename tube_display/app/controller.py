@@ -402,6 +402,10 @@ class Controller:
     async def _manual_step(self) -> None:
         """Rotation off + button: show the next screen in the rotation and stay there. The clock
         entry is skipped, since the button only reaches the app while panels show."""
+        # The button press that brought us here set _interrupted to wake the loop; clear it, or
+        # the new screen's transition would be skipped (it aborts on an interrupt). A further
+        # press during the transition sets it again and still cuts the transition short.
+        self._interrupted = False
         cfg = self._config
         rotation = self._rotation()
         if cfg is None or not rotation:

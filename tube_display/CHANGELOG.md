@@ -2,6 +2,7 @@
 
 ## 1.0.1
 
+- Transitions now play when the clock's button changes the screen in button-only mode (*Cycle automatically* off); the button press used to make the new screen skip its transition.
 - Dependency updates: aiohttp 3.14.5, ruamel.yaml 0.19.1.
 
 ## 1.0.0
