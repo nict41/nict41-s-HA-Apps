@@ -58,7 +58,7 @@ class Settings:
     clocks: list[ClockSettings] = field(default_factory=list)
     app_url: str = ""            # public URL of this app (env TUBE_APP_URL), e.g. for firmware links
     firmware_updates: bool = True   # env TUBE_FIRMWARE_UPDATES ("true"/"false")
-    firmware_variant: str = "ipstube"  # env TUBE_FIRMWARE_VARIANT
+    firmware_variant: str = "ipstube_ha"  # env TUBE_FIRMWARE_VARIANT
     errors: list[str] = field(default_factory=list)  # config problems that did not stop startup
 
     def __post_init__(self) -> None:
@@ -183,6 +183,6 @@ def load_settings(env: dict | None = None) -> Settings:
         clocks=clocks,
         app_url=env.get("TUBE_APP_URL", "").strip(),
         firmware_updates=fw not in ("false", "0", "no", "off"),
-        firmware_variant=env.get("TUBE_FIRMWARE_VARIANT", "ipstube").strip() or "ipstube",
+        firmware_variant=env.get("TUBE_FIRMWARE_VARIANT", "ipstube_ha").strip() or "ipstube_ha",
         errors=errors,
     )

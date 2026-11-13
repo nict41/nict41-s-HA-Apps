@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+
+- **`firmware_variant` defaults to `ipstube_ha`**, the Home Assistant-only build that the HA Tubes web installer now installs by default, so new installs are offered the right firmware. An option you've already set is kept; if your clock runs the standard build, set it to `ipstube`.
+
 ## 1.3.1
 
 - **Clearer brightness settings:** the editor's Night mode card is now **Brightness**, with a daytime and a night brightness in %, a plain choice of when to dim (around sunset and sunrise, only once it's dark, from late afternoon, or sun angles you choose) and a "Right now" line showing the current brightness and where the sun is. The two night dimmers (the clock's brightness and darkening the pictures) are one night brightness, as both darken the same pixels on the clock. Your saved settings keep working unchanged.

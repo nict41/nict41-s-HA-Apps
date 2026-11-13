@@ -122,6 +122,7 @@ async def _make_publisher(tmp_path, gh, base="http://192.168.8.25:8098", **kwarg
     async def base_url():
         return base
 
+    kwargs.setdefault("variant", "ipstube")   # the release files below are named for it
     pub = FirmwarePublisher(session, str(tmp_path), rec.publish, rec.clock_ids_fn,
                             base_url, api_base=gh.api_base, **kwargs)
     return session, rec, pub

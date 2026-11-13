@@ -27,7 +27,7 @@ def test_legacy_single_clock():
     # new fields default sensibly
     assert s.app_url == ""
     assert s.firmware_updates is True
-    assert s.firmware_variant == "ipstube"
+    assert s.firmware_variant == "ipstube_ha"
 
 
 def test_legacy_host_with_scheme_and_user():
