@@ -45,6 +45,7 @@ from aiohttp import web
 from render import IMAGE_EXTS, safe_image_name
 from screens import ScreensError, parse_screens
 from history import SaveHistory
+import fonts
 
 _LOG = logging.getLogger(__name__)
 
@@ -224,18 +225,27 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                     ha.render_template if ha is not None else _async_none,
                     session=None, ha=ha)
                 ctx.images_dir = images_dir
+            # the top-level `font` of the file being edited, if the editor sent it
+            if isinstance(body, dict) and "font" in body:
+                top_font = body.get("font")
+                ctx.default_font = (top_font if isinstance(top_font, str) and top_font
+                                    and top_font != "default" else None)
             headers: dict[str, str] = {}
             if errors:
                 headers["X-Preview-Errors"] = " | ".join(errors)[:900].encode("ascii", "replace").decode()
-            # For the designer: where each item of a custom tube ended up
+            # For the designer: where each item of a custom tube (or canvas) ended up
             ctx.record_boxes = {}
             strip = await render_mod.render_screen(screen, ctx)
-            boxes = ctx.record_boxes.get(f"__preview__:tube{tube}")
+            import json
             if tube is not None:
+                boxes = ctx.record_boxes.get(f"__preview__:tube{tube}")
                 from rgb565 import TUBE_W
                 strip = strip.crop((tube * TUBE_W, 0, (tube + 1) * TUBE_W, strip.height))
                 if boxes is not None:
-                    import json
+                    headers["X-Item-Boxes"] = json.dumps(boxes)
+            elif screen.canvas is not None:
+                boxes = ctx.record_boxes.get("__preview__:canvas")
+                if boxes is not None:
                     headers["X-Item-Boxes"] = json.dumps(boxes)
             buf = io.BytesIO()
             strip.save(buf, format="PNG")
@@ -457,7 +467,7 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
             return new
 
         new = _convert(data)
-        for key in ("rotation", "clock", "screens", "night", "clocks"):
+        for key in ("rotation", "clock", "screens", "night", "clocks", "font"):
             if key in new:
                 root[key] = _merge(root[key], new[key]) if key in root else new[key]
             elif key in root:
@@ -596,6 +606,8 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     # picture library: <screens file folder>/images, used as source "file:<name>"
     # ------------------------------------------------------------------
     images_dir = os.path.join(os.path.dirname(screens_file) or ".", "images")
+    fonts_dir = os.path.join(os.path.dirname(screens_file) or ".", "fonts")
+    fonts.set_user_dir(fonts_dir)
     max_image_bytes = 10 * 1024 * 1024
 
     async def api_images(request: web.Request) -> web.Response:
@@ -665,6 +677,120 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
                 f.write(data)
             os.replace(tmp, os.path.join(images_dir, name))
             return web.json_response({"ok": True, "name": name, "source": "file:" + name})
+        return await ingress_only(request, handler)
+
+    # ------------------------------------------------------------------
+    # font library: <screens file folder>/fonts, used as family "file:<name>"
+    # ------------------------------------------------------------------
+    max_font_bytes = 3 * 1024 * 1024
+    _font_preview_cache: dict[tuple, bytes] = {}
+
+    async def api_fonts(request: web.Request) -> web.Response:
+        """GET: {"bundled": [{"id","name"}], "files": [{"name","size"}]}."""
+        async def handler(req: web.Request) -> web.Response:
+            files = []
+            if os.path.isdir(fonts_dir):
+                for n in sorted(os.listdir(fonts_dir)):
+                    if fonts.safe_font_name(n):
+                        try:
+                            files.append({"name": n, "size": os.path.getsize(os.path.join(fonts_dir, n))})
+                        except OSError:
+                            pass
+            return web.json_response({"bundled": fonts.bundled_families(), "files": files})
+        return await ingress_only(request, handler)
+
+    async def api_font_get(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = fonts.safe_font_name(req.match_info["name"])
+            path = os.path.join(fonts_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            return web.FileResponse(path)
+        return await ingress_only(request, handler)
+
+    async def api_font_delete(request: web.Request) -> web.Response:
+        async def handler(req: web.Request) -> web.Response:
+            name = fonts.safe_font_name(req.match_info["name"])
+            path = os.path.join(fonts_dir, name) if name else None
+            if not path or not os.path.isfile(path):
+                raise web.HTTPNotFound()
+            os.remove(path)
+            fonts._load.cache_clear()
+            return web.json_response({"ok": True})
+        return await ingress_only(request, handler)
+
+    async def api_font_upload(request: web.Request) -> web.Response:
+        """multipart field "file": a .ttf/.otf font (max 3 MB), checked with Pillow,
+        saved under a safe name."""
+        async def handler(req: web.Request) -> web.Response:
+            from PIL import ImageFont
+            try:
+                reader = await req.multipart()
+            except Exception:
+                return web.json_response({"error": "body must be multipart form data"}, status=400)
+            part = await reader.next()
+            while part is not None and part.name != "file":
+                part = await reader.next()
+            if part is None or not part.filename:
+                return web.json_response({"error": "no file"}, status=400)
+            from urllib.parse import unquote
+            base, ext = os.path.splitext(os.path.basename(unquote(part.filename)))
+            ext = ext.lower()
+            if ext not in fonts.FONT_EXTS:
+                return web.json_response({"error": "use a .ttf or .otf font file"}, status=400)
+            clean = "".join(c if (c.isascii() and c.isalnum()) or c in "-_" else "_" for c in base).strip("_") or "font"
+            data = bytearray()
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                data.extend(chunk)
+                if len(data) > max_font_bytes:
+                    return web.json_response({"error": "font is over 3 MB"}, status=400)
+            try:
+                ImageFont.truetype(io.BytesIO(bytes(data)), 20)
+            except Exception:
+                return web.json_response({"error": "not a font file Pillow can read"}, status=400)
+            os.makedirs(fonts_dir, exist_ok=True)
+            name = clean + ext
+            n = 2
+            while os.path.exists(os.path.join(fonts_dir, name)):
+                name = f"{clean}-{n}{ext}"
+                n += 1
+            tmp = os.path.join(fonts_dir, "." + name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, os.path.join(fonts_dir, name))
+            fonts._load.cache_clear()
+            return web.json_response({"ok": True, "name": name, "family": "file:" + name})
+        return await ingress_only(request, handler)
+
+    async def api_font_preview(request: web.Request) -> web.Response:
+        """GET ?font=<family id or file:name>&text=<sample>&size=<n>: a small PNG of the
+        sample in white on dark, cached per (font, text, size)."""
+        async def handler(req: web.Request) -> web.Response:
+            from PIL import Image, ImageDraw
+            fam = req.query.get("font", "default")
+            text = (req.query.get("text") or "Ag 123")[:80]
+            try:
+                size = max(8, min(120, int(req.query.get("size", "28"))))
+            except ValueError:
+                size = 28
+            key = (fam, text, size)
+            png = _font_preview_cache.get(key)
+            if png is None:
+                img = Image.new("RGB", (min(400, 24 + size * len(text) // 2 + 40), size + 24), (24, 24, 24))
+                draw = ImageDraw.Draw(img)
+                font = fonts.load_font(size, bold=False, family=fam)
+                draw.text((12, 12), text, font=font, fill=(255, 255, 255))
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                png = buf.getvalue()
+                if len(_font_preview_cache) > 256:
+                    _font_preview_cache.clear()
+                _font_preview_cache[key] = png
+            return web.Response(body=png, content_type="image/png",
+                                headers={"Cache-Control": "max-age=3600"})
         return await ingress_only(request, handler)
 
     async def api_rotation(request: web.Request) -> web.Response:
@@ -833,6 +959,11 @@ def create_app(controller, ha, screens_file: str, test_allow_local: bool = False
     app.router.add_post("/api/images", api_image_upload)
     app.router.add_get("/api/images/{name}", api_image_get)
     app.router.add_delete("/api/images/{name}", api_image_delete)
+    app.router.add_get("/api/fonts", api_fonts)
+    app.router.add_post("/api/fonts", api_font_upload)
+    app.router.add_get("/api/fonts/{name}", api_font_get)
+    app.router.add_delete("/api/fonts/{name}", api_font_delete)
+    app.router.add_get("/api/font_preview", api_font_preview)
     app.router.add_get("/", index)
     app.router.add_get("/{name}", static_file)
     app.router.add_get("/api/config", api_config)

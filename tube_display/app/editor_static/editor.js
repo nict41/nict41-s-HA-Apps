@@ -8,8 +8,8 @@ const WIDGET_TYPES = ["text", "big_number", "ring", "bar", "icon", "image", "spa
 // fields per widget type, mirroring render._WIDGET_TEMPLATE_FIELDS plus the
 // other keys screens.py / render.py read
 const FIELDS = {
-  text:       ["text", "size", "align", "weight", "color"],
-  big_number: ["value", "unit", "label", "unit_newline", "color"],
+  text:       ["text", "size", "align", "weight", "font", "color"],
+  big_number: ["value", "unit", "label", "unit_newline", "font", "color"],
   ring:       ["value", "max", "label", "unit", "unit_newline", "color"],
   bar:        ["value", "max", "label", "unit", "color"],
   icon:       ["icon", "text", "color"],
@@ -27,32 +27,38 @@ const FIELDS = {
 const MORE = {
   text:       ["valign"],
   big_number: ["value_size", "unit_size", "label_size", "value_color", "unit_color", "label_color"],
-  ring:       ["radius", "thickness", "value_size", "unit_size", "label_size", "value_color", "label_color"],
-  bar:        ["value_size", "label_size", "value_color", "label_color"],
-  icon:       ["icon_size", "text_size", "text_color"],
-  graph:      ["min", "max", "points", "value_size", "value_color", "label_color"],
-  progress:   ["value_size", "value_color", "label_size", "label_color", "eta_color"],
-  analog_clock: ["label_color"],
-  weather:    ["temp_size", "hl_color", "label_color"],
-  ticker:     ["label_color"],
+  ring:       ["radius", "thickness", "value_size", "unit_size", "label_size", "value_color", "label_color", "font"],
+  bar:        ["value_size", "label_size", "value_color", "label_color", "font"],
+  icon:       ["icon_size", "text_size", "text_color", "font"],
+  graph:      ["min", "max", "points", "value_size", "value_color", "label_color", "font"],
+  progress:   ["value_size", "value_color", "label_size", "label_color", "eta_color", "font"],
+  analog_clock: ["label_color", "font"],
+  weather:    ["temp_size", "hl_color", "label_color", "font"],
+  ticker:     ["label_color", "font"],
+  sparkline:  ["font"],
 };
 // what a custom tube is made of (render.ITEM_TYPES) and each item's fields
 const ITEM_FIELDS = {
-  text:  ["text", "x", "y", "size", "weight", "align", "color", "width", "height"],
+  text:  ["text", "x", "y", "size", "weight", "align", "font", "color", "width", "height"],
   ring:  ["value", "max", "x", "y", "radius", "thickness", "color", "track", "start", "sweep"],
   bar:   ["value", "max", "x", "y", "width", "height", "direction", "color", "track"],
   icon:  ["icon", "x", "y", "size", "color"],
   image: ["source", "x", "y", "width", "height"],
   rect:  ["x", "y", "width", "height", "radius", "color"],
 };
-const ITEM_NEW = {
-  text:  { type: "text", text: "Text", x: 67, y: 120, size: 20 },
-  ring:  { type: "ring", value: "50", max: 100, x: 67, y: 70, radius: 52, thickness: 10 },
-  bar:   { type: "bar", value: "50", max: 100, x: 67, y: 200, width: 110, height: 10 },
-  icon:  { type: "icon", icon: "mdi:star", x: 67, y: 120, size: 64 },
-  image: { type: "image", source: "builtin:claude", x: 67, y: 120, width: 135, height: 135 },
-  rect:  { type: "rect", x: 67, y: 120, width: 100, height: 2, color: "#444444" },
-};
+// new-item defaults; on a canvas (cw > TUBE_W) they are placed in strip coordinates
+function itemNew(t, cw) {
+  const wide = cw > TUBE_W, cx = Math.round(cw / 2);
+  const base = {
+    text:  { type: "text", text: "Text", x: cx, y: 120, size: 20 },
+    ring:  { type: "ring", value: "50", max: 100, x: cx, y: 70, radius: 52, thickness: 10 },
+    bar:   { type: "bar", value: "50", max: 100, x: cx, y: 200, width: wide ? 380 : 110, height: 10 },
+    icon:  { type: "icon", icon: "mdi:star", x: cx, y: 120, size: 64 },
+    image: { type: "image", source: "builtin:claude", x: cx, y: 120, width: wide ? 240 : 135, height: wide ? 240 : 135 },
+    rect:  { type: "rect", x: cx, y: 120, width: wide ? 380 : 100, height: 2, color: "#444444" },
+  };
+  return JSON.parse(JSON.stringify(base[t]));
+}
 const VALUE_FIELDS = ["value", "text"];   // get the Entity/Fixed/Template source picker
 const SELECTS = {                         // first option = the default, not written to the file
   align: ["center", "left", "right"],
@@ -179,7 +185,7 @@ function applySnapshot(json) {
   }
   if (state.selectedTube != null) {
     const s = state.data.screens[state.selectedScreen];
-    if (!s || s.strip || !s.tubes || state.selectedTube >= s.tubes.length) state.selectedTube = null;
+    if (!s || s.strip || s.canvas || !s.tubes || state.selectedTube >= s.tubes.length) state.selectedTube = null;
   }
   closeDesigner();
   renderAll();
@@ -250,6 +256,7 @@ function renderAll() {
   renderRotation();
   renderNight();
   renderScreenList();
+  renderDefaultFont();
   renderScreenSettings();
   renderTubeEditor();
 }
@@ -599,6 +606,40 @@ $("deleteScreen").addEventListener("click", () => {
 
 // ---------------------------------------------------------------- screen settings
 
+// The top-level `font:` default, shown in the Screens card. Options come from api/fonts
+// (bundled families + uploaded files); the preview image next to it is refreshed on change.
+async function renderDefaultFont() {
+  const sel = $("defaultFont");
+  const { bundled, files } = await fontList();
+  sel.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "default"; def.textContent = "Default";
+  sel.appendChild(def);
+  (bundled || []).forEach((b) => {
+    if (b.id === "default") return;
+    const o = document.createElement("option");
+    o.value = b.id; o.textContent = b.name;
+    sel.appendChild(o);
+  });
+  if (files && files.length) {
+    const grp = document.createElement("optgroup");
+    grp.label = "Your fonts";
+    files.forEach((fl) => {
+      const o = document.createElement("option");
+      o.value = "file:" + fl.name; o.textContent = fl.name;
+      grp.appendChild(o);
+    });
+    sel.appendChild(grp);
+  }
+  const cur = state.data.font != null ? String(state.data.font) : "default";
+  if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+}
+
+$("defaultFont").addEventListener("change", (e) => {
+  if (e.target.value === "default") delete state.data.font; else state.data.font = e.target.value;
+  markDirty(); schedulePreview(0);
+});
+
 function renderScreenSettings() {
   const s = state.data.screens[state.selectedScreen];
   $("screenTitle").textContent = state.selectedScreen ? "Screen: " + state.selectedScreen : "No screen selected";
@@ -607,7 +648,7 @@ function renderScreenSettings() {
   $("scrRefresh").value = s.refresh != null ? s.refresh : "";
   $("scrBackground").value = /^#[0-9a-fA-F]{6}$/.test(s.background || "") ? s.background : "#000000";
   $("scrWhen").value = s.when || "";
-  $("scrLayout").value = s.strip ? "strip" : "tubes";
+  $("scrLayout").value = s.strip ? "strip" : s.canvas ? "canvas" : "tubes";
   $("scrTransition").value = s.transition != null ? s.transition : "";
 }
 
@@ -647,16 +688,40 @@ $("scrLayout").addEventListener("change", (e) => {
   const s = curScreen(); if (!s) return;
   const keep = stash.get(s) || {};
   if (e.target.value === "strip" && !s.strip) {
-    keep.tubes = s.tubes; delete s.tubes;
+    keep.tubes = s.tubes; keep.canvas = s.canvas; delete s.tubes; delete s.canvas;
     s.strip = keep.strip || { source: "builtin:claude", fit: "contain" };
-  } else if (e.target.value === "tubes" && s.strip) {
-    keep.strip = s.strip; delete s.strip;
+  } else if (e.target.value === "tubes" && (s.strip || s.canvas)) {
+    if (s.strip) keep.strip = s.strip; else keep.canvas = s.canvas;
+    delete s.strip; delete s.canvas;
     s.tubes = keep.tubes || Array.from({ length: 6 }, () => ({ type: "blank" }));
+  } else if (e.target.value === "canvas" && !s.canvas) {
+    keep.tubes = s.tubes; keep.strip = s.strip; delete s.tubes; delete s.strip;
+    s.canvas = keep.canvas || canvasFromTubes(s, keep.tubes);
   }
   stash.set(s, keep);
   state.selectedTube = null;
   markDirty(); renderTubeEditor(); schedulePreview(0);
 });
+
+// tubes -> canvas: each tube's contents become items offset by its tube index * 135.
+// Custom tubes keep their items as they are; the simple widget types are converted with
+// toCustom (the same conversion the type select uses). Blank tubes add nothing.
+function canvasFromTubes(s, tubes) {
+  const items = [];
+  (tubes || []).forEach((w, i) => {
+    if (!w || w.type === "blank" || !w.type) return;
+    const off = i * TUBE_W;
+    const src = w.type === "custom" ? w : toCustom(w);
+    (src.items || []).forEach((it) => {
+      const copy = JSON.parse(JSON.stringify(it));
+      if (typeof copy.x === "number") copy.x += off;
+      else if (typeof copy.x === "string" && !hasTemplate(copy.x) && isFinite(Number(copy.x))) copy.x = Number(copy.x) + off;
+      items.push(copy);
+    });
+  });
+  if (!items.length) items.push(itemNew("text", 6 * TUBE_W));
+  return { background: s.background, items };
+}
 
 // ---------------------------------------------------------------- preview
 
@@ -674,7 +739,7 @@ async function refreshPreview() {
   const { status, res, body } = await api("api/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ screen: s }),
+    body: JSON.stringify({ screen: s, font: state.data.font }),
   });
   let blob = null;
   if (status === 200) {
@@ -699,7 +764,7 @@ async function refreshPreview() {
     }
     img.title = "tube " + i;
     img.addEventListener("click", () => {
-      if (curScreen().strip) return;      // one picture: nothing per tube to edit
+      if (curScreen().strip || curScreen().canvas) return;   // one design: nothing per tube to edit
       if (state.selectedTube !== i) state.designerSel = null;
       state.selectedTube = i; renderTubeEditor(); markSelectedTube();
     });
@@ -823,6 +888,16 @@ function renderTubeEditor() {
     box.appendChild(imageSourceField(s.strip, "source", 6 * TUBE_W, TUBE_H));
     return;
   }
+  if (s && s.canvas) {
+    // A free design across all six tubes: the custom-tube designer at strip size
+    panel.classList.remove("hidden");
+    $("tubeTypeRow").classList.add("hidden");
+    $("tubeTitle").textContent = "Canvas across all six tubes";
+    const box = $("tubeFields");
+    box.innerHTML = "";
+    box.appendChild(customEditor(s.canvas, 6 * TUBE_W, TUBE_H));
+    return;
+  }
   if (!s || state.selectedTube == null || !s.tubes) { panel.classList.add("hidden"); return; }
   panel.classList.remove("hidden");
   $("tubeTypeRow").classList.remove("hidden");
@@ -895,6 +970,8 @@ function fieldRow(w, f, opts) {
     row.appendChild(lab);
   } else if (SELECTS[f]) {
     row.appendChild(selectField(w, f, SELECTS[f]));
+  } else if (f === "font") {
+    row.appendChild(fontField(w, f));
   } else if (f === "icon") {
     row.appendChild(iconField(w, f));
   } else if (f === "source") {
@@ -1096,6 +1173,95 @@ function selectField(w, f, options) {
   return wrap;
 }
 
+// ---- font picker: Default, the bundled families, your uploaded fonts, + Upload --------
+let fontListPromise = null;
+function fontList() {
+  if (!fontListPromise) {
+    fontListPromise = api("api/fonts").then(({ status, body }) =>
+      status === 200 && body ? body : { bundled: [{ id: "default", name: "Default" }], files: [] });
+  }
+  return fontListPromise;
+}
+
+function fontField(w, f) {
+  const wrap = document.createElement("div");
+  wrap.className = "field font-field";
+  const sel = document.createElement("select");
+  const preview = document.createElement("img");
+  preview.className = "font-preview-img";
+  preview.alt = "font preview";
+  const upload = document.createElement("input");
+  upload.type = "file"; upload.accept = ".ttf,.otf"; upload.className = "hidden";
+  const uploadBtn = mkBtn("+ Upload font", () => upload.click(), "upload a .ttf/.otf font (max 3 MB)");
+  uploadBtn.classList.add("small");
+
+  function previewUrl(fam) {
+    return "api/font_preview?font=" + encodeURIComponent(fam || "default") +
+      "&text=" + encodeURIComponent("Ag 123") + "&size=28";
+  }
+  function updatePreview() {
+    const v = sel.value || "default";
+    preview.src = previewUrl(v);
+  }
+  async function fill() {
+    const { bundled, files } = await fontList();
+    sel.innerHTML = "";
+    const def = document.createElement("option");
+    def.value = "default"; def.textContent = "Default";
+    sel.appendChild(def);
+    (bundled || []).forEach((b) => {
+      if (b.id === "default") return;
+      const o = document.createElement("option");
+      o.value = b.id; o.textContent = b.name;
+      sel.appendChild(o);
+    });
+    if (files && files.length) {
+      const grp = document.createElement("optgroup");
+      grp.label = "Your fonts";
+      files.forEach((fl) => {
+        const o = document.createElement("option");
+        o.value = "file:" + fl.name; o.textContent = fl.name;
+        grp.appendChild(o);
+      });
+      sel.appendChild(grp);
+    }
+    const cur = w[f] != null ? String(w[f]) : "default";
+    if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+    else if (cur.startsWith("file:")) {
+      // an uploaded font that was deleted since: keep it selectable so nothing is lost silently
+      const o = document.createElement("option");
+      o.value = cur; o.textContent = cur.slice(5) + " (missing)";
+      sel.appendChild(o); sel.value = cur;
+    }
+    updatePreview();
+  }
+  sel.addEventListener("change", () => {
+    if (sel.value === "default") delete w[f]; else w[f] = sel.value;
+    updatePreview();
+    markDirty(); schedulePreview();
+  });
+  upload.addEventListener("change", async () => {
+    if (!upload.files || !upload.files[0]) return;
+    const fd = new FormData();
+    fd.append("file", upload.files[0]);
+    const { status, body } = await api("api/fonts", { method: "POST", body: fd });
+    if (status !== 200) { setStatus((body && body.error) || "font upload failed", "error"); return; }
+    fontListPromise = null;               // re-fetch so the new font appears
+    await fill();
+    w[f] = body.family;                   // "file:<name>"
+    sel.value = body.family;
+    updatePreview();
+    markDirty(); schedulePreview();
+    upload.value = "";
+  });
+  const line = document.createElement("label");
+  line.className = "field";
+  line.append(labelEl("font"), sel);
+  wrap.append(line, preview, uploadBtn, upload);
+  fill();
+  return wrap;
+}
+
 // ---- picture placement: drag to move, pinch / wheel / slider to zoom -------------------
 // Writes fit: contain plus zoom, offset_x, offset_y, rotate and background, which render.py's
 // _fit_image reads; the drawing here uses the same sums, so what you see is what the tube gets.
@@ -1267,21 +1433,27 @@ function positioner(w, f, cw, ch) {
   return wrap;
 }
 
-// ---- custom tube: designer --------------------------------------------------------------
-// The tube is drawn by the app (so fonts and sizes are exact); the outlines over it are where
-// each item ended up (X-Item-Boxes from api/preview) and can be dragged.
-function customEditor(w) {
+// ---- custom tube / canvas designer ------------------------------------------------------
+// The tube (or the whole 810x240 canvas) is drawn by the app (so fonts and sizes are exact);
+// the outlines over it are where each item ended up (X-Item-Boxes from api/preview) and can
+// be dragged. cw/ch are the canvas size: 135x240 for a tube, 810x240 for a canvas screen.
+function customEditor(w, cw, ch) {
+  cw = cw || TUBE_W; ch = ch || TUBE_H;
+  const wide = cw > TUBE_W;
   if (!Array.isArray(w.items)) w.items = [];
   const tube = state.selectedTube;
   const wrap = document.createElement("div");
   wrap.className = "designer";
+  const stageScroll = document.createElement("div");
+  stageScroll.className = "designer-stage-scroll";
   const stage = document.createElement("div");
-  stage.className = "designer-stage";
+  stage.className = "designer-stage" + (wide ? " wide" : "");
   const pic = document.createElement("img");
-  pic.alt = "tube preview"; pic.draggable = false;
+  pic.alt = "preview"; pic.draggable = false;
   const overlay = document.createElement("div");
   overlay.className = "designer-overlay";
   stage.append(pic, overlay);
+  stageScroll.appendChild(stage);
   const side = document.createElement("div");
   side.className = "designer-side";
   const addRow = document.createElement("div");
@@ -1291,37 +1463,60 @@ function customEditor(w) {
   const fields = document.createElement("div");
   fields.className = "field-grid";
   side.append(addRow, list, fields);
-  wrap.append(stage, side);
+  wrap.append(stageScroll, side);
 
   const numOr = (v, d) => (typeof v === "number" ? v : (v != null && v !== "" && isFinite(Number(v)) ? Number(v) : d));
   let boxes = [], seq = 0, picUrl = null, dragging = false;
-  // snap to grid: remembered in the browser; the grid is measured from the tube's centre
-  const CX = Math.round(TUBE_W / 2), CY = TUBE_H / 2;
+  // snap to grid: remembered in the browser; the grid is measured from the canvas centre
+  const CX = Math.round(cw / 2), CY = ch / 2;
   const snapCb = document.createElement("input");
   snapCb.type = "checkbox"; snapCb.checked = localStorage.getItem("tdSnap") === "1";
   const snapSize = document.createElement("select");
   [2, 5, 10, 15, 20].forEach((n) => { const o = document.createElement("option"); o.value = n; o.textContent = n + " px"; snapSize.appendChild(o); });
   snapSize.value = localStorage.getItem("tdSnapSize") || "5";
   const grid = () => (snapCb.checked ? parseInt(snapSize.value, 10) : 0);
+  // on a canvas, also offer snapping x to the centres of the six physical tubes
+  const tubeCb = document.createElement("input");
+  tubeCb.type = "checkbox"; tubeCb.checked = localStorage.getItem("tdSnapTube") === "1";
+  const snapTube = () => (wide && tubeCb.checked);
   function drawGrid() {
-    const g = grid(), k = stage.getBoundingClientRect().width / TUBE_W;
+    const g = grid(), k = stage.getBoundingClientRect().width / cw;
     if (!g || !k) { overlay.style.backgroundImage = ""; return; }
     const line = "rgba(255,255,255,0.13) 1px, transparent 1px";
     overlay.style.backgroundImage = "linear-gradient(to right, " + line + "), linear-gradient(to bottom, " + line + ")";
     overlay.style.backgroundSize = (g * k) + "px " + (g * k) + "px";
     overlay.style.backgroundPosition = ((CX * k) % (g * k)) + "px " + ((CY * k) % (g * k)) + "px";
   }
+  function drawTubeLines() {
+    overlay.querySelectorAll(".tube-line").forEach((el) => el.remove());
+    if (!wide) return;
+    for (let t = 1; t < 6; t++) {
+      const el = document.createElement("div");
+      el.className = "tube-line";
+      el.style.left = (t * TUBE_W / cw * 100) + "%";
+      el.title = "gap between tube " + t + " and tube " + (t + 1);
+      overlay.appendChild(el);
+    }
+  }
   const snapChanged = () => {
     localStorage.setItem("tdSnap", snapCb.checked ? "1" : "0");
     localStorage.setItem("tdSnapSize", snapSize.value);
+    localStorage.setItem("tdSnapTube", tubeCb.checked ? "1" : "0");
     drawGrid();
   };
   snapCb.addEventListener("change", snapChanged);
   snapSize.addEventListener("change", snapChanged);
+  tubeCb.addEventListener("change", snapChanged);
   const snapRow = document.createElement("label");
   snapRow.className = "field";
   snapRow.append(snapCb, document.createTextNode(" snap to grid "), snapSize);
   side.insertBefore(snapRow, list);
+  if (wide) {
+    const tubeRow = document.createElement("label");
+    tubeRow.className = "field";
+    tubeRow.append(tubeCb, document.createTextNode(" snap to tube centres"));
+    side.insertBefore(tubeRow, list);
+  }
 
   function summary(it) {
     const v = it.type === "text" ? it.text : it.type === "icon" ? it.icon : it.type === "image" ? it.source
@@ -1368,7 +1563,7 @@ function customEditor(w) {
     });
     if (!w.items.length) {
       const li = document.createElement("li");
-      li.className = "hint"; li.textContent = "Empty tube. Add something with the buttons above.";
+      li.className = "hint"; li.textContent = "Empty " + (wide ? "canvas" : "tube") + ". Add something with the buttons above.";
       list.appendChild(li);
     }
   }
@@ -1382,24 +1577,25 @@ function customEditor(w) {
       ? " (x is its " + it.align + " edge)" : "");
     fields.appendChild(head);
     (ITEM_FIELDS[it.type] || []).forEach((f) => {
-      fields.appendChild(fieldRow(it, f, { cw: Math.round(numOr(it.width, TUBE_W)), ch: Math.round(numOr(it.height, TUBE_H)) }));
+      fields.appendChild(fieldRow(it, f, { cw: Math.round(numOr(it.width, cw)), ch: Math.round(numOr(it.height, ch)) }));
     });
   }
 
   function drawBoxes() {
-    overlay.innerHTML = "";
+    overlay.querySelectorAll(".item-box").forEach((el) => el.remove());
     boxes.forEach((b, i) => {
       if (!w.items[i]) return;
       const el = document.createElement("div");
       el.className = "item-box" + (i === state.designerSel ? " selected" : "");
-      el.style.left = (b[0] / TUBE_W * 100) + "%";
-      el.style.top = (b[1] / TUBE_H * 100) + "%";
-      el.style.width = (Math.max(b[2] - b[0], 6) / TUBE_W * 100) + "%";
-      el.style.height = (Math.max(b[3] - b[1], 6) / TUBE_H * 100) + "%";
+      el.style.left = (b[0] / cw * 100) + "%";
+      el.style.top = (b[1] / ch * 100) + "%";
+      el.style.width = (Math.max(b[2] - b[0], 6) / cw * 100) + "%";
+      el.style.height = (Math.max(b[3] - b[1], 6) / ch * 100) + "%";
       el.title = summary(w.items[i]);
       el.addEventListener("pointerdown", (e) => startDrag(e, el, i));
       overlay.appendChild(el);
     });
+    drawTubeLines();
   }
 
   function startDrag(e, el, i) {
@@ -1411,7 +1607,7 @@ function customEditor(w) {
     if (hasTemplate(it.x) || hasTemplate(it.y)) return;
     el.setPointerCapture(e.pointerId);
     dragging = true;
-    const k = TUBE_W / stage.getBoundingClientRect().width;
+    const k = cw / stage.getBoundingClientRect().width;
     const sx = e.clientX, sy = e.clientY;
     let dx = 0, dy = 0;
     const move = (ev) => {
@@ -1425,7 +1621,13 @@ function customEditor(w) {
       dragging = false;
       if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) { drawBoxes(); return; }
       const g = grid() || 1;
-      it.x = CX + Math.round((numOr(it.x, CX) + dx - CX) / g) * g;
+      let nx = CX + Math.round((numOr(it.x, CX) + dx - CX) / g) * g;
+      if (snapTube()) {
+        // nearest tube centre: 67.5 + t * 135
+        const t = Math.round((nx - TUBE_W / 2) / TUBE_W);
+        nx = Math.round(TUBE_W / 2 + t * TUBE_W);
+      }
+      it.x = nx;
       it.y = CY + Math.round((numOr(it.y, CY) + dy - CY) / g) * g;
       drawFields(); changed();
     };
@@ -1436,11 +1638,14 @@ function customEditor(w) {
 
   async function refresh() {
     const s = curScreen();
-    if (!s || !s.tubes || s.tubes[tube] !== w) return;
+    if (!s) return;
+    if (wide ? s.canvas !== w : !s.tubes || s.tubes[tube] !== w) return;
     const mine = ++seq;
+    const payload = { screen: s, font: state.data.font };
+    if (!wide) payload.tube = tube;
     const { status, res } = await api("api/preview", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ screen: s, tube }),
+      body: JSON.stringify(payload),
     });
     if (mine !== seq || status !== 200) return;
     const blob = await res.blob();
@@ -1452,16 +1657,16 @@ function customEditor(w) {
     drawGrid();
   }
 
-  Object.keys(ITEM_NEW).forEach((t) => {
+  Object.keys(ITEM_FIELDS).forEach((t) => {
     addRow.appendChild(mkBtn("+ " + (t === "rect" ? "box / line" : t === "image" ? "picture" : t), () => {
-      w.items.push(JSON.parse(JSON.stringify(ITEM_NEW[t])));
+      w.items.push(itemNew(t, cw));
       state.designerSel = w.items.length - 1;
       drawList(); drawFields(); changed();
     }));
   });
 
   if (state.designerSel == null || !w.items[state.designerSel]) state.designerSel = w.items.length ? 0 : null;
-  drawList(); drawFields();
+  drawList(); drawFields(); drawTubeLines();
   state.designerRefresh = refresh;
   refresh();
   return wrap;

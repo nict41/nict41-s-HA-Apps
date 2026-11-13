@@ -799,3 +799,168 @@ def test_ticker_and_clock_animators_registered_and_sized():
     assert clk.interval({"type": "analog_clock", "seconds": False}) == 30.0
     img, rect = asyncio.run(clk.frame({"type": "analog_clock"}, None, 0, None))
     assert img.size == (135, 240) and rect == (0, 0, 135, 240)
+
+
+# ----------------------------------------------------------------------
+# canvas screens (free design across all six tubes) and the font field
+# ----------------------------------------------------------------------
+
+def _canvas_screen(items, name="wide"):
+    return Screen(name=name, canvas={"background": "#000000", "items": items})
+
+
+def test_canvas_renders_items_at_strip_coordinates():
+    ctx = _ctx()
+    ctx.record_boxes = {}
+    screen = _canvas_screen([
+        {"type": "rect", "x": 607, "y": 200, "width": 380, "height": 12, "color": "#0000FF"},
+        {"type": "rect", "x": 100, "y": 40, "width": 60, "height": 20, "color": "#FF0000"},
+        {"type": "text", "x": 405, "y": 120, "text": "hi", "size": 30, "color": "#FFFFFF"},
+    ])
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H)
+    # the bar-like rect spans tubes 4 and 5 (x 417..796 of the 810-wide strip)
+    assert strip.getpixel((610, 200)) == (0, 0, 255)
+    assert strip.getpixel((790, 200)) == (0, 0, 255)
+    assert strip.getpixel((800, 200)) == (0, 0, 0)          # past the rect's right edge
+    assert strip.getpixel((100, 200)) == (0, 0, 0)          # outside the rect: background
+    assert strip.getpixel((110, 45)) == (255, 0, 0)         # second rect in tube 0
+    assert strip.getpixel((300, 45)) == (0, 0, 0)
+    # text centred at x=405 (the strip centre) has ink around it
+    assert any(strip.getpixel((x, y)) == (255, 255, 255)
+               for x in range(380, 430) for y in range(100, 140))
+    assert ctx.last_errors == {}
+    # record_boxes under "<screen>:canvas"
+    boxes = ctx.record_boxes["wide:canvas"]
+    assert len(boxes) == 3
+    assert boxes[0] == (417, 194, 797, 206)                 # rect centred at 607, width 380
+    assert boxes[1] == (70, 30, 130, 50)                    # rect centred at 100, 60x20
+
+
+def test_canvas_templates_in_items_are_resolved():
+    async def renderer(t):
+        return {"{{ temp }}": "21.5", "{{ pct }}": "60"}.get(t, t)
+
+    screen = _canvas_screen([
+        {"type": "text", "x": 202, "y": 120, "text": "{{ temp }}°", "size": 60},
+        {"type": "bar", "x": 607, "y": 200, "width": 380, "height": 12, "value": "{{ pct }}", "max": 100},
+    ])
+    assert set(render.collect_templates(screen)) == {"{{ temp }}°", "{{ pct }}"}
+    ctx = _ctx(renderer)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert ctx.last_errors == {}
+    # bar filled to 60% of 380 px from x=417: 417+228=645
+    assert strip.getpixel((500, 200)) == (255, 165, 0) or strip.getpixel((500, 200))[0] > 200
+    assert strip.getpixel((700, 200)) == (60, 60, 60)       # track beyond the fill
+    # the text rendered the template, not the raw "{{ temp }}"
+    assert any(strip.getpixel((x, y)) != (0, 0, 0)
+               for x in range(150, 260) for y in range(90, 150))
+
+
+def test_canvas_failed_template_shows_bang():
+    async def bad(t):
+        raise RuntimeError("boom")
+
+    screen = _canvas_screen([{"type": "text", "x": 405, "y": 120, "text": "{{ bad }}"}])
+    ctx = _ctx(bad)
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.size == (STRIP_W, STRIP_H)
+    assert "wide:canvas" in ctx.last_errors
+    colors = strip.getcolors(maxcolors=100000)
+    assert any(c > 0 and rgb[0] > 200 and rgb[1] < 120 for c, rgb in colors)
+
+
+def test_canvas_bad_item_marks_only_that_item():
+    ctx = _ctx()
+    screen = _canvas_screen([
+        {"type": "rect", "x": 100, "y": 40, "width": 60, "height": 20, "color": "#00FF00"},
+        {"type": "nope", "x": 400, "y": 120},
+    ])
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.getpixel((110, 45)) == (0, 255, 0)
+    assert any("item 1" in k for k in ctx.last_errors)
+
+
+def test_canvas_resolved_tubes_are_six_nones():
+    ctx = _ctx()
+    tubes = asyncio.run(render.resolved_tubes(_canvas_screen([]), ctx))
+    assert tubes == [None] * 6
+    strip_screen = Screen(name="s", strip={"source": "builtin:claude"})
+    assert asyncio.run(render.resolved_tubes(strip_screen, ctx)) == [None] * 6
+
+
+def test_canvas_background_field():
+    ctx = _ctx()
+    screen = Screen(name="c", canvas={"background": "#102030", "items": [
+        {"type": "rect", "x": 405, "y": 120, "width": 20, "height": 20, "color": "#FFFFFF"}]})
+    strip = asyncio.run(render.render_screen(screen, ctx))
+    assert strip.getpixel((10, 10)) == (0x10, 0x20, 0x30)
+    assert strip.getpixel((405, 120)) == (255, 255, 255)
+
+
+def test_font_field_threads_through_widgets(monkeypatch):
+    """A widget's `font` reaches load_font; the context default is used when the
+    widget has none. Uses a spy on fonts.load_font (no real font file needed)."""
+    calls = []
+    real = fonts.load_font
+
+    def spy(size, bold=False, family=None):
+        calls.append(family)
+        return real(size, bold=bold, family=family)
+
+    monkeypatch.setattr(render.fonts, "load_font", spy)
+    ctx = _ctx()
+    ctx.default_font = "nunito"
+    render.draw_text({"type": "text", "text": "hi", "font": "orbitron", "size": 20}, ctx, (0, 0, 0))
+    assert "orbitron" in calls
+    calls.clear()
+    render.draw_text({"type": "text", "text": "hi", "size": 20}, ctx, (0, 0, 0))   # no font -> the default
+    assert "nunito" in calls
+    calls.clear()
+    ctx.default_font = None
+    render.draw_text({"type": "text", "text": "hi", "size": 20, "font": "default"}, ctx, (0, 0, 0))
+    assert None in calls and "default" not in calls
+
+
+def test_font_field_on_custom_text_item(monkeypatch):
+    calls = []
+    real = fonts.load_font
+
+    def spy(size, bold=False, family=None):
+        calls.append(family)
+        return real(size, bold=bold, family=family)
+
+    monkeypatch.setattr(render.fonts, "load_font", spy)
+    ctx = _ctx()
+    ctx.default_font = "oswald"
+    w = {"type": "custom", "items": [
+        {"type": "text", "x": 67, "y": 60, "text": "a", "font": "bebas-neue"},
+        {"type": "text", "x": 67, "y": 160, "text": "b"},
+    ]}
+    asyncio.run(render.draw_custom(w, ctx, (0, 0, 0)))
+    assert "bebas-neue" in calls and "oswald" in calls
+
+
+def test_file_font_renders_differently(tmp_path):
+    """With a real .ttf in the user dir, a file: font is loaded and used (skip
+    when no .ttf exists in this environment)."""
+    import os
+    src = os.environ.get("TD_TEST_FONT") or next(
+        (p for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                     "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                     "/tmp/td/fonts/DejaVuSans.ttf") if os.path.isfile(p)), None)
+    if src is None:
+        pytest.skip("no .ttf available in this environment")
+    import shutil
+    udir = tmp_path / "fonts"
+    udir.mkdir()
+    shutil.copy(src, udir / "Test.ttf")
+    fonts.set_user_dir(str(udir))
+    try:
+        ctx = _ctx()
+        w = {"type": "text", "text": "Ag", "size": 40, "font": "file:Test.ttf"}
+        img = _render_widget(w)
+        assert img.size == (TUBE_W, TUBE_H)
+        assert any(img.getpixel((x, y)) != (0, 0, 0) for x in range(TUBE_W) for y in range(TUBE_H))
+    finally:
+        fonts.set_user_dir(None)

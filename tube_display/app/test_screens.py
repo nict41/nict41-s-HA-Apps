@@ -326,3 +326,92 @@ def test_transition_delay_validated():
                                             "tubes": [{"type": "blank"}] * 6}}))
     assert cfg.errors == []
     assert cfg.screens["a"].resolved_transition_delay() == 0
+
+
+# ----------------------------------------------------------------------
+# canvas screens and the top-level `font:` default
+# ----------------------------------------------------------------------
+
+CANVAS = {"background": "#000000", "items": [
+    {"type": "text", "text": "21.5°", "x": 202, "y": 120, "size": 120, "font": "bebas-neue"},
+    {"type": "icon", "icon": "mdi:weather-partly-cloudy", "x": 67, "y": 120, "size": 100},
+    {"type": "bar", "value": "60", "max": 100, "x": 607, "y": 200, "width": 380, "height": 12},
+]}
+
+
+def test_canvas_screen_parses():
+    cfg = parse_screens(_cfg(screens={"a": {"canvas": CANVAS, "duration": 20, "refresh": 5,
+                                            "when": "{{ is_state('sun.sun','above_horizon') }}",
+                                            "transition": "wipe"}}))
+    assert cfg.errors == []
+    s = cfg.screens["a"]
+    assert s.kind() == "canvas"
+    assert s.canvas == CANVAS
+    assert s.resolved_duration(15) == 20 and s.resolved_refresh(30) == 5
+    assert s.when and s.resolved_transition("cascade") == "wipe"
+
+
+def test_canvas_and_tubes_rejected():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [{"type": "blank"}] * 6, "canvas": CANVAS}}))
+    assert "a" not in cfg.screens
+    assert any("not both" in e and "canvas" in e for e in cfg.errors)
+
+
+def test_canvas_and_strip_rejected():
+    cfg = parse_screens(_cfg(screens={"a": {"strip": {"source": "camera:x"}, "canvas": CANVAS}}))
+    assert "a" not in cfg.screens
+    assert any("not both" in e for e in cfg.errors)
+
+
+def test_canvas_bad_item_rejected():
+    bad = {"canvas": {"items": [{"type": "text", "text": "hi"}, {"type": "nope", "x": 5}]}}
+    cfg = parse_screens(_cfg(screens={"a": bad}))
+    assert "a" not in cfg.screens
+    assert any("unknown item type" in e and "canvas" in e for e in cfg.errors)
+    # items are validated exactly like custom-tube items (same fields)
+    bad2 = {"canvas": {"items": [{"type": "icon", "x": 5}]}}          # icon needs mdi: prefix
+    cfg = parse_screens(_cfg(screens={"a": bad2}))
+    assert any("mdi:" in e for e in cfg.errors)
+    bad3 = {"canvas": {"items": "nope"}}
+    cfg = parse_screens(_cfg(screens={"a": bad3}))
+    assert any("'items' must be a list" in e for e in cfg.errors)
+    bad4 = {"canvas": ["not", "a", "map"]}
+    cfg = parse_screens(_cfg(screens={"a": bad4}))
+    assert any("'canvas' must be a mapping" in e for e in cfg.errors)
+
+
+def test_canvas_empty_items_ok():
+    cfg = parse_screens(_cfg(screens={"a": {"canvas": {"items": []}}}))
+    assert cfg.errors == []
+    assert cfg.screens["a"].canvas == {"items": []}
+
+
+def test_top_level_font_parsed():
+    cfg = parse_screens(_cfg(font="bebas-neue"))
+    assert cfg.errors == []
+    assert cfg.font == "bebas-neue"
+    cfg = parse_screens(_cfg(font="file:MyFont.ttf"))
+    assert cfg.font == "file:MyFont.ttf" and cfg.errors == []
+    cfg = parse_screens(_cfg())                       # absent -> None
+    assert cfg.font is None and cfg.errors == []
+
+
+def test_top_level_font_bad_type_is_error():
+    cfg = parse_screens(_cfg(font=42))
+    assert cfg.font is None
+    assert any("'font' must be a non-empty string" in e for e in cfg.errors)
+    cfg = parse_screens(_cfg(font=""))
+    assert any("'font' must be a non-empty string" in e for e in cfg.errors)
+    cfg = parse_screens(_cfg(font=None))
+    assert any("'font' must be a non-empty string" in e for e in cfg.errors)
+
+
+def test_widget_font_field_accepted_on_text_widgets():
+    cfg = parse_screens(_cfg(screens={"a": {"tubes": [
+        {"type": "text", "text": "hi", "font": "orbitron"},
+        {"type": "big_number", "value": "1", "font": "file:X.ttf"},
+        {"type": "custom", "items": [{"type": "text", "text": "x", "font": "nunito"}]},
+        {"type": "blank"}, {"type": "blank"}, {"type": "blank"}]}}))
+    assert cfg.errors == []
+    assert cfg.screens["a"].tubes[0]["font"] == "orbitron"
+    assert cfg.screens["a"].tubes[2]["items"][0]["font"] == "nunito"

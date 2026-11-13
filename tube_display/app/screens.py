@@ -43,6 +43,15 @@ class Screen:
     transition_delay: int | None = None   # ms between tubes, None -> 90
     tubes: list[dict] = field(default_factory=list)   # exactly 6 widgets
     strip: dict | None = None         # alternative: one 810x240 picture
+    canvas: dict | None = None        # alternative: free design across all six tubes
+
+    def kind(self) -> str:
+        """"tubes", "strip" or "canvas" - exactly one of them is set."""
+        if self.strip is not None:
+            return "strip"
+        if self.canvas is not None:
+            return "canvas"
+        return "tubes"
 
     def resolved_duration(self, default: int) -> int:
         return self.duration if self.duration is not None else default
@@ -70,6 +79,7 @@ class ScreensConfig:
     rotation: list[str] = field(default_factory=list)
     clock_duration: int | None = None   # duration for the "clock" rotation entry
     transition: str = DEFAULT_TRANSITION  # top-level default for screens' `transition`
+    font: str | None = None              # top-level default `font:` for all widgets
     screens: dict[str, Screen] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)  # human-readable, per screen
     clock_overrides: dict[str, ClockOverride] = field(default_factory=dict)  # clock name -> override
@@ -96,6 +106,23 @@ class ScreensConfig:
 
 def _err(errors: list[str], screen: str, msg: str) -> None:
     errors.append(f"screen '{screen}': {msg}")
+
+
+def _check_item(errors: list[str], where: str, n: int, it: object) -> bool:
+    """One item of a custom widget / canvas (ITEM_TYPES), validated the same way in both."""
+    if not isinstance(it, dict) or it.get("type") not in ITEM_TYPES:
+        kind = it.get("type") if isinstance(it, dict) else type(it).__name__
+        errors.append(f"{where} item {n}: unknown item type {kind!r} (expected one of {', '.join(ITEM_TYPES)})")
+        return False
+    if it["type"] == "image" and it.get("fit", "contain") not in FITS:
+        errors.append(f"{where} item {n}: image 'fit' must be one of {', '.join(FITS)}")
+        return False
+    if it["type"] == "icon":
+        icon = it.get("icon")
+        if not isinstance(icon, str) or not icon.startswith("mdi:"):
+            errors.append(f"{where} item {n}: icon item needs 'icon: mdi:<name>'")
+            return False
+    return True
 
 
 def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
@@ -160,12 +187,7 @@ def _check_widget(errors: list[str], screen: str, idx: int, w: object) -> bool:
             errors.append(f"{where}: custom widget 'items' must be a list")
             return False
         for n, it in enumerate(items):
-            if not isinstance(it, dict) or it.get("type") not in ITEM_TYPES:
-                kind = it.get("type") if isinstance(it, dict) else type(it).__name__
-                errors.append(f"{where} item {n}: unknown item type {kind!r} (expected one of {', '.join(ITEM_TYPES)})")
-                return False
-            if it["type"] == "image" and it.get("fit", "contain") not in FITS:
-                errors.append(f"{where} item {n}: image 'fit' must be one of {', '.join(FITS)}")
+            if not _check_item(errors, where, n, it):
                 return False
     return True
 
@@ -209,11 +231,13 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
 
     has_tubes = "tubes" in raw
     has_strip = "strip" in raw
-    if has_tubes and has_strip:
-        _err(errors, name, "use either 'tubes' or 'strip', not both")
+    has_canvas = "canvas" in raw
+    kinds = [k for k, has in (("tubes", has_tubes), ("strip", has_strip), ("canvas", has_canvas)) if has]
+    if len(kinds) > 1:
+        _err(errors, name, f"use only one of 'tubes', 'strip', 'canvas' - not both/all of them (got {', '.join(kinds)})")
         return None
-    if not has_tubes and not has_strip:
-        _err(errors, name, "needs 'tubes' (6 widgets) or 'strip' (one 810x240 picture)")
+    if not kinds:
+        _err(errors, name, "needs 'tubes' (6 widgets), 'strip' (one 810x240 picture) or 'canvas' (free design across all six tubes)")
         return None
     if has_strip:
         strip = raw["strip"]
@@ -225,6 +249,20 @@ def _parse_screen(name: str, raw: object, errors: list[str]) -> Screen | None:
             _err(errors, name, f"strip 'fit' must be one of {', '.join(FITS)}, got {fit!r}")
             return None
         screen.strip = strip
+    elif has_canvas:
+        canvas = raw["canvas"]
+        if not isinstance(canvas, dict):
+            _err(errors, name, "'canvas' must be a mapping with an 'items' list (text/ring/bar/icon/image/rect placed by x/y in 0..810 x 0..240)")
+            return None
+        items = canvas.get("items", [])
+        if not isinstance(items, list):
+            _err(errors, name, "canvas 'items' must be a list")
+            return None
+        where = f"screen '{name}' canvas"
+        for n, it in enumerate(items):
+            if not _check_item(errors, where, n, it):
+                return None
+        screen.canvas = canvas
     else:
         tubes = raw["tubes"]
         if not isinstance(tubes, list) or len(tubes) != 6:
@@ -308,6 +346,15 @@ def parse_screens(data: object) -> ScreensConfig:
         else:
             cfg.transition = transition
 
+    font = data.get("font")
+    if font is not None:
+        if not isinstance(font, str) or not font:
+            cfg.errors.append(f"top-level 'font' must be a non-empty string (a bundled family id or file:<name>), got {font!r}")
+        else:
+            cfg.font = font
+    elif "font" in data:
+        cfg.errors.append("top-level 'font' must be a non-empty string (a bundled family id or file:<name>), got None")
+
     _parse_clock_overrides(data, cfg)
 
     night_cfg, night_errors = parse_night(data.get("night"))
@@ -361,10 +408,14 @@ clock: {duration: 60}
 # transition: cascade    # optional default for all screens: none | cascade |
 #                        # cascade_right | center_out | wipe (how a screen appears
 #                        # tube by tube when it becomes active; per screen too)
+# font: bebas-neue      # optional default font for every widget that draws text
+#                        # (a bundled family id, or file:<uploaded font>); each
+#                        # widget's own `font:` wins over this
 
 screens:
-  # A screen is either `tubes:` (exactly 6 widgets, left to right, one per
-  # 135x240 tube) or `strip:` (one 810x240 picture across all six tubes).
+  # A screen is `tubes:` (exactly 6 widgets, left to right, one per 135x240
+  # tube), `strip:` (one 810x240 picture across all six tubes) or `canvas:`
+  # (a free design across all six tubes: items placed by x/y in 0..810 x 0..240).
   claude:
     duration: 20        # optional, default_duration from the add-on options
     refresh: 30         # optional, default_refresh; seconds between re-renders
@@ -385,6 +436,16 @@ screens:
   # One picture across all six tubes (fit: cover crops to fill 810x240).
   doorbell:
     strip: {source: "camera:camera.front_door", fit: cover}
+
+  # A free design across all six tubes: the same items a custom tube is made
+  # of, but x/y are in strip coordinates (0..810 x 0..240).
+  weather_wide:
+    canvas:
+      background: "#000000"
+      items:
+        - {type: icon, icon: "mdi:weather-partly-cloudy", x: 67, y: 120, size: 100}
+        - {type: text, text: "{{ states('sensor.outside_temp') }}\u00b0", x: 202, y: 120, size: 120, font: bebas-neue}
+        - {type: bar, value: "{{ states('sensor.humidity') }}", max: 100, x: 607, y: 200, width: 380, height: 12}
 
 # Widget types (every string field may be a Home Assistant template, and text fields
 # may have several lines with \\n):
@@ -412,5 +473,7 @@ screens:
 #   custom     items: a list of text / ring / bar / icon / image / rect, each placed by x, y
 #              (easiest with the editor's designer)
 #   blank      empty tube
+# Every widget that draws text also takes `font:` (a bundled family id like
+# bebas-neue, or file:<uploaded font>); the top-level `font:` is the default.
 # Colours accept "#RRGGBB" or a template returning one.
 """

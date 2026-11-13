@@ -48,6 +48,9 @@ class RenderContext:
         self.ha = ha
         # Folder of uploaded pictures for "file:<name>" sources (set by the controller)
         self.images_dir: str | None = None
+        # The screens file's top-level `font:` default (a family id or file:<name>);
+        # widgets without their own `font` use this (set by the controller/editor)
+        self.default_font: str | None = None
         # widget key -> last error message, so an error is logged once per change
         self.last_errors: dict[str, str] = {}
         # The editor's designer sets this to a dict to get, per custom widget key, the
@@ -59,6 +62,13 @@ class RenderContext:
         # refresh; the clock is time.monotonic, injectable for tests
         self.forecast_cache: dict[str, tuple[float, list]] = {}
         self.now_monotonic = time.monotonic
+
+    def font_family(self, w: dict) -> str | None:
+        """The `font` field of a resolved widget, else the context's default."""
+        fam = w.get("font") if isinstance(w, dict) else None
+        if isinstance(fam, str) and fam and fam != "default":
+            return fam
+        return self.default_font
 
     def note_error(self, key: str, msg: str) -> None:
         if self.last_errors.get(key) != msg:
@@ -96,16 +106,17 @@ def _text_size(draw: ImageDraw.ImageDraw, text: str, font) -> tuple[int, int]:
 
 
 def _fit_font(draw: ImageDraw.ImageDraw, text: str, max_w: int, max_h: int,
-              start: int, bold: bool = False, min_size: int = 8) -> ImageFont.ImageFont:
+              start: int, bold: bool = False, min_size: int = 8,
+              family: str | None = None) -> ImageFont.ImageFont:
     """Largest font size <= start whose text fits max_w x max_h."""
     size = max(start, min_size)
     while size > min_size:
-        font = fonts.load_font(size, bold=bold)
+        font = fonts.load_font(size, bold=bold, family=family)
         w, h = _text_size(draw, text, font)
         if w <= max_w and h <= max_h:
             return font
         size -= 1
-    return fonts.load_font(min_size, bold=bold)
+    return fonts.load_font(min_size, bold=bold, family=family)
 
 
 def _draw_centered(draw: ImageDraw.ImageDraw, cx: float, cy: float, text: str,
@@ -146,11 +157,11 @@ def _size(value: Any) -> int | None:
 
 
 def _font(draw: ImageDraw.ImageDraw, text: str, size: int | None, max_w: int, max_h: int,
-          start: int, bold: bool = False):
+          start: int, bold: bool = False, family: str | None = None):
     """The font at a fixed `size`, or the largest one <= start that fits the box."""
     if size:
-        return fonts.load_font(size, bold=bold)
-    return _fit_font(draw, text, max_w, max_h, start=start, bold=bold)
+        return fonts.load_font(size, bold=bold, family=family)
+    return _fit_font(draw, text, max_w, max_h, start=start, bold=bold, family=family)
 
 
 def _draw_error(img: Image.Image, msg: str = "!") -> Image.Image:
@@ -175,20 +186,21 @@ def _parse_number(value: Any) -> float | None:
 # string of a widget (collect_templates), so a template anywhere works; this table
 # is the documented contract the editor mirrors (editor.js FIELDS) and what tests
 # check - every field listed here must survive collect_templates/resolve_templates.
+# "font" (a family id or file:<name>) is on every widget that draws text.
 _WIDGET_TEMPLATE_FIELDS = {
-    "text": ("text", "color"),
-    "big_number": ("value", "unit", "label", "color"),
-    "ring": ("value", "max", "label", "unit", "color"),
-    "bar": ("value", "max", "label", "unit", "color"),
-    "icon": ("icon", "text", "color"),
+    "text": ("text", "color", "font"),
+    "big_number": ("value", "unit", "label", "color", "font"),
+    "ring": ("value", "max", "label", "unit", "color", "font"),
+    "bar": ("value", "max", "label", "unit", "color", "font"),
+    "icon": ("icon", "text", "color", "font"),
     "image": ("source",),
-    "sparkline": ("entity", "hours", "unit", "color"),
+    "sparkline": ("entity", "hours", "unit", "color", "font"),
     "graph": ("entity", "hours", "style", "color", "label", "unit", "show_value",
-              "min", "max", "points"),
-    "progress": ("value", "max", "label", "finish", "eta_format", "color", "track"),
-    "analog_clock": ("tz", "seconds", "numerals", "label", "color", "accent", "face"),
-    "weather": ("entity", "label", "show", "color", "icon_color"),
-    "ticker": ("text", "size", "color", "background", "y", "speed", "label"),
+              "min", "max", "points", "font"),
+    "progress": ("value", "max", "label", "finish", "eta_format", "color", "track", "font"),
+    "analog_clock": ("tz", "seconds", "numerals", "label", "color", "accent", "face", "font"),
+    "weather": ("entity", "label", "show", "color", "icon_color", "font"),
+    "ticker": ("text", "size", "color", "background", "y", "speed", "label", "font"),
     "custom": (),
     "blank": (),
 }
@@ -223,6 +235,8 @@ def collect_templates(screen: Screen) -> list[str]:
     add(screen.when)
     add(screen.background)
     for s in _walk_strings(screen.strip):
+        add(s)
+    for s in _walk_strings(screen.canvas):
         add(s)
     for w in screen.tubes:
         for s in _walk_strings(w):
@@ -284,6 +298,7 @@ def draw_text(w: dict, ctx: RenderContext, bg) -> Image.Image:
     align = str(w.get("align", "center")).lower()
     valign = str(w.get("valign", "middle")).lower()
     bold = str(w.get("weight", "")).lower() == "bold"
+    family = ctx.font_family(w)
     size = _size(w.get("size"))
     pad = 8
     lines = text.split("\n")
@@ -291,15 +306,15 @@ def draw_text(w: dict, ctx: RenderContext, bg) -> Image.Image:
         # fit the whole block
         start = 120
         while start > 8:
-            font = fonts.load_font(start, bold=bold)
+            font = fonts.load_font(start, bold=bold, family=family)
             widths = [_text_size(draw, ln, font)[0] for ln in lines]
             line_h = _text_size(draw, "Ag", font)[1] + 4
             if max(widths, default=0) <= TUBE_W - 2 * pad and line_h * len(lines) <= TUBE_H - 2 * pad:
                 break
             start -= 2
-        font = fonts.load_font(max(start, 8), bold=bold)
+        font = fonts.load_font(max(start, 8), bold=bold, family=family)
     else:
-        font = fonts.load_font(size, bold=bold)
+        font = fonts.load_font(size, bold=bold, family=family)
     line_h = _text_size(draw, "Ag", font)[1] + 4
     total_h = line_h * len(lines)
     if valign == "top":
@@ -322,7 +337,7 @@ def draw_text(w: dict, ctx: RenderContext, bg) -> Image.Image:
 
 
 def _bottom_label(draw: ImageDraw.ImageDraw, w: dict, default_size: int, legacy_cy: int,
-                  default_color) -> int:
+                  default_color, family: str | None = None) -> int:
     """Draw a widget's label at the bottom of the tube. A one-line label sits where it always
     did; one with several lines is fitted into the bottom of the tube and grows upwards.
     Returns how many more pixels than a one-line label it took, so the caller can make room."""
@@ -332,9 +347,9 @@ def _bottom_label(draw: ImageDraw.ImageDraw, w: dict, default_size: int, legacy_
     color = parse_color(w.get("label_color"), default_color)
     size = _size(w.get("label_size"))
     if "\n" not in label:
-        _draw_centered(draw, TUBE_W // 2, legacy_cy, label, fonts.load_font(size or default_size), color)
+        _draw_centered(draw, TUBE_W // 2, legacy_cy, label, fonts.load_font(size or default_size, family=family), color)
         return 0
-    font = _font(draw, label, size, TUBE_W - 8, 100, start=default_size)
+    font = _font(draw, label, size, TUBE_W - 8, 100, start=default_size, family=family)
     h = _text_size(draw, label, font)[1]
     bottom = TUBE_H - 10
     _draw_centered(draw, TUBE_W // 2, bottom - h / 2, label, font, color)
@@ -352,22 +367,23 @@ def draw_big_number(w: dict, ctx: RenderContext, bg) -> Image.Image:
     vcolor = parse_color(w.get("value_color"), color)
     ucolor = parse_color(w.get("unit_color"), color)
     vsize, usize = _size(w.get("value_size")), _size(w.get("unit_size"))
-    extra = _bottom_label(draw, w, 18, TUBE_H - 34, color)
+    family = ctx.font_family(w)
+    extra = _bottom_label(draw, w, 18, TUBE_H - 34, color, family)
     up = extra // 2      # a tall label pushes the number up and leaves it less room
     cx = TUBE_W // 2
     if unit and w.get("unit_newline"):
         # The value alone gets the full width; the unit goes on its own line below it
-        font = _font(draw, value, vsize, TUBE_W - 8, TUBE_H - 110 - extra, start=140, bold=True)
+        font = _font(draw, value, vsize, TUBE_W - 8, TUBE_H - 110 - extra, start=140, bold=True, family=family)
         _draw_centered(draw, cx, TUBE_H // 2 - 34 - up, value, font, vcolor)
-        ufont = _font(draw, unit, usize, TUBE_W - 12, 40, start=36, bold=True)
+        ufont = _font(draw, unit, usize, TUBE_W - 12, 40, start=36, bold=True, family=family)
         _draw_centered(draw, cx, TUBE_H // 2 + 46 - extra, unit, ufont, ucolor)
     elif not unit and not label:
         # Just a value (e.g. one digit of a time): as big as the tube allows
-        font = _font(draw, value, vsize, TUBE_W - 6, TUBE_H - 24, start=240, bold=True)
+        font = _font(draw, value, vsize, TUBE_W - 6, TUBE_H - 24, start=240, bold=True, family=family)
         _draw_centered(draw, cx, TUBE_H // 2, value, font, vcolor)
     else:
         main = value + unit
-        font = _font(draw, main, vsize, TUBE_W - 12, TUBE_H - 70 - extra, start=110, bold=True)
+        font = _font(draw, main, vsize, TUBE_W - 12, TUBE_H - 70 - extra, start=110, bold=True, family=family)
         _draw_centered(draw, cx, TUBE_H // 2 - 14 - up, main, font, vcolor)
     return img
 
@@ -422,6 +438,7 @@ def draw_ring(w: dict, ctx: RenderContext, bg) -> Image.Image:
     ucolor = parse_color(w.get("unit_color"), vcolor)
     lcolor = parse_color(w.get("label_color"), DEFAULT_COLOR)
     frac = _gauge_fraction(w)
+    family = ctx.font_family(w)
     r = int(max(16, min(64, _num(w.get("radius"), 52))))
     width = int(max(2, min(r - 6, _num(w.get("thickness"), 12))))
     label = _str(w.get("label"))
@@ -434,20 +451,20 @@ def draw_ring(w: dict, ctx: RenderContext, bg) -> Image.Image:
     vsize, usize, lsize = _size(w.get("value_size")), _size(w.get("unit_size")), _size(w.get("label_size"))
     inner = 2 * (r - width)      # room inside the ring
     if unit and w.get("unit_newline"):
-        vfont = _font(draw, value, vsize, inner + 2, 44, start=48, bold=True)
+        vfont = _font(draw, value, vsize, inner + 2, 44, start=48, bold=True, family=family)
         _draw_centered(draw, cx, cy - 8, value, vfont, vcolor)
-        ufont = _font(draw, unit, usize, inner - 16, 20, start=20, bold=True)
+        ufont = _font(draw, unit, usize, inner - 16, 20, start=20, bold=True, family=family)
         _draw_centered(draw, cx, cy + 24, unit, ufont, ucolor)
     else:
-        vfont = _font(draw, value + unit, vsize, inner + 16, 40, start=34, bold=True)
+        vfont = _font(draw, value + unit, vsize, inner + 16, 40, start=34, bold=True, family=family)
         _draw_centered(draw, cx, cy, value + unit, vfont, vcolor)
     if label:
         if "\n" in label:
             top, bottom = cy + r + 8, TUBE_H - 8
-            lfont = _font(draw, label, lsize, TUBE_W - 8, bottom - top, start=22)
+            lfont = _font(draw, label, lsize, TUBE_W - 8, bottom - top, start=22, family=family)
             _draw_centered(draw, cx, (top + bottom) / 2, label, lfont, lcolor)
         else:
-            _draw_centered(draw, cx, cy + r + 18, label, fonts.load_font(lsize or 16), lcolor)
+            _draw_centered(draw, cx, cy + r + 18, label, fonts.load_font(lsize or 16, family=family), lcolor)
     return img
 
 
@@ -456,7 +473,8 @@ def draw_bar(w: dict, ctx: RenderContext, bg) -> Image.Image:
     draw = ImageDraw.Draw(img)
     color = parse_color(w.get("color"), CLAUDE_ORANGE)
     frac = _gauge_fraction(w)
-    extra = _bottom_label(draw, w, 16, TUBE_H - 30, DEFAULT_COLOR)
+    family = ctx.font_family(w)
+    extra = _bottom_label(draw, w, 16, TUBE_H - 30, DEFAULT_COLOR, family)
     x0, x1 = 30, TUBE_W - 30
     y0, y1 = 24, TUBE_H - 56 - extra
     draw.rectangle([x0, y0, x1, y1], outline=TRACK_COLOR, width=6)
@@ -464,7 +482,7 @@ def draw_bar(w: dict, ctx: RenderContext, bg) -> Image.Image:
     if fill_h > 0:
         draw.rectangle([x0, y1 - fill_h, x1, y1], fill=color)
     value = _str(w.get("value")) + _str(w.get("unit"))
-    vfont = _font(draw, value, _size(w.get("value_size")), TUBE_W - 16, 40, start=30, bold=True)
+    vfont = _font(draw, value, _size(w.get("value_size")), TUBE_W - 16, 40, start=30, bold=True, family=family)
     _draw_centered(draw, TUBE_W // 2, (y0 + y1) // 2, value, vfont,
                    parse_color(w.get("value_color"), DEFAULT_COLOR))
     return img
@@ -488,12 +506,13 @@ def draw_icon(w: dict, ctx: RenderContext, bg) -> Image.Image:
     draw = ImageDraw.Draw(img)
     color = parse_color(w.get("color"), CLAUDE_ORANGE)
     text = _str(w.get("text"))
+    family = ctx.font_family(w)
     # With text below, the icon sits in the upper part; on its own it is centred and a bit bigger
     cy = 88 if text else TUBE_H // 2
     size = _size(w.get("icon_size")) or (96 if text else 120)
     _draw_mdi(draw, TUBE_W // 2, cy, _str(w.get("icon")), size, color)
     if text:
-        tfont = _font(draw, text, _size(w.get("text_size")), TUBE_W - 12, 60, start=24)
+        tfont = _font(draw, text, _size(w.get("text_size")), TUBE_W - 12, 60, start=24, family=family)
         _draw_centered(draw, TUBE_W // 2, 170, text, tfont,
                        parse_color(w.get("text_color"), DEFAULT_COLOR))
     return img
@@ -669,14 +688,17 @@ ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")
 Box = tuple[int, int, int, int]
 
 
-def _item_text(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
+def _item_text(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict,
+               cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
     text = _str(it.get("text"))
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
     align = str(it.get("align") or "center").lower()
     bold = str(it.get("weight") or "").lower() == "bold"
-    max_w = int(_num(it.get("width"), TUBE_W - 8))
+    fam = it.get("font")
+    family = fam if isinstance(fam, str) and fam and fam != "default" else default_family
+    max_w = int(_num(it.get("width"), cw - 8))
     max_h = int(_num(it.get("height"), 60))
-    font = _font(draw, text, _size(it.get("size")), max_w, max_h, start=200, bold=bold)
+    font = _font(draw, text, _size(it.get("size")), max_w, max_h, start=200, bold=bold, family=family)
     if not text:
         return (int(x) - 6, int(y) - 6, int(x) + 6, int(y) + 6)
     return _draw_centered(draw, x, y, text, font, parse_color(it.get("color"), DEFAULT_COLOR), align)
@@ -687,8 +709,9 @@ def _no_track(track: Any) -> bool:
     return isinstance(track, str) and track.strip().lower() == "none"
 
 
-def _item_ring(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
+def _item_ring(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict,
+               cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
     r = max(4.0, _num(it.get("radius"), 50))
     width = max(1.0, min(r, _num(it.get("thickness"), 10)))
     track = it.get("track")
@@ -698,8 +721,9 @@ def _item_ring(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
                      start=_num(it.get("start"), -90), sweep=_num(it.get("sweep"), 360))
 
 
-def _item_bar(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
+def _item_bar(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict,
+              cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
     bw, bh = max(2.0, _num(it.get("width"), 100)), max(2.0, _num(it.get("height"), 14))
     x0, y0, x1, y1 = round(x - bw / 2), round(y - bh / 2), round(x + bw / 2), round(y + bh / 2)
     radius = int(max(0, min(min(x1 - x0, y1 - y0) / 2, _num(it.get("radius"), min(bw, bh) / 2))))
@@ -727,14 +751,16 @@ def _item_bar(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
     return (x0, y0, x1, y1)
 
 
-def _item_icon(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
+def _item_icon(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict,
+               cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
     return _draw_mdi(draw, x, y, _str(it.get("icon")), _size(it.get("size")) or 64,
                      parse_color(it.get("color"), CLAUDE_ORANGE))
 
 
-def _item_rect(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
+def _item_rect(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict,
+               cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
     bw, bh = max(1.0, _num(it.get("width"), 100)), max(1.0, _num(it.get("height"), 2))
     x0, y0, x1, y1 = round(x - bw / 2), round(y - bh / 2), round(x + bw / 2), round(y + bh / 2)
     radius = int(max(0, min(min(x1 - x0, y1 - y0) / 2, _num(it.get("radius"), 0))))
@@ -743,10 +769,11 @@ def _item_rect(img: Image.Image, draw: ImageDraw.ImageDraw, it: dict) -> Box:
     return (x0, y0, x1, y1)
 
 
-async def _item_image(img: Image.Image, it: dict, ctx: RenderContext, bg) -> Box:
-    x, y = _num(it.get("x"), TUBE_W / 2), _num(it.get("y"), TUBE_H / 2)
-    bw = int(max(1, min(TUBE_W * 2, _num(it.get("width"), TUBE_W))))
-    bh = int(max(1, min(TUBE_H * 2, _num(it.get("height"), TUBE_H))))
+async def _item_image(img: Image.Image, it: dict, ctx: RenderContext, bg,
+                      cw: int = TUBE_W, ch: int = TUBE_H, default_family: str | None = None) -> Box:
+    x, y = _num(it.get("x"), cw / 2), _num(it.get("y"), ch / 2)
+    bw = int(max(1, min(cw * 2, _num(it.get("width"), cw))))
+    bh = int(max(1, min(ch * 2, _num(it.get("height"), ch))))
     x0, y0 = round(x - bw / 2), round(y - bh / 2)
     source = str(it.get("source") or "")
     if source == "builtin:claude":
@@ -764,35 +791,44 @@ _ITEM_DRAW = {"text": _item_text, "ring": _item_ring, "bar": _item_bar, "icon": 
               "rect": _item_rect}
 
 
-async def draw_custom(w: dict, ctx: RenderContext, bg) -> Image.Image:
-    """Items drawn in order (later ones on top), each placed by its own x/y in tube pixels
-    (0,0 = top left, the tube is 135 x 240). An item that fails shows a small red "!"."""
-    bg = parse_color(w.get("background"), bg)
-    img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+async def draw_items(items: object, ctx: RenderContext, img: Image.Image, bg,
+                     key: str, cw: int = TUBE_W, ch: int = TUBE_H) -> None:
+    """Draw a list of custom items (in order, later ones on top) onto an existing
+    cw x ch image, each placed by its own x/y in canvas pixels (0,0 = top left).
+    An item that fails shows a small red "!". Records the boxes under `key` when
+    ctx.record_boxes is set."""
     draw = ImageDraw.Draw(img)
-    key = str(w.get("_key") or "custom")
     boxes: list[Box] = []
-    items = w.get("items")
     for i, it in enumerate(items if isinstance(items, list) else []):
         try:
             if not isinstance(it, dict):
                 raise ValueError("item must be a mapping")
             kind = it.get("type")
             if kind == "image":
-                box = await _item_image(img, it, ctx, bg)
+                box = await _item_image(img, it, ctx, bg, cw, ch)
                 draw = ImageDraw.Draw(img)
             elif kind in _ITEM_DRAW:
-                box = _ITEM_DRAW[kind](img, draw, it)
+                box = _ITEM_DRAW[kind](img, draw, it, cw, ch, ctx.default_font)
             else:
                 raise ValueError(f"unknown item type {kind!r} (expected one of {', '.join(ITEM_TYPES)})")
         except Exception as err:
             ctx.note_error(f"{key} item {i}", str(err))
-            x = _num(it.get("x"), TUBE_W / 2) if isinstance(it, dict) else TUBE_W / 2
-            y = _num(it.get("y"), TUBE_H / 2) if isinstance(it, dict) else TUBE_H / 2
+            x = _num(it.get("x"), cw / 2) if isinstance(it, dict) else cw / 2
+            y = _num(it.get("y"), ch / 2) if isinstance(it, dict) else ch / 2
             box = _draw_centered(draw, x, y, "!", fonts.load_font(24, bold=True), (255, 80, 80))
         boxes.append(tuple(int(v) for v in box))
     if ctx.record_boxes is not None:
         ctx.record_boxes[key] = boxes
+
+
+async def draw_custom(w: dict, ctx: RenderContext, bg, width: int = TUBE_W, height: int = TUBE_H) -> Image.Image:
+    """Items drawn in order (later ones on top), each placed by its own x/y in canvas pixels
+    (0,0 = top left; a tube is 135 x 240, a canvas screen 810 x 240). An item that fails
+    shows a small red "!"."""
+    bg = parse_color(w.get("background"), bg)
+    img = Image.new("RGB", (width, height), bg)
+    key = str(w.get("_key") or "custom")
+    await draw_items(w.get("items"), ctx, img, bg, key, width, height)
     return img
 
 
@@ -812,6 +848,7 @@ async def draw_sparkline(w: dict, ctx: RenderContext, bg) -> Image.Image:
             values.append(v)
     pad = 10
     top, bottom = 34, TUBE_H - 34
+    family = ctx.font_family(w)
     if values:
         lo, hi = min(values), max(values)
         if hi - lo < 1e-9:
@@ -827,11 +864,11 @@ async def draw_sparkline(w: dict, ctx: RenderContext, bg) -> Image.Image:
         draw.ellipse([pts[-1][0] - 4, pts[-1][1] - 4, pts[-1][0] + 4, pts[-1][1] + 4],
                      fill=color)
         latest = f"{values[-1]:g}" + str(w.get("unit") or "")
-        vfont = fonts.load_font(20, bold=True)
+        vfont = fonts.load_font(20, bold=True, family=family)
         _draw_centered(draw, TUBE_W // 2, 20, latest, vfont, DEFAULT_COLOR)
     else:
         _draw_centered(draw, TUBE_W // 2, (top + bottom) // 2, "no data",
-                       fonts.load_font(16), DEFAULT_COLOR)
+                       fonts.load_font(16, family=family), DEFAULT_COLOR)
     return img
 
 
@@ -894,12 +931,13 @@ async def draw_graph(w: dict, ctx: RenderContext, bg) -> Image.Image:
     top = 46 if (label or show_value) else 16
     bottom = TUBE_H - 14
     left, right = 26, TUBE_W - 8     # left margin leaves room for the axis values
+    family = ctx.font_family(w)
     if label:
-        _draw_centered(draw, TUBE_W // 2, 14, label, fonts.load_font(14),
+        _draw_centered(draw, TUBE_W // 2, 14, label, fonts.load_font(14, family=family),
                        parse_color(w.get("label_color"), DEFAULT_COLOR))
     if not values:
         _draw_centered(draw, TUBE_W // 2, (top + bottom) // 2, "no data",
-                       fonts.load_font(16), DEFAULT_COLOR)
+                       fonts.load_font(16, family=family), DEFAULT_COLOR)
         return img
 
     lo = _parse_number(w.get("min"))
@@ -918,7 +956,7 @@ async def draw_graph(w: dict, ctx: RenderContext, bg) -> Image.Image:
 
     # faint baseline and the axis values small at the left
     draw.line([(left, bottom), (right, bottom)], fill=(50, 50, 50), width=1)
-    axis_font = fonts.load_font(11)
+    axis_font = fonts.load_font(11, family=family)
     axis_color = (150, 150, 150)
     _draw_centered(draw, 2, top + 6, f"{hi:g}", axis_font, axis_color, align="left")
     _draw_centered(draw, 2, bottom - 6, f"{lo:g}", axis_font, axis_color, align="left")
@@ -931,7 +969,7 @@ async def draw_graph(w: dict, ctx: RenderContext, bg) -> Image.Image:
         means = [sum(b) / len(b) for b in buckets if b]
         if not means:
             _draw_centered(draw, TUBE_W // 2, (top + bottom) // 2, "no data",
-                           fonts.load_font(16), DEFAULT_COLOR)
+                           fonts.load_font(16, family=family), DEFAULT_COLOR)
             return img
         bw = (right - left) / n
         for i, m in enumerate(means):
@@ -951,7 +989,7 @@ async def draw_graph(w: dict, ctx: RenderContext, bg) -> Image.Image:
 
     if show_value:
         latest = f"{values[-1]:g}" + unit
-        vfont = _font(draw, latest, _size(w.get("value_size")), TUBE_W - 8, 34, start=30, bold=True)
+        vfont = _font(draw, latest, _size(w.get("value_size")), TUBE_W - 8, 34, start=30, bold=True, family=family)
         _draw_centered(draw, TUBE_W // 2, top - 22, latest, vfont,
                        parse_color(w.get("value_color"), DEFAULT_COLOR))
     return img
@@ -1033,6 +1071,7 @@ def draw_progress(w: dict, ctx: RenderContext, bg) -> Image.Image:
     color = parse_color(w.get("color"), CLAUDE_ORANGE)
     track = parse_color(w.get("track"), (0x33, 0x33, 0x33))
     frac = _gauge_fraction(w)
+    family = ctx.font_family(w)
     label = _str(w.get("label"))
     r = 62
     width = 12
@@ -1040,14 +1079,14 @@ def draw_progress(w: dict, ctx: RenderContext, bg) -> Image.Image:
     # 270 degrees open at the bottom: from 135 deg to 405 deg (0 = three o'clock, clockwise)
     _draw_arc(img, cx, cy, r, width, frac, color, track, start=135, sweep=270)
     pct = f"{round(frac * 100)}%"
-    vfont = _font(draw, pct, _size(w.get("value_size")), 2 * (r - width), 44, start=40, bold=True)
+    vfont = _font(draw, pct, _size(w.get("value_size")), 2 * (r - width), 44, start=40, bold=True, family=family)
     _draw_centered(draw, cx, cy - 6, pct, vfont, parse_color(w.get("value_color"), DEFAULT_COLOR))
     if label:
-        _draw_centered(draw, cx, cy + 22, label, fonts.load_font(_size(w.get("label_size")) or 16),
+        _draw_centered(draw, cx, cy + 22, label, fonts.load_font(_size(w.get("label_size")) or 16, family=family),
                        parse_color(w.get("label_color"), DEFAULT_COLOR))
     eta = format_eta(_str(w.get("finish")), datetime.now(), str(w.get("eta_format") or "remaining"))
     if eta:
-        _draw_centered(draw, cx, TUBE_H - 26, eta, fonts.load_font(18, bold=True),
+        _draw_centered(draw, cx, TUBE_H - 26, eta, fonts.load_font(18, bold=True, family=family),
                        parse_color(w.get("eta_color"), color))
     return img
 
@@ -1087,12 +1126,13 @@ def draw_analog_clock(w: dict, ctx: RenderContext, bg) -> Image.Image:
     if isinstance(seconds, str):
         seconds = seconds.strip().lower() not in ("false", "0", "no", "off")
     numerals = bool(w.get("numerals", False))
+    family = ctx.font_family(w) if ctx is not None else w.get("font")
     now = datetime.now(_tzinfo(w.get("tz")))
     cx, cy = TUBE_W * ss / 2, 104 * ss
     r = 78 * ss
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=face, outline=color, width=2 * ss)
     # ticks (or numerals at 12/3/6/9)
-    num_font = fonts.load_font(20 * ss, bold=True)
+    num_font = fonts.load_font(20 * ss, bold=True, family=family)
     for i in range(12):
         a = math.radians(i * 30)
         if numerals and i % 3 == 0:
@@ -1121,7 +1161,7 @@ def draw_analog_clock(w: dict, ctx: RenderContext, bg) -> Image.Image:
         hand(second_deg, r * 0.86, 1.5, accent)
     label = _str(w.get("label"))
     if label:
-        _draw_centered(draw, cx, 208 * ss, label, fonts.load_font(16 * ss),
+        _draw_centered(draw, cx, 208 * ss, label, fonts.load_font(16 * ss, family=family),
                        parse_color(w.get("label_color"), DEFAULT_COLOR))
     return img.resize((TUBE_W, TUBE_H), Image.LANCZOS)
 
@@ -1180,11 +1220,12 @@ async def draw_weather(w: dict, ctx: RenderContext, bg) -> Image.Image:
     if show not in ("today", "now"):
         show = "today"
     label = _str(w.get("label"))
+    family = ctx.font_family(w)
     if ctx.ha is None:
         raise ValueError("no HA client for weather")
     st = await ctx.ha.state(entity)
     if not st:
-        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2, "no data", fonts.load_font(16), DEFAULT_COLOR)
+        _draw_centered(draw, TUBE_W // 2, TUBE_H // 2, "no data", fonts.load_font(16, family=family), DEFAULT_COLOR)
         return img
     condition = str(st.get("state") or "").strip().lower()
     icon = WEATHER_ICONS.get(condition, WEATHER_ICONS["cloudy"])
@@ -1194,10 +1235,10 @@ async def draw_weather(w: dict, ctx: RenderContext, bg) -> Image.Image:
     _draw_mdi(draw, TUBE_W // 2, 62, icon, 84, icon_color)
     if temp is not None:
         text = f"{temp:g}{unit if unit != '°' else '°'}"
-        tfont = _font(draw, text, _size(w.get("temp_size")), TUBE_W - 8, 60, start=44, bold=True)
+        tfont = _font(draw, text, _size(w.get("temp_size")), TUBE_W - 8, 60, start=44, bold=True, family=family)
         _draw_centered(draw, TUBE_W // 2, 140, text, tfont, color)
     else:
-        _draw_centered(draw, TUBE_W // 2, 140, "--", fonts.load_font(36, bold=True), color)
+        _draw_centered(draw, TUBE_W // 2, 140, "--", fonts.load_font(36, bold=True, family=family), color)
     if show == "today":
         forecast = await _daily_forecast(entity, ctx)
         today = None
@@ -1214,10 +1255,10 @@ async def draw_weather(w: dict, ctx: RenderContext, bg) -> Image.Image:
             lo = _parse_number(today.get("templow"))
             if hi is not None or lo is not None:
                 hl = f"H {hi:g}{unit if hi is not None else ''} L {lo:g}{unit if lo is not None else ''}".replace("None", "--")
-                _draw_centered(draw, TUBE_W // 2, 178, hl, fonts.load_font(18),
+                _draw_centered(draw, TUBE_W // 2, 178, hl, fonts.load_font(18, family=family),
                                parse_color(w.get("hl_color"), DEFAULT_COLOR))
     if label:
-        _draw_centered(draw, TUBE_W // 2, TUBE_H - 22, label, fonts.load_font(16),
+        _draw_centered(draw, TUBE_W // 2, TUBE_H - 22, label, fonts.load_font(16, family=family),
                        parse_color(w.get("label_color"), DEFAULT_COLOR))
     return img
 
@@ -1229,7 +1270,7 @@ async def draw_weather(w: dict, ctx: RenderContext, bg) -> Image.Image:
 TICKER_GAP = 60   # px of empty band between two loops of the text
 
 
-def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, int, int]]:
+def ticker_band(w: dict, offset: float, family: str | None = None) -> tuple[Image.Image, tuple[int, int, int, int]]:
     """The ticker's band image at scroll `offset` px, and its (x, y, w, h) in the tube.
 
     `w` is the resolved widget dict. The band is TUBE_W x (size + 12) centred at y; the
@@ -1243,7 +1284,7 @@ def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, in
     draw = ImageDraw.Draw(band)
     text = _str(w.get("text"))
     color = parse_color(w.get("color"), DEFAULT_COLOR)
-    font = fonts.load_font(size, bold=True)
+    font = fonts.load_font(size, bold=True, family=family)
     tw = _text_size(draw, text, font)[0] if text else 0
     if not text:
         return band, (0, top, TUBE_W, band_h)
@@ -1260,7 +1301,7 @@ def ticker_band(w: dict, offset: float) -> tuple[Image.Image, tuple[int, int, in
     return band, (0, top, TUBE_W, band_h)
 
 
-def ticker_cycle(w: dict) -> float:
+def ticker_cycle(w: dict, family: str | None = None) -> float:
     """Seconds for one full loop of the ticker: (text width + gap) / speed.
     0 when the text fits the tube (it is centred and doesn't scroll)."""
     speed = _num(w.get("speed"), 40.0)
@@ -1268,7 +1309,7 @@ def ticker_cycle(w: dict) -> float:
         return 0.0
     probe = Image.new("RGB", (1, 1))
     size = _size(w.get("size")) or 28
-    tw = _text_size(ImageDraw.Draw(probe), _str(w.get("text")), fonts.load_font(size, bold=True))[0]
+    tw = _text_size(ImageDraw.Draw(probe), _str(w.get("text")), fonts.load_font(size, bold=True, family=family))[0]
     if tw <= TUBE_W:
         return 0.0
     return (tw + TICKER_GAP) / speed
@@ -1283,6 +1324,7 @@ def draw_ticker(w: dict, ctx: RenderContext, bg) -> Image.Image:
     if w.get("background") is None:
         w["background"] = "#%02X%02X%02X" % tuple(max(0, min(255, int(c))) for c in tuple(bg))
     img = Image.new("RGB", (TUBE_W, TUBE_H), bg)
+    family = ctx.font_family(w)
     label = _str(w.get("label"))
     if label:
         draw = ImageDraw.Draw(img)
@@ -1290,9 +1332,9 @@ def draw_ticker(w: dict, ctx: RenderContext, bg) -> Image.Image:
         size = _size(w.get("size")) or 28
         band_h = size + 12
         top = max(0, min(TUBE_H - band_h, y - band_h // 2))
-        _draw_centered(draw, TUBE_W // 2, max(12, top - 12), label, fonts.load_font(14),
+        _draw_centered(draw, TUBE_W // 2, max(12, top - 12), label, fonts.load_font(14, family=family),
                        parse_color(w.get("label_color"), DEFAULT_COLOR))
-    band, (x, y, bw, bh) = ticker_band(w, 0)
+    band, (x, y, bw, bh) = ticker_band(w, 0, family)
     img.paste(band, (x, y))
     return img
 
@@ -1347,6 +1389,25 @@ async def render_screen(screen: Screen, ctx: RenderContext) -> Image.Image:
                 strip = _placed(await _fetch_image(source, ctx), w, STRIP_W, STRIP_H, bg)
         except Exception as err:
             ctx.note_error(f"{screen.name}:strip", str(err))
+            strip = Image.new("RGB", (STRIP_W, STRIP_H), bg)
+            _draw_error(strip)
+        return strip
+
+    if screen.canvas is not None:
+        # A free design across all six tubes: the same items a custom tube is made
+        # of, drawn straight into the 810x240 strip at strip coordinates
+        key = f"{screen.name}:canvas"
+        failed = _failed_templates(screen.canvas, resolved)
+        if failed:
+            ctx.note_error(key, f"template failed for {failed[0][0]}: {failed[0][1]}")
+            return _draw_error(strip)
+        w = _resolved_widget(screen.canvas, resolved)
+        try:
+            cbg = parse_color(w.get("background"), bg)
+            strip = Image.new("RGB", (STRIP_W, STRIP_H), cbg)
+            await draw_items(w.get("items"), ctx, strip, cbg, key, STRIP_W, STRIP_H)
+        except Exception as err:
+            ctx.note_error(key, str(err))
             strip = Image.new("RGB", (STRIP_W, STRIP_H), bg)
             _draw_error(strip)
         return strip
@@ -1446,8 +1507,8 @@ async def resolved_tubes(screen: Screen, ctx: RenderContext) -> list[dict | None
     """The screen's six tube widget dicts with their templates resolved exactly as
     render_screen does it (same resolve_templates + _resolved_widget pass), for
     consumers that need the widgets themselves (e.g. animate.py's animators).
-    Strip screens have no per-tube widgets: a list of six None."""
-    if screen.strip is not None:
+    Strip and canvas screens have no per-tube widgets: a list of six None."""
+    if screen.strip is not None or screen.canvas is not None:
         return [None] * 6
     resolved = await resolve_templates(screen, ctx)
     return [_resolved_widget(w, resolved) for w in screen.tubes]
@@ -1473,14 +1534,17 @@ class _TickerAnimator:
     FRAME = 0.1
 
     def interval(self, w: dict) -> float:
-        return self.FRAME if ticker_cycle(w) > 0 else 0.0
+        return self.FRAME if ticker_cycle(w, w.get("font") if isinstance(w.get("font"), str) else None) > 0 else 0.0
 
     async def frame(self, w: dict, ctx, t: float, bg):
         w = dict(w)
         if w.get("background") is None and bg is not None:
             w["background"] = _bg_hex(bg)
         speed = _num(w.get("speed"), 40.0)
-        return ticker_band(w, t * speed)
+        fam = w.get("font") if isinstance(w.get("font"), str) else None
+        if fam is None and ctx is not None:
+            fam = ctx.default_font
+        return ticker_band(w, t * speed, fam)
 
 
 class _AnalogClockAnimator:

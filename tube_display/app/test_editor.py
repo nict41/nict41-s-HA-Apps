@@ -845,3 +845,174 @@ def test_api_mirror_ingress_only(tmp_path):
             assert (await client.delete("/api/mirror", json={})).status == 403
             assert (await client.post("/api/mirror/end", json={})).status == 403
     asyncio.run(wrapper())
+
+
+# ----------------------------------------------------------------------
+# font library: api/fonts, api/font_preview, and save round-trips
+# ----------------------------------------------------------------------
+
+def _test_ttf() -> str | None:
+    import os
+    env = os.environ.get("TD_TEST_FONT")
+    for p in (env, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+              "/usr/share/fonts/dejavu/DejaVuSans.ttf", "/tmp/td/fonts/DejaVuSans.ttf"):
+        if p and os.path.isfile(p):
+            return p
+    return None
+
+
+def test_api_fonts_lists_bundled_families(tmp_path):
+    async def check(client, screens_file):
+        body = await (await client.get("/api/fonts")).json()
+        assert body["files"] == []
+        ids = [b["id"] for b in body["bundled"]]
+        assert ids[0] == "default"
+        assert "bebas-neue" in ids and "orbitron" in ids and "audiowide" in ids
+        names = {b["id"]: b["name"] for b in body["bundled"]}
+        assert names["bebas-neue"] == "Bebas Neue"
+    _with_client(tmp_path, check)
+
+
+def test_font_upload_rejects_non_fonts(tmp_path):
+    async def check(client, screens_file):
+        import aiohttp
+        form = aiohttp.FormData()
+        form.add_field("file", b"not a font", filename="x.ttf", content_type="font/ttf")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+        form = aiohttp.FormData()
+        form.add_field("file", _png_bytes(), filename="x.png", content_type="image/png")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+        form = aiohttp.FormData()                      # no file part at all
+        form.add_field("other", "x")
+        assert (await client.post("/api/fonts", data=form)).status == 400
+    _with_client(tmp_path, check)
+
+
+def test_font_upload_list_get_delete_preview(tmp_path):
+    src = _test_ttf()
+    if src is None:
+        pytest.skip("no .ttf available in this environment")
+    async def check(client, screens_file):
+        import aiohttp
+        data = open(src, "rb").read()
+        form = aiohttp.FormData()
+        form.add_field("file", data, filename="My Font!.ttf", content_type="font/ttf")
+        resp = await client.post("/api/fonts", data=form)
+        assert resp.status == 200, await resp.text()
+        body = await resp.json()
+        assert body["name"] == "My_Font.ttf" and body["family"] == "file:My_Font.ttf"
+        fonts_dir = os.path.join(os.path.dirname(screens_file), "fonts")
+        assert os.path.isfile(os.path.join(fonts_dir, "My_Font.ttf"))
+        # listed with its size, and downloadable
+        listing = await (await client.get("/api/fonts")).json()
+        assert listing["files"] == [{"name": "My_Font.ttf", "size": len(data)}]
+        assert (await client.get("/api/fonts/My_Font.ttf")).status == 200
+        assert (await client.get("/api/fonts/..%2Fscreens.yaml")).status == 404
+        # preview: a PNG, white text on dark, cached (same bytes twice)
+        resp = await client.get("/api/font_preview?font=file:My_Font.ttf&text=Ag&size=28")
+        assert resp.status == 200 and resp.content_type == "image/png"
+        png1 = await resp.read()
+        resp = await client.get("/api/font_preview?font=file:My_Font.ttf&text=Ag&size=28")
+        assert await resp.read() == png1
+        img = Image.open(io.BytesIO(png1))
+        assert img.size[1] >= 28
+        assert any(img.convert("RGB").getpixel((x, y)) == (255, 255, 255)
+                   for x in range(img.width) for y in range(img.height))
+        # bundled family preview works too (falls back to the default font here)
+        resp = await client.get("/api/font_preview?font=bebas-neue&text=Ag&size=28")
+        assert resp.status == 200 and resp.content_type == "image/png"
+        # delete
+        assert (await client.delete("/api/fonts/My_Font.ttf")).status == 200
+        assert not os.path.exists(os.path.join(fonts_dir, "My_Font.ttf"))
+        assert (await client.get("/api/fonts")).json() and (await (await client.get("/api/fonts")).json())["files"] == []
+        assert (await client.delete("/api/fonts/My_Font.ttf")).status == 404
+    _with_client(tmp_path, check)
+
+
+def test_font_endpoints_ingress_only(tmp_path):
+    async def wrapper():
+        screens_file = _write(tmp_path)
+        app = editor_mod.create_app(StubController(), StubHa(), screens_file, test_allow_local=False)
+        async with TestClient(TestServer(app)) as client:
+            assert (await client.get("/api/fonts")).status == 403
+            assert (await client.get("/api/font_preview?font=default")).status == 403
+            assert (await client.get("/api/fonts/x.ttf")).status == 403
+            assert (await client.delete("/api/fonts/x.ttf")).status == 403
+    asyncio.run(wrapper())
+
+
+def test_preview_canvas_screen_returns_item_boxes(tmp_path):
+    async def check(client, screens_file):
+        import json
+        screen = {"canvas": {"background": "#000000", "items": [
+            {"type": "rect", "x": 607, "y": 200, "width": 380, "height": 12, "color": "#0000FF"},
+            {"type": "text", "x": 202, "y": 120, "text": "21.5", "size": 60},
+        ]}}
+        resp = await client.post("/api/preview", json={"screen": screen})
+        assert resp.status == 200 and resp.content_type == "image/png"
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (STRIP_W, STRIP_H)
+        boxes = json.loads(resp.headers["X-Item-Boxes"])
+        assert boxes[0] == [417, 194, 797, 206]
+        # a tube param on a canvas screen still crops, but boxes stay the canvas ones
+        resp = await client.post("/api/preview", json={"screen": screen, "tube": 4})
+        assert resp.status == 200
+        img = Image.open(io.BytesIO(await resp.read()))
+        assert img.size == (TUBE_W, TUBE_H)
+    _with_client(tmp_path, check)
+
+
+def test_preview_honours_top_level_font(tmp_path):
+    """The editor posts the file's top-level `font`; the preview uses it as the
+    context default (spy on RenderContext.font_family via a widget without font)."""
+    async def check(client, screens_file):
+        import render as render_mod
+        seen = []
+        orig = render_mod.RenderContext.font_family
+
+        def spy(self, w):
+            fam = orig(self, w)
+            seen.append(fam)
+            return fam
+
+        render_mod.RenderContext.font_family = spy
+        try:
+            screen = {"tubes": [{"type": "text", "text": "hi", "size": 20}] + [{"type": "blank"}] * 5}
+            resp = await client.post("/api/preview", json={"screen": screen, "font": "orbitron"})
+            assert resp.status == 200
+            assert "orbitron" in seen
+            seen.clear()
+            resp = await client.post("/api/preview", json={"screen": screen, "font": "default"})
+            assert resp.status == 200
+            assert seen and all(f is None for f in seen)
+        finally:
+            render_mod.RenderContext.font_family = orig
+    _with_client(tmp_path, check)
+
+
+def test_save_round_trip_keeps_font_and_canvas(tmp_path):
+    async def check(client, screens_file):
+        cfg = await (await client.get("/api/config")).json()
+        data = cfg["data"]
+        data["font"] = "bebas-neue"                       # new top-level key
+        data["screens"]["wide"] = {"canvas": {"background": "#000000", "items": [
+            {"type": "text", "text": "21.5°", "x": 202, "y": 120, "size": 120, "font": "bebas-neue"},
+            {"type": "bar", "value": "60", "max": 100, "x": 607, "y": 200, "width": 380, "height": 12},
+        ]}}
+        data["rotation"].append("wide")
+        resp = await client.post("/api/save", json={"data": data, "mtime": cfg["mtime"]})
+        assert resp.status == 200, await resp.text()
+        text = open(screens_file, encoding="utf-8").read()
+        assert "# My Tube Display screens - keep this comment!" in text   # comments kept
+        loaded = yaml.safe_load(text)
+        assert loaded["font"] == "bebas-neue"
+        assert loaded["screens"]["wide"]["canvas"]["items"][0]["font"] == "bebas-neue"
+        assert loaded["screens"]["wide"]["canvas"]["items"][1]["x"] == 607
+        assert "wide" in loaded["rotation"]
+        # saving again without the font removes the key again
+        cfg = await (await client.get("/api/config")).json()
+        del cfg["data"]["font"]
+        resp = await client.post("/api/save", json={"data": cfg["data"], "mtime": cfg["mtime"]})
+        assert resp.status == 200
+        assert "font:" not in open(screens_file, encoding="utf-8").read().split("screens:")[0]
+    _with_client(tmp_path, check)

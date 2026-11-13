@@ -37,6 +37,7 @@ from PIL import Image
 import night as night_mod
 import render as render_mod
 import animate as animate_mod
+import fonts
 from clock import DISPLAY_CLOCK, DISPLAY_PANELS, ClockPusher
 from rgb565 import STRIP_H, STRIP_W, TUBE_COUNT, TUBE_H, TUBE_W, image_to_rgb565, strip_to_tube_bytes
 from screens import (CLOCK_ENTRY, DEFAULT_TRANSITION, DEFAULT_TRANSITION_DELAY, Screen,
@@ -79,6 +80,7 @@ class Controller:
         self._renderer = renderer or (ha.render_template if ha else None)
         self._ctx = render_mod.RenderContext(self._renderer, session=session, ha=ha)
         self._ctx.images_dir = os.path.join(os.path.dirname(settings.screens_file) or ".", "images")
+        fonts.set_user_dir(os.path.join(os.path.dirname(settings.screens_file) or ".", "fonts"))
 
         # which clock this controller drives (None -> the primary/legacy one)
         self.clock = clock if clock is not None else settings.primary_clock
@@ -167,6 +169,7 @@ class Controller:
             self.last_error = f"screens file: {err}"
             return self._config
         self._config = cfg
+        self._ctx.default_font = cfg.font
         self.config_errors = list(cfg.errors)
         for e in cfg.errors:
             _LOG.error("Screens file: %s (screen skipped)", e)
