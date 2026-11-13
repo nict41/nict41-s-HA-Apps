@@ -908,6 +908,22 @@ def test_send_screen_one_batch_with_the_transition():
 
 
 @pytestmark_pil
+def test_send_screen_flip_sends_duration_and_gap():
+    async def check(pusher, clock):
+        payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]
+        ok = await pusher.send_screen(payloads, (), "flip", [0, 1, 2, 3, 4, 5],
+                                      duration_ms=450, gap_ms=80)
+        assert ok is True and len(clock.batches) == 1
+        assert clock.batch_params[0] == {"transition": "flip", "order": "0,1,2,3,4,5",
+                                         "interrupt": "1", "duration": "450", "gap": "80"}
+        # a clock without flip can't
+        pusher.transitions = {"wipe", "cascade"}
+        assert await pusher.send_screen(payloads, (), "flip", list(range(6))) is None
+    _run(_with_fake_clock(FakeClock(batch=True, held=40000,
+                                    transitions=["wipe", "cascade", "flip"]), check))
+
+
+@pytestmark_pil
 def test_send_screen_none_when_the_clock_cant():
     async def check(pusher, clock):
         payloads = [_flat_payload(i) for i in range(TUBE_COUNT)]

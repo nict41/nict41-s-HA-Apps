@@ -124,6 +124,10 @@
     "transitions_need_2_5": {
       "title": "Clock {clock} cannot play transitions itself",
       "description": "A screen uses a transition, but this clock's firmware cannot play transitions itself, so the app plays a simpler one instead. Update the clock to HA Tubes 2.5 or newer (Settings > Devices > the clock's Firmware update)."
+    },
+    "flip_needs_2_6": {
+      "title": "Clock {clock} cannot flip",
+      "description": "A screen uses a flip transition, but this clock's firmware cannot flip, so it plays a wipe instead. Update the clock to HA Tubes 2.6 or newer (Settings > Devices > the clock's Firmware update)."
     }
   }
 }

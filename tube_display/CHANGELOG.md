@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+- **Flip transition** (HA Tubes 2.6): `flip`, `flip_right` and `flip_center` flip the tubes like a split-flap display, each starting a moment after the one before it. `transition_duration` is each tube's flip and `transition_delay` the time between their starts; both can be set in the editor, and **Play on clock** tries it straight away. On HA Tubes 2.5 the clock plays a wipe instead, and a warning in Repairs says the clock needs updating (the integration is updated to 1.3.0 for that warning, which Home Assistant loads at its next restart).
+
 ## 1.2.0
 
 - **Transition settings in the editor:** delay (cascades) and duration (wipes) next to the transition, and **Play on clock** to try a screen's transition straight away, without saving.

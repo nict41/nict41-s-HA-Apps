@@ -16,4 +16,5 @@ SERVICE_SET_ROTATION = "set_rotation"
 # screens use that the clock's firmware cannot do); each becomes a Repairs issue
 NOTICE_GIF = "gif_needs_2_4"
 NOTICE_TRANSITIONS = "transitions_need_2_5"
-NOTICE_CODES = (NOTICE_GIF, NOTICE_TRANSITIONS)
+NOTICE_FLIP = "flip_needs_2_6"
+NOTICE_CODES = (NOTICE_GIF, NOTICE_TRANSITIONS, NOTICE_FLIP)

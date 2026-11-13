@@ -24,7 +24,8 @@ WIDGET_TYPES = ("text", "big_number", "ring", "bar", "icon", "image", "sparkline
                 "progress", "analog_clock", "weather", "ticker", "gif", "custom", "blank")
 ITEM_TYPES = ("text", "ring", "bar", "icon", "image", "rect")   # what a custom widget is made of
 FITS = ("cover", "contain")
-TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe", "wipe_right", "wipe_center")
+TRANSITIONS = ("none", "cascade", "cascade_right", "center_out", "wipe", "wipe_right", "wipe_center",
+               "flip", "flip_right", "flip_center")
 DEFAULT_TRANSITION = "none"
 DEFAULT_TRANSITION_DELAY = 90   # ms between tubes during a transition
 DEFAULT_TRANSITION_DURATION = 500   # ms a wipe takes from start to end
@@ -118,8 +119,8 @@ class Screen:
     when: str | None = None           # HA template; skipped in rotation unless "true"
     background: str = "#000000"
     transition: str | None = None     # None -> the top-level `transition` default
-    transition_delay: int | None = None   # ms between tubes, None -> 90
-    transition_duration: int | None = None   # ms a wipe takes, None -> 500
+    transition_delay: int | None = None   # ms between tubes (a flip: between their starts), None -> 90
+    transition_duration: int | None = None   # ms a wipe takes, or each tube's flip, None -> 500
     tubes: list[dict] = field(default_factory=list)   # exactly 6 widgets
     strip: dict | None = None         # alternative: one 810x240 picture
     canvas: dict | None = None        # alternative: free design across all six tubes

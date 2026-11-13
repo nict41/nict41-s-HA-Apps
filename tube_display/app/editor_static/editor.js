@@ -1315,6 +1315,8 @@ $("defaultFont").addEventListener("change", (e) => {
 // else none
 const CASCADE_TRANSITIONS = ["cascade", "cascade_right", "center_out"];
 const WIPE_TRANSITIONS = ["wipe", "wipe_right", "wipe_center"];
+// a flip has both: each tube's flip takes the duration, and the delay is between their starts
+const FLIP_TRANSITIONS = ["flip", "flip_right", "flip_center"];
 
 function effectiveTransition(s) {
   if (!s) return "none";
@@ -1326,8 +1328,10 @@ function effectiveTransition(s) {
 function renderTransitionFields() {
   const s = curScreen();
   const t = effectiveTransition(s);
-  $("scrTransitionDelayRow").classList.toggle("hidden", !CASCADE_TRANSITIONS.includes(t));
-  $("scrTransitionDurationRow").classList.toggle("hidden", !WIPE_TRANSITIONS.includes(t));
+  $("scrTransitionDelayRow").classList.toggle("hidden",
+    !CASCADE_TRANSITIONS.includes(t) && !FLIP_TRANSITIONS.includes(t));
+  $("scrTransitionDurationRow").classList.toggle("hidden",
+    !WIPE_TRANSITIONS.includes(t) && !FLIP_TRANSITIONS.includes(t));
   $("playTransitionBtn").classList.toggle("hidden",
     state.clocks.length === 0 || t === "none");
 }
