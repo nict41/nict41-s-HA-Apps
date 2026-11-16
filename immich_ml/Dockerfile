@@ -28,12 +28,23 @@ RUN set -eu; \
 # (the venv has none), pinned by hash and without touching anything else.
 # Remove this block once an Immich release ships anyio >= 4.14.2, or it will
 # hold anyio at 4.14.2.
+#
+# The same step moves the base image's system pip (unused at runtime) from
+# 26.2.1 to 26.3: pip vendors certifi, and 26.2.1's copy (2026.6.17) still
+# trusts the compromised emSign roots (GHSA-6q48-6c7w-9gw2, CRITICAL). 26.3
+# vendors certifi 2026.10.23.
 RUN set -eu; \
     printf 'anyio==4.14.2 --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494\n' > /tmp/anyio.txt; \
     /usr/local/bin/python3 -m pip --python /opt/venv/bin/python install --no-cache-dir \
         --no-deps --require-hashes --disable-pip-version-check -r /tmp/anyio.txt; \
     rm -f /tmp/anyio.txt; \
-    /opt/venv/bin/python -c "import anyio, importlib.metadata as m; v = m.version('anyio'); assert v == '4.14.2', v; print('anyio', v)"
+    /opt/venv/bin/python -c "import anyio, importlib.metadata as m; v = m.version('anyio'); assert v == '4.14.2', v; print('anyio', v)"; \
+    printf 'pip==26.3 --hash=sha256:f3b60b20ffaadd4415ed7957212a38ac63fa4c5fa375bd0f4a797777940fad13\n' > /tmp/pip.txt; \
+    /usr/local/bin/python3 -m pip install --no-cache-dir --no-deps --require-hashes \
+        --disable-pip-version-check -r /tmp/pip.txt; \
+    rm -f /tmp/pip.txt; \
+    /usr/local/bin/python3 -m pip --version | grep -q '^pip 26\.3 '; \
+    echo "system pip: $(/usr/local/bin/python3 -m pip --version)"
 
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh

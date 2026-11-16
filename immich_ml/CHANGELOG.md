@@ -4,6 +4,7 @@
 
 - Upstream image moved to ghcr.io/immich-app/immich-machine-learning:v3.4.1-openvino (was v3.4.0-openvino).
 - Security: anyio 4.2.0 → 4.14.2 in the app's venv (CVE-2026-63374, CRITICAL, TLS certificate spoofing). Upstream main already uses 4.14.2; this patch goes once a release includes it.
+- Security: the base image's system pip 26.2.1 → 26.3, whose vendored certifi (2026.10.23) drops the compromised emSign roots (GHSA-6q48-6c7w-9gw2, CRITICAL). The app's own certifi was already current.
 
 ## v3.4.0-openvino
 
