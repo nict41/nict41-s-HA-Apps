@@ -1,5 +1,10 @@
 # Changelog
 
+## v3.4.1-openvino
+
+- Upstream image moved to ghcr.io/immich-app/immich-machine-learning:v3.4.1-openvino (was v3.4.0-openvino).
+- Security: anyio 4.2.0 → 4.14.2 in the app's venv (CVE-2026-63374, CRITICAL, TLS certificate spoofing). Upstream main already uses 4.14.2; this patch goes once a release includes it.
+
 ## v3.4.0-openvino
 
 - Security: move to ghcr.io/immich-app/immich-machine-learning:v3.4.0-openvino (was v3.3.1-openvino), and run `apt-get upgrade` at build time so OS packages pick up the security fixes Debian has published since the base image was built.

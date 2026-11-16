@@ -22,6 +22,19 @@ RUN set -eu; \
     rm -rf /usr/src/bashio /tmp/bashio.tar.gz; \
     rm -rf /var/lib/apt/lists/*
 
+# anyio CVE-2026-63374 (CRITICAL, TLS certificate spoofing). The image pins
+# anyio 4.2.0; upstream main has already moved to 4.14.2, but no release
+# carries it yet. Swap it into the app's venv with the base image's system pip
+# (the venv has none), pinned by hash and without touching anything else.
+# Remove this block once an Immich release ships anyio >= 4.14.2, or it will
+# hold anyio at 4.14.2.
+RUN set -eu; \
+    printf 'anyio==4.14.2 --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494\n' > /tmp/anyio.txt; \
+    /usr/local/bin/python3 -m pip --python /opt/venv/bin/python install --no-cache-dir \
+        --no-deps --require-hashes --disable-pip-version-check -r /tmp/anyio.txt; \
+    rm -f /tmp/anyio.txt; \
+    /opt/venv/bin/python -c "import anyio, importlib.metadata as m; v = m.version('anyio'); assert v == '4.14.2', v; print('anyio', v)"
+
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 

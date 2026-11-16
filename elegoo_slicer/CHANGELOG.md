@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4
+
+- Security: remove Docker from the image. The kasmvnc base bundles Docker-in-Docker, which this app never starts, and its dockerd, docker-proxy, docker CLI and compose plugin carried CRITICAL Go stdlib and gRPC CVEs.
+- Security: kclient's proxy-addr 2.0.7 → 2.0.8 (CVE-2026-90711, CRITICAL, IP spoofing), checked against the npm registry's sha512.
+- Still flagged: the swiper copy bundled inside ElegooSlicer itself. It goes away only when ElegooSlicer ships a newer release.
+
 ## 0.4.3
 
 - Security: run `apt-get upgrade` at build time so OS packages pick up the security fixes Ubuntu has published since the base image was built.
