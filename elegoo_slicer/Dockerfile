@@ -90,6 +90,46 @@ RUN apt-get update \
         python3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Remove Docker. The base ships Docker-in-Docker, which this add-on never runs
+# (START_DOCKER=false above parks the service on sleep infinity), and its
+# binaries are where most of the image's CRITICAL findings live: dockerd,
+# docker-proxy, the docker CLI and the compose plugin, all built with an old Go
+# and gRPC. The svc-docker script only reads START_DOCKER before sleeping, so
+# nothing calls them. Purge only what is installed, drop the apt source with
+# them, and prove dockerd is gone.
+RUN pkgs="$(dpkg-query -W -f='${Package} ${Status}\n' \
+            containerd.io docker-ce docker-ce-cli docker-ce-rootless-extras \
+            docker-buildx-plugin docker-compose-plugin 2>/dev/null \
+        | awk '$NF == "installed" {print $1}')" \
+    && if [ -n "${pkgs}" ]; then \
+         echo "Purging: ${pkgs}"; \
+         DEBIAN_FRONTEND=noninteractive apt-get purge -y ${pkgs}; \
+       fi \
+    && rm -f /etc/apt/sources.list.d/docker.list /usr/share/keyrings/docker.asc \
+    && ! command -v dockerd \
+    && ! test -e /usr/libexec/docker/cli-plugins/docker-compose \
+    && echo "Docker removed"
+
+# kclient (the base's web front end on port 6900, which every page goes
+# through) ships proxy-addr 2.0.7, affected by CVE-2026-90711 (IP spoofing).
+# 2.0.8 is the fix, with the same dependencies, so swap the package in place
+# from the npm registry, checked against its published sha512. The final image
+# has node but no npm, hence the tarball. A kclient that has already moved past
+# 2.0.7 is left alone.
+ARG PROXY_ADDR_SHA512=e679f1d321b2554718eadf519d6700456b704fd1750fc3bdaedd3c86d3ef9dde3d5b522066d98b921bbd59f333423d5c1718c720ee9ca279d43555b993b015c9
+RUN dir=/kclient/node_modules/proxy-addr \
+    && have="$(node -p "require('${dir}/package.json').version")" \
+    && if [ "${have}" = "2.0.7" ]; then \
+         curl -fsSL -o /tmp/proxy-addr.tgz \
+             https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.8.tgz \
+         && echo "${PROXY_ADDR_SHA512}  /tmp/proxy-addr.tgz" | sha512sum -c - \
+         && rm -rf "${dir}" && mkdir -p "${dir}" \
+         && tar -xzf /tmp/proxy-addr.tgz --strip-components=1 -C "${dir}" \
+         && rm -f /tmp/proxy-addr.tgz; \
+       fi \
+    && node -e "require('/kclient/node_modules/proxy-addr')" \
+    && echo "kclient proxy-addr: $(node -p "require('${dir}/package.json').version")"
+
 RUN curl -fsSL -o /tmp/ElegooSlicer.AppImage \
         "https://github.com/ELEGOO-3D/ElegooSlicer/releases/download/v${ELEGOO_VERSION}/ElegooSlicer_Linux_V${ELEGOO_VERSION}.AppImage" \
     && chmod +x /tmp/ElegooSlicer.AppImage \
