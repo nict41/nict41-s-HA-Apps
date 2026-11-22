@@ -35,3 +35,4 @@ services:
       DOWNLOAD_WINDOW_END: "07:00"
       # LIBRARY_SOURCE: https://library.kiwix.org
       # BASE_PATH: /kiwix-app   # only if a reverse proxy serves it under a subpath
+      # KIWIX_LAN_PORT: "8080"  # optional read-only reader with NO login; also add "8080:8080" to ports

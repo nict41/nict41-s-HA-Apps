@@ -59,6 +59,26 @@ AUTH_PASSWORD = os.environ.get("KIWIX_PASSWORD", "")
 # the manager proxies it under /kiwix so everything stays behind HA's auth.
 KIWIX_PORT = int(os.environ.get("KIWIX_PORT", "8090"))
 
+# Optional second kiwix-serve for other devices on the LAN: listens on all
+# interfaces at this container port, at the URL root, with no login of its
+# own (kiwix-serve has none). Empty or 0 means off. Under Home Assistant the
+# run script sets it only when a host port is mapped for 8080/tcp in the
+# app's Network settings, so mapping the port is the switch.
+LAN_PORT = 0
+try:
+    LAN_PORT = int(os.environ.get("KIWIX_LAN_PORT", "") or 0)
+except ValueError:
+    LAN_PORT = 0
+if not 0 < LAN_PORT < 65536:
+    LAN_PORT = 0
+
+# The port other devices actually use, for display only: under Home
+# Assistant the host port mapped onto LAN_PORT, which can differ from it.
+try:
+    LAN_HOST_PORT = int(os.environ.get("KIWIX_LAN_HOST_PORT", "") or LAN_PORT)
+except ValueError:
+    LAN_HOST_PORT = LAN_PORT
+
 # Refuse to treat these as a ZIM directory: writing hundreds of gigabytes to
 # the media root itself (or to /) would silently fill Home Assistant's own
 # disk when what the user meant was a folder on their share.

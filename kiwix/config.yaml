@@ -1,5 +1,5 @@
 name: "Kiwix"
-version: "0.2.4"
+version: "0.3.0"
 slug: "kiwix"
 description: "Browse, download and serve offline Wikipedia (and other ZIM) archives from NAS storage"
 url: "https://github.com/nict41/nict41-s-HA-Apps/tree/main/kiwix"
@@ -15,8 +15,10 @@ panel_icon: mdi:bookshelf
 panel_title: "Kiwix"
 ports:
   8099/tcp: null
+  8080/tcp: null
 ports_description:
   8099/tcp: "Kiwix manager UI (optional direct access; reading articles needs ingress)"
+  8080/tcp: "LAN reader: set a port to let other devices read the served archives (no login)"
 map:
   - media:rw
 options:

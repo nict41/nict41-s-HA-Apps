@@ -76,6 +76,8 @@ but it never chowns `/zim`, which may be a NAS share.
 | `DOWNLOAD_WINDOW_START` / `_END` | `23:00` / `07:00` | Off-peak window, 24-hour. It may cross midnight. |
 | `BASE_PATH` | empty | Only for a reverse proxy at a subpath (see below). |
 | `PORT` | `8099` | Port the app listens on inside the container. |
+| `KIWIX_LAN_PORT` | empty | Optional read-only reader for other devices: set it (e.g. `8080`) and publish that port, and kiwix-serve serves the served archives there at the URL root. **It has no login**, even when `KIWIX_USERNAME` is set. Leave empty to keep everything behind the app. |
+| `KIWIX_LAN_HOST_PORT` | `KIWIX_LAN_PORT` | Only for display: the host port you published it on, if different. |
 
 The download settings are starting values. Anything you change in the app's
 Settings panel wins over them, and survives restarts.
