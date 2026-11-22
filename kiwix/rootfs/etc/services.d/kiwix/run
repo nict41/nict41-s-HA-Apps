@@ -41,6 +41,21 @@ ha_ingress_entry() {
 
 ingress_entry=$(ha_ingress_entry 2>/dev/null) || ingress_entry=""
 
+# The LAN reader is switched on by mapping a host port for 8080/tcp in the
+# app's Network settings; with no port mapped it doesn't run at all.
+ha_port() {
+    if declare -F bashio::app.port >/dev/null 2>&1; then
+        bashio::app.port "$1"
+    else
+        bashio::addon.port "$1"
+    fi
+}
+
+lan_host_port=$(ha_port "8080/tcp" 2>/dev/null) || lan_host_port=""
+if [[ "${lan_host_port}" == "null" ]]; then
+    lan_host_port=""
+fi
+
 export ZIM_PATH="${zim_path}"
 export LIBRARY_SOURCE="${library_source}"
 export CATALOG_LANGUAGE="${catalog_language}"
@@ -51,6 +66,14 @@ export DOWNLOAD_WINDOW_ENABLED="${download_window_enabled}"
 export DOWNLOAD_WINDOW_START="${download_window_start}"
 export DOWNLOAD_WINDOW_END="${download_window_end}"
 export INGRESS_ENTRY="${ingress_entry}"
+
+if bashio::var.has_value "${lan_host_port}"; then
+    export KIWIX_LAN_PORT=8080
+    export KIWIX_LAN_HOST_PORT="${lan_host_port}"
+    bashio::log.info "LAN reader enabled: other devices can read the served archives at http://<home-assistant-ip>:${lan_host_port}/ (no login)"
+else
+    export KIWIX_LAN_PORT=""
+fi
 
 if bashio::var.has_value "${zim_path}"; then
     bashio::log.info "ZIM storage path: ${zim_path}"

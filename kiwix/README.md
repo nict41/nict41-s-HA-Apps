@@ -106,6 +106,32 @@ button that brings you back however deep into an archive you have clicked. Use *
 on the Library tab to control which archives are searchable and readable;
 changes take effect immediately, without restarting anything.
 
+### 6. Optional: read from other devices on your network
+
+Out of the box the archives can only be read from the Home Assistant panel.
+To let other devices on your LAN read them too, without logging in to
+Home Assistant, open the app's **Configuration** tab, go to **Network**, and
+enter a port for **8080/tcp** (8080 is fine if nothing else on the host
+uses it). Save and the app restarts.
+
+Then open `http://<home-assistant-ip>:<port>/` on any device: it's the
+standard kiwix-serve library page with search. Kiwix's own apps (Android,
+iOS, desktop) can also add it as a remote library using the same address.
+The Library tab shows "LAN reader on port …" while it's running.
+
+Things to know:
+
+- **There is no login.** Anyone who can reach that port can read every
+  archive you serve. Only do this on a network you trust, and don't forward
+  the port to the internet. If Tailscale or a VPN reaches your Home
+  Assistant host, it reaches this port too.
+- It is **read-only**: it serves only the archives marked as served, and it
+  can't download, delete or change anything. Managing the library still
+  needs the panel.
+- It follows the **Start/Stop server** switch, and serving or un-serving an
+  archive applies to it immediately.
+- Clear the port again to switch it off.
+
 ## Options
 
 | Option | Default | Description |
@@ -141,14 +167,15 @@ falls back to a single connection.
 ## How it works
 
 `kiwix-serve` runs inside the app on loopback only and is never exposed as a
-port. The manager reverse-proxies it under the panel's own `/kiwix` path, so
+port (the optional LAN reader in step 6 is a separate kiwix-serve). The manager reverse-proxies it under the panel's own `/kiwix` path, so
 reading an article goes through Home Assistant's authentication exactly like
 the rest of the panel.
 
 Because kiwix-serve writes absolute links into the pages it serves, it is
 started with Home Assistant's ingress path as its URL root
 (`--urlRootLocation`), which is also why the reader only works from the
-sidebar and not over the app's optional direct port. Which archives are
+sidebar and not over the app's optional direct port. The LAN reader is
+started at the plain URL root instead, so its links work on its own port. Which archives are
 served is materialised as a kiwix library XML file that kiwix-serve watches
 (`--monitorLibrary`), so serving and un-serving take effect without a
 restart.

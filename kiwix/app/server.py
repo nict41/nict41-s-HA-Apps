@@ -11,6 +11,11 @@ Assistant's authentication. Two details matter:
   `X-Ingress-Path` header of live requests, so a rotated token heals itself.
 * `--monitorLibrary` makes kiwix-serve reload the library XML on its own, so
   adding or removing an archive never needs a restart.
+
+Optionally (settings.LAN_PORT) a second kiwix-serve serves the same library
+XML on all interfaces at the URL root, for other devices on the LAN. It has
+no login - kiwix-serve has none - and it is read-only: it can't download or
+delete anything. It follows the same Start/Stop switch as the main one.
 """
 
 import collections
@@ -28,6 +33,8 @@ _root = ""
 _log: collections.deque[str] = collections.deque(maxlen=25)
 _last_error = ""
 _monitor_started = False
+_lan_process: subprocess.Popen | None = None
+_lan_error = ""
 
 
 def root_for(ingress_prefix: str | None = None) -> str:
@@ -47,9 +54,18 @@ def is_running() -> bool:
         return _process is not None and _process.poll() is None
 
 
-def port_ready(timeout: float = 0.5) -> bool:
+def lan_enabled() -> bool:
+    return bool(settings.LAN_PORT)
+
+
+def lan_running() -> bool:
+    with _lock:
+        return _lan_process is not None and _lan_process.poll() is None
+
+
+def port_ready(timeout: float = 0.5, port: int | None = None) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", settings.KIWIX_PORT), timeout=timeout):
+        with socket.create_connection(("127.0.0.1", port or settings.KIWIX_PORT), timeout=timeout):
             return True
     except OSError:
         return False
@@ -66,14 +82,80 @@ def wait_ready(timeout: float = 10.0) -> bool:
     return False
 
 
-def _drain(process: subprocess.Popen) -> None:
+def _drain(process: subprocess.Popen, tag: str = "kiwix-serve") -> None:
     """Mirror kiwix-serve output into the add-on log, keeping a tail for the UI."""
     assert process.stdout is not None
     for line in process.stdout:
         line = line.rstrip()
         if line:
-            _log.append(line)
-            print(f"[kiwix-serve] {line}")
+            _log.append(line if tag == "kiwix-serve" else f"[{tag}] {line}")
+            print(f"[{tag}] {line}")
+
+
+def start_lan() -> tuple[bool, str]:
+    """Start the LAN-facing kiwix-serve if one is configured (idempotent).
+
+    Called after the main instance is up, so the library XML already exists.
+    A failure here (the port taken, say) is reported but never stops the
+    main reader from working.
+    """
+    global _lan_process, _lan_error
+    if not lan_enabled():
+        return True, ""
+    with _lock:
+        if lan_running():
+            return True, ""
+        command = [
+            "kiwix-serve",
+            "--library", str(library.library_xml()),
+            "--port", str(settings.LAN_PORT),
+            "--address", "0.0.0.0",
+            "--monitorLibrary",
+            "--skipInvalid",
+        ]
+        try:
+            _lan_process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            _lan_process = None
+            _lan_error = f"Could not start the LAN reader: {exc}"
+            print(f"[kiwix] {_lan_error}")
+            return False, _lan_error
+        threading.Thread(target=_drain, args=(_lan_process, "kiwix-serve lan"), daemon=True).start()
+        print(
+            f"[kiwix] LAN reader started on port {settings.LAN_PORT} "
+            f"(reachable on host port {settings.LAN_HOST_PORT}); it has no login"
+        )
+
+    deadline = time.monotonic() + 10.0
+    while time.monotonic() < deadline:
+        if port_ready(port=settings.LAN_PORT):
+            _lan_error = ""
+            return True, ""
+        if not lan_running():
+            break
+        time.sleep(0.2)
+    _lan_error = "The LAN reader did not start listening. Check the add-on log."
+    return False, _lan_error
+
+
+def stop_lan() -> None:
+    global _lan_process
+    with _lock:
+        process, _lan_process = _lan_process, None
+    if process is None or process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+    print("[kiwix] LAN reader stopped")
 
 
 def start(ingress_prefix: str | None = None) -> tuple[bool, str]:
@@ -122,6 +204,7 @@ def start(ingress_prefix: str | None = None) -> tuple[bool, str]:
         return False, _last_error
 
     _last_error = ""
+    start_lan()
     return True, ""
 
 
@@ -137,6 +220,11 @@ def stop() -> None:
     except subprocess.TimeoutExpired:
         process.kill()
     print("[kiwix] kiwix-serve stopped")
+
+
+def stop_all() -> None:
+    stop()
+    stop_lan()
 
 
 def restart(ingress_prefix: str | None = None) -> tuple[bool, str]:
@@ -171,7 +259,7 @@ def set_enabled(value: bool, ingress_prefix: str | None = None) -> tuple[bool, s
     library.write_state(state)
     if value:
         return start(ingress_prefix)
-    stop()
+    stop_all()
     return True, ""
 
 
@@ -185,6 +273,12 @@ def status() -> dict:
         "served_count": len(library.read_state()["served"]),
         "error": _last_error,
         "log": list(_log)[-8:],
+        "lan": {
+            "enabled": lan_enabled(),
+            "port": settings.LAN_HOST_PORT if lan_enabled() else None,
+            "running": lan_running(),
+            "error": _lan_error,
+        },
     }
 
 
@@ -194,7 +288,19 @@ def _monitor() -> None:
     while True:
         time.sleep(5)
         try:
-            if not enabled() or is_running():
+            if not enabled():
+                backoff = 5.0
+                continue
+            if is_running():
+                # The LAN reader is restarted on its own: it can die (or
+                # never bind) independently of the main instance.
+                if lan_enabled() and not lan_running():
+                    print("[kiwix] LAN reader is not running; restarting it")
+                    lan_ok, _ = start_lan()
+                    if not lan_ok:
+                        time.sleep(backoff)
+                        backoff = min(backoff * 2, 120.0)
+                        continue
                 backoff = 5.0
                 continue
             if not settings.storage_status()["ok"]:

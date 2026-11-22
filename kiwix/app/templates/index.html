@@ -466,7 +466,14 @@
         var label = srv.running ? (srv.ready ? "Serving" : "Starting") : (srv.enabled ? "Idle" : "Stopped");
         $("stat-server").textContent = label;
         tile.classList.toggle("is-live", Boolean(srv.running && srv.ready));
-        $("stat-served").textContent = "· " + srv.served_count + " selected";
+        var served = "· " + srv.served_count + " selected";
+        if (srv.lan && srv.lan.enabled) {
+          served += srv.lan.running
+            ? " · LAN reader on port " + srv.lan.port
+            : " · LAN reader " + (srv.lan.error ? "failed" : "off");
+        }
+        $("stat-served").textContent = served;
+        $("stat-served").title = srv.lan && srv.lan.error ? srv.lan.error : "";
 
         var toggle = $("server-toggle");
         toggle.textContent = srv.enabled ? "Stop server" : "Start server";

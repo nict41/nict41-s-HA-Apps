@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     if server.enabled() and library.read_state()["served"]:
         await run_in_threadpool(server.start)
     yield
-    server.stop()
+    server.stop_all()
     await _kiwix_client.aclose()
 
 
