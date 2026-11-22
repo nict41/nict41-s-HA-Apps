@@ -108,7 +108,7 @@ def test_the_lan_reader_listens_on_all_interfaces_at_the_url_root(monkeypatch, z
 
         main_cmd, lan_cmd = processes[0].command, processes[1].command
         assert main_cmd[main_cmd.index("--address") + 1] == "127.0.0.1"
-        assert lan_cmd[lan_cmd.index("--address") + 1] == "0.0.0.0"
+        assert "--address" not in lan_cmd
         assert lan_cmd[lan_cmd.index("--port") + 1] == "8080"
         assert "--urlRootLocation" not in lan_cmd
         assert lan_cmd[lan_cmd.index("--library") + 1] == main_cmd[main_cmd.index("--library") + 1]
@@ -127,7 +127,7 @@ def test_a_lan_reader_failure_does_not_break_the_main_reader(monkeypatch, zim_di
     monkeypatch.setattr(settings, "LAN_PORT", 8080)
 
     def fake_popen(command, **kwargs):
-        if "0.0.0.0" in command:
+        if str(settings.LAN_PORT) in command:
             raise OSError("address in use")
         return _FakeProcess(command)
 

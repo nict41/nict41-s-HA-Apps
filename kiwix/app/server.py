@@ -109,7 +109,8 @@ def start_lan() -> tuple[bool, str]:
             "kiwix-serve",
             "--library", str(library.library_xml()),
             "--port", str(settings.LAN_PORT),
-            "--address", "0.0.0.0",
+            # No --address: kiwix-serve then listens on every interface.
+            # It rejects 0.0.0.0 ("IP address is not available").
             "--monitorLibrary",
             "--skipInvalid",
         ]
